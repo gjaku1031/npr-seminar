@@ -1,20 +1,27 @@
 "use client";
 
 /**
- * QR 스캐너 (명세 §9, flows ADMIN-F7) — 와이어프레임 ScannerScreen 이식.
- * 기기 모니터링(스캐너 #1~#4) → 카메라 권한 목업 → 전체화면 스캔(데모) → 입장 확인 팝업 2초 ·
- * 현장 입장(연락처 뒷 4자리, 모/부 매칭). 실제 카메라·QR 인식은 미구현 (명세 §12).
+ * QR 스캐너 (명세 §9, flows ADMIN-F7) — 실카메라 스캔 전환 (qr-poc ScannerClient 이식).
+ * 기기 모니터링(스캐너 #1~#4) → 카메라 권한 안내 → 전체화면 스캔:
+ * 좌측 실카메라(html5-qrcode, 스캔영역 82%·최대 360px) + 스캔 결과 패널,
+ * 우측 연락처 뒷 4자리 다이얼 현장 입장 (명세 §9.3). 입장 확인 팝업 2초 (명세 §9.2).
  */
 
-import { Fragment, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Device } from "@/entities/device";
 import type { Reservation } from "@/entities/reservation";
 import type { Session } from "@/entities/session";
 import type { Student } from "@/entities/student";
 import { idleState } from "@/shared/lib/action";
-import { fmtDateTimeShort } from "@/shared/lib/format";
-import { Badge, Button, Card, EmptyState, Icons, Input, Toast } from "@/shared/ui";
-import { checkInAction, walkInAction } from "@/features/check-in";
+import { fmtDateTime, fmtDateTimeShort } from "@/shared/lib/format";
+import { Badge, Button, Card, EmptyState, Icons, Toast } from "@/shared/ui";
+import {
+  detectPreferRearCamera,
+  QrCameraScanner,
+  scanQrAction,
+  type QrScanData,
+} from "@/features/check-in";
+import { ManualEntryPanel, type ManualEntryDone } from "./ManualEntryPanel";
 
 export interface ScannerViewProps {
   sessions: Session[];
@@ -30,64 +37,205 @@ interface ScanResult {
   code: string;
 }
 
-export function ScannerView({ sessions, students, reservations, devices }: ScannerViewProps) {
-  const session = sessions[0];
+type ScanPanel =
+  | { kind: "idle" }
+  | { kind: "processing" }
+  | { kind: "success"; data: QrScanData }
+  | { kind: "already"; data: QrScanData }
+  | { kind: "error"; message: string };
 
+/** QR 텍스트에서 토큰 추출 — `/q/{token}`·`/verify/{token}` URL 또는 원문 토큰 (qr-poc 이식) */
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function extractTokenFromPath(path: string): string {
+  const pathname = path.split(/[?#]/)[0] ?? "";
+  const segments = pathname.split("/").filter(Boolean).map(decodePathSegment);
+
+  for (const prefix of ["q", "verify"]) {
+    const index = segments.lastIndexOf(prefix);
+    if (index === -1) continue;
+    const token = segments[index + 1]?.trim();
+    if (token) return token;
+  }
+
+  return "";
+}
+
+function extractQrToken(decodedText: string): string {
+  const text = decodedText.trim();
+  if (!text) return "";
+
+  try {
+    const url = new URL(text, "https://qr.local");
+    const token = extractTokenFromPath(url.pathname);
+    if (token) return token;
+  } catch {
+    const token = extractTokenFromPath(text);
+    if (token) return token;
+  }
+
+  return text;
+}
+
+const emptySubscribe = () => () => {};
+const getServerPreferRear = () => false;
+
+/* 다크 표면 텍스트 톤 */
+const ink = {
+  strong: "var(--gray-1)",
+  muted: "rgba(248,250,252,0.62)",
+  faint: "rgba(248,250,252,0.4)",
+  border: "rgba(248,250,252,0.12)",
+  borderSoft: "rgba(248,250,252,0.08)",
+  card: "rgba(248,250,252,0.05)",
+};
+
+/** 스캔 결과 패널 — 카메라 아래 상시 표시 (qr-poc ScanResultPanel 이식) */
+function ScanStatusPanel({ panel }: { panel: ScanPanel }) {
+  const frame = (children: React.ReactNode, border = ink.borderSoft, bg = ink.card) => (
+    <div style={{ borderRadius: "var(--radius-lg)", border: `1px solid ${border}`, background: bg, padding: "16px 18px", textAlign: "center" }}>
+      {children}
+    </div>
+  );
+
+  if (panel.kind === "processing")
+    return frame(
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--mint-400)", fontSize: 13.5, fontWeight: 700 }}>
+        <span style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid rgba(56,189,248,0.3)", borderTopColor: "var(--mint-400)", animation: "npr-scan-panel-spin 0.9s linear infinite" }} />
+        인증 처리 중...
+        <style>{`@keyframes npr-scan-panel-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>,
+    );
+
+  if (panel.kind === "success")
+    return frame(
+      <Fragment>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--status-success)" }}>✅ 입장 완료</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: ink.strong, marginTop: 6 }}>{panel.data.name}</div>
+        <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 3 }}>
+          {[panel.data.school, panel.data.grade, panel.data.code].filter(Boolean).join(" · ")}
+        </div>
+        {panel.data.enteredAt && (
+          <div style={{ fontSize: 11.5, color: ink.faint, marginTop: 6 }}>{fmtDateTime(new Date(panel.data.enteredAt))}</div>
+        )}
+      </Fragment>,
+      "rgba(34,197,94,0.35)",
+      "rgba(34,197,94,0.08)",
+    );
+
+  if (panel.kind === "already")
+    return frame(
+      <Fragment>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--status-warning)" }}>⚠️ 이미 입장한 QR</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: ink.strong, marginTop: 6 }}>{panel.data.name}</div>
+        <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 3 }}>
+          {[panel.data.school, panel.data.grade, panel.data.code].filter(Boolean).join(" · ")}
+        </div>
+        {panel.data.enteredAt && (
+          <div style={{ display: "inline-block", marginTop: 8, borderRadius: "var(--radius-sm)", background: "rgba(245,158,11,0.16)", color: "var(--status-warning)", fontSize: 11.5, fontWeight: 700, padding: "6px 10px" }}>
+            최초 입장 {fmtDateTime(new Date(panel.data.enteredAt))}
+          </div>
+        )}
+      </Fragment>,
+      "rgba(245,158,11,0.4)",
+      "rgba(245,158,11,0.08)",
+    );
+
+  if (panel.kind === "error")
+    return frame(
+      <Fragment>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#FCA5A5" }}>❌ 인식 실패</div>
+        <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 6, lineHeight: 1.6 }}>{panel.message}</div>
+      </Fragment>,
+      "rgba(239,68,68,0.4)",
+      "rgba(239,68,68,0.08)",
+    );
+
+  return frame(
+    <Fragment>
+      <div style={{ fontSize: 26, opacity: 0.4 }}>🎫</div>
+      <div style={{ fontSize: 12.5, color: ink.faint, marginTop: 6, lineHeight: 1.6 }}>
+        QR을 스캔하면 결과가 여기에 표시됩니다
+      </div>
+    </Fragment>,
+  );
+}
+
+export function ScannerView({ sessions, students, reservations, devices }: ScannerViewProps) {
+  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
   const [device, setDevice] = useState<Device | null>(null);
   const [perm, setPerm] = useState<"ask" | "granted">("ask");
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [digits, setDigits] = useState("");
+  const [panel, setPanel] = useState<ScanPanel>({ kind: "idle" });
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  // 마운트 후에만 기기 감지 — SSR은 전면 카메라 기본 (qr-poc useSyncExternalStore 패턴)
+  const preferRear = useSyncExternalStore(emptySubscribe, detectPreferRearCamera, getServerPreferRear);
+  const lastTokenRef = useRef("");
+  const processingRef = useRef(false);
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const flash = (m: string) => { setToast(m); later(() => setToast(null), 3200); };
   const showResult = (r: ScanResult) => { setScanResult(r); later(() => setScanResult(null), 2000); };
 
+  const session = sessions.find((s) => s.id === sessionId) ?? sessions[0];
+  const scannerNo = device?.scannerNo ?? 1;
+
+  /* 실카메라 스캔 → 토큰 추출 → 체크인 액션 (명세 §9.2, 중복 스캔 방지는 qr-poc 로직) */
+  const handleScan = useCallback(
+    async (decodedText: string) => {
+      if (!session) return;
+      const token = extractQrToken(decodedText);
+      if (!token || token === lastTokenRef.current || processingRef.current) return;
+
+      lastTokenRef.current = token;
+      processingRef.current = true;
+      setPanel({ kind: "processing" });
+
+      try {
+        const fd = new FormData();
+        fd.set("token", token);
+        fd.set("sessionId", session.id);
+        fd.set("scannerNo", String(scannerNo));
+        const result = await scanQrAction(idleState, fd);
+
+        if (result.status === "success" && result.data) {
+          if (result.data.alreadyEntered) {
+            setPanel({ kind: "already", data: result.data });
+          } else {
+            setPanel({ kind: "success", data: result.data });
+            showResult({
+              name: result.data.name,
+              school: result.data.school,
+              grade: result.data.grade,
+              code: result.data.code,
+            });
+          }
+        } else if (result.status === "error") {
+          setPanel({ kind: "error", message: result.message });
+        }
+      } catch {
+        setPanel({ kind: "error", message: "QR 처리 중 오류가 발생했어요." });
+      } finally {
+        processingRef.current = false;
+        later(() => {
+          if (lastTokenRef.current === token) lastTokenRef.current = "";
+        }, 2500);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session?.id, scannerNo],
+  );
+
   if (!session) return <EmptyState>진행 중인 설명회가 없어요.</EmptyState>;
 
-  const scannerNo = device?.scannerNo ?? 1;
   const unchecked = reservations.filter((r) => r.sessionId === session.id && r.status === "reserved");
-
-  /* 데모 스캔 — 미체크 예약 하나를 입장 처리 (명세 §9.2) */
-  const demoScan = () => {
-    const target = unchecked[0];
-    if (!target) { flash("미체크 예약이 없어요"); return; }
-    const fd = new FormData();
-    fd.set("reservationId", target.id);
-    fd.set("scannerNo", String(scannerNo));
-    startTransition(async () => {
-      const result = await checkInAction(idleState, fd);
-      if (result.status === "error") { flash(result.message); return; }
-      showResult({ name: target.name, school: target.school, grade: target.grade, code: target.code });
-    });
-  };
-
-  /* 현장 입장 — 뒷 4자리, 모/부 모두 매칭 (명세 §9.3) */
-  const found =
-    digits.length >= 4
-      ? students.filter(
-          (s) =>
-            s.motherPhone.replace(/\D/g, "").endsWith(digits.slice(-4)) ||
-            s.fatherPhone.replace(/\D/g, "").endsWith(digits.slice(-4)),
-        )
-      : [];
-
-  const walkIn = (stu: Student) => {
-    const fd = new FormData();
-    fd.set("studentId", stu.id);
-    fd.set("sessionId", session.id);
-    fd.set("scannerNo", String(scannerNo));
-    startTransition(async () => {
-      const result = await walkInAction(idleState, fd);
-      if (result.status !== "success") { if (result.status === "error") flash(result.message); return; }
-      setSheetOpen(false);
-      setDigits("");
-      showResult({ name: stu.name, school: stu.school, grade: stu.grade, code: result.data?.code ?? "" });
-    });
-  };
 
   /* ── 기기 선택 뷰 (명세 §9.1) ── */
   if (!device) {
@@ -128,8 +276,8 @@ export function ScannerView({ sessions, students, reservations, devices }: Scann
   /* ── 전체화면 스캐너 (명세 §9.2) ── */
   return (
     <div data-screen-label="QR 스캐너 — 스캔 화면" style={{ position: "fixed", inset: 0, zIndex: 90, background: "#0A0F1A", display: "flex", flexDirection: "column", animation: "ds-fade-in var(--dur-base) var(--ease-out) both" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 22px", color: "var(--gray-1)" }}>
-        <button onClick={() => setDevice(null)} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(248,250,252,0.1)", border: "none", color: "var(--gray-1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-body)", padding: "9px 14px", borderRadius: "var(--radius-pill)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 22px", color: "var(--gray-1)", flexWrap: "wrap" }}>
+        <button onClick={() => { setDevice(null); setPanel({ kind: "idle" }); }} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(248,250,252,0.1)", border: "none", color: "var(--gray-1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-body)", padding: "9px 14px", borderRadius: "var(--radius-pill)" }}>
           <Icons.refresh size={14} /> 기기 변경
         </button>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
@@ -137,46 +285,61 @@ export function ScannerView({ sessions, students, reservations, devices }: Scann
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--status-success)" }} />
         </span>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 13.5, color: "var(--mint-400)", fontWeight: 700 }}>{session.title}</span>
+        {sessions.length > 1 ? (
+          <select
+            value={session.id}
+            onChange={(e) => { setSessionId(e.target.value); setPanel({ kind: "idle" }); lastTokenRef.current = ""; }}
+            aria-label="설명회 회차 선택"
+            style={{ background: "rgba(248,250,252,0.08)", border: `1px solid ${ink.border}`, color: "var(--mint-400)", fontSize: 13, fontWeight: 700, borderRadius: "var(--radius-pill)", padding: "8px 12px", fontFamily: "var(--font-body)", maxWidth: 320 }}
+          >
+            {sessions.map((s) => (
+              <option key={s.id} value={s.id} style={{ color: "#0A0F1A" }}>{s.title}</option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ fontSize: 13.5, color: "var(--mint-400)", fontWeight: 700 }}>{session.title}</span>
+        )}
       </div>
 
-      <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ flex: 1, position: "relative", overflowY: "auto" }}>
         {perm === "ask" && (
-          <div style={{ width: 380, background: "var(--surface-card)", borderRadius: "var(--radius-xl)", padding: 28, textAlign: "center", boxShadow: "var(--shadow-float)", animation: "ds-pop var(--dur-slow) var(--ease-spring) both" }}>
-            <span style={{ width: 54, height: 54, borderRadius: "50%", background: "var(--violet-50)", color: "var(--violet-800)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              <Icons.camera size={24} />
-            </span>
-            <h3 style={{ fontSize: 19, fontWeight: 800, marginTop: 14 }}>카메라 권한이 필요해요</h3>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: "8px 0 0", lineHeight: 1.6 }}>QR 스캔을 위해 이 태블릿의 카메라 접근을 허용해 주세요. 영상은 저장되지 않아요.</p>
-            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-              <Button variant="ghost" fullWidth onClick={() => setDevice(null)}>거부</Button>
-              <Button fullWidth onClick={() => setPerm("granted")}>허용</Button>
+          <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ width: 380, background: "var(--surface-card)", borderRadius: "var(--radius-xl)", padding: 28, textAlign: "center", boxShadow: "var(--shadow-float)", animation: "ds-pop var(--dur-slow) var(--ease-spring) both" }}>
+              <span style={{ width: 54, height: 54, borderRadius: "50%", background: "var(--violet-50)", color: "var(--violet-800)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <Icons.camera size={24} />
+              </span>
+              <h3 style={{ fontSize: 19, fontWeight: 800, marginTop: 14 }}>카메라 권한이 필요해요</h3>
+              <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: "8px 0 0", lineHeight: 1.6 }}>
+                허용을 누르면 브라우저의 카메라 권한 요청이 표시돼요. QR 스캔에만 사용하고 영상은 저장되지 않아요.
+              </p>
+              <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+                <Button variant="ghost" fullWidth onClick={() => setDevice(null)}>거부</Button>
+                <Button fullWidth onClick={() => setPerm("granted")}>허용</Button>
+              </div>
             </div>
           </div>
         )}
 
         {perm === "granted" && (
           <Fragment>
-            {/* 스캔 프레임 + 스캔라인 */}
-            <div style={{ position: "relative", width: 320, height: 320 }}>
-              <div style={{ position: "absolute", inset: 0, borderRadius: 28, boxShadow: "0 0 0 9999px rgba(10,15,26,0.55)", background: "rgba(248,250,252,0.03)" }} />
-              {[
-                { t: 0, l: 0, br: "18px 0 0 0", bt: true, bl: true },
-                { t: 0, r: 0, br: "0 18px 0 0", bt: true, brd: true },
-                { b: 0, l: 0, br: "0 0 0 18px", bb: true, bl: true },
-                { b: 0, r: 0, br: "0 0 18px 0", bb: true, brd: true },
-              ].map((c, i) => (
-                <span key={i} style={{ position: "absolute", top: c.t, left: c.l, right: c.r, bottom: c.b, width: 46, height: 46, borderRadius: c.br, borderTop: c.bt ? "4px solid var(--mint-500)" : "none", borderBottom: c.bb ? "4px solid var(--mint-500)" : "none", borderLeft: c.bl ? "4px solid var(--mint-500)" : "none", borderRight: c.brd ? "4px solid var(--mint-500)" : "none" }} />
-              ))}
-              <span className="npr-scanline" />
-            </div>
-            <div style={{ position: "absolute", top: "calc(50% + 190px)", left: "50%", transform: "translateX(-50%)", color: "rgba(248,250,252,0.75)", fontSize: 14.5, whiteSpace: "nowrap", textAlign: "center" }}>
-              문자로 받은 QR을 프레임 안에 맞춰 주세요
-              <div style={{ marginTop: 12 }}>
-                <button onClick={demoScan} disabled={pending} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "1px dashed rgba(56,189,248,0.6)", background: "transparent", color: "var(--mint-400)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-body)" }}>
-                  데모 — QR 인식 시뮬레이션
-                </button>
+            {/* 좌: 실카메라 + 결과 패널 / 우: 연락처 뒷 4자리 다이얼 현장 입장 (qr-poc 레이아웃) */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(330px, 430px) minmax(340px, 1fr)", gap: 18, alignItems: "start", maxWidth: 1060, margin: "0 auto", padding: "6px 24px 28px", width: "100%", boxSizing: "border-box" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <QrCameraScanner onScan={handleScan} preferRearCamera={preferRear} />
+                <ScanStatusPanel panel={panel} />
               </div>
+
+              <ManualEntryPanel
+                key={session.id}
+                session={session}
+                students={students}
+                reservations={reservations}
+                scannerNo={scannerNo}
+                onEntered={(done: ManualEntryDone) => {
+                  showResult(done);
+                  flash(`${done.name} 학부모님 입장 확인 — 입장 문자를 발송했어요`);
+                }}
+              />
             </div>
 
             {/* 입장 확인 팝업 2초 (명세 §9.2) */}
@@ -196,42 +359,6 @@ export function ScannerView({ sessions, students, reservations, devices }: Scann
                 </div>
                 <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--violet-800)", background: "var(--surface-brand-soft)", borderRadius: "var(--radius-sm)", padding: "9px 12px", display: "inline-flex", gap: 7, alignItems: "center" }}>
                   <Icons.message size={13} /> 학부모께 입장 완료 문자 발송됨
-                </div>
-              </div>
-            )}
-
-            {/* 우하단 현장 입장 (명세 §9.3) */}
-            <div style={{ position: "absolute", right: 26, bottom: 26 }}>
-              <Button variant="accent" size="lg" icon={<Icons.logIn size={17} />} onClick={() => setSheetOpen(true)}>현장 입장</Button>
-            </div>
-
-            {/* 현장 입장 시트 — 재원생 연락처 뒷자리 조회 */}
-            {sheetOpen && (
-              <div style={{ position: "absolute", inset: 0, background: "rgba(10,15,26,0.5)", display: "flex", alignItems: "flex-end", zIndex: 10 }} onClick={(e) => { if (e.target === e.currentTarget) setSheetOpen(false); }}>
-                <div style={{ width: "100%", maxHeight: "72%", overflowY: "auto", background: "var(--surface-page)", borderRadius: "28px 28px 0 0", padding: "26px 30px 34px", animation: "ds-fade-up var(--dur-slow) var(--ease-spring) both" }}>
-                  <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--gray-3)", margin: "0 auto 18px" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <h3 style={{ fontSize: 20, fontWeight: 800 }}>현장 입장 — 재원생 조회</h3>
-                    <button onClick={() => setSheetOpen(false)} style={{ background: "none", border: "none", color: "var(--text-faint)", cursor: "pointer" }}>
-                      <Icons.x size={18} />
-                    </button>
-                  </div>
-                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "6px 0 14px" }}>
-                    QR이 없어도 재원생은 학부모 연락처 뒷자리로 바로 입장 처리할 수 있어요. (비재원생은 예약 명단 → 수동 추가를 이용)
-                  </p>
-                  <Input placeholder="학부모 연락처 뒷자리 4자리" value={digits} onChange={(v) => setDigits(v.replace(/\D/g, "").slice(0, 4))} icon={<Icons.search size={17} />} size="lg" />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 }}>
-                    {found.map((s, i) => (
-                      <div key={s.id} onClick={() => walkIn(s)} style={{ padding: "16px", borderRadius: "var(--radius-md)", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", boxShadow: "var(--shadow-card)", cursor: "pointer", textAlign: "center", transition: "all var(--dur-fast) var(--ease-out)", animation: `ds-pop var(--dur-base) var(--ease-spring) ${i * 60}ms both` }}>
-                        <span style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--violet-100)", color: "var(--violet-900)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14 }}>{s.name[0]}</span>
-                        <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text-strong)", marginTop: 8 }}>{s.name}</div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{s.school} · {s.grade}</div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>{s.className}</div>
-                        <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "var(--violet-800)" }}>탭하여 입장 처리</div>
-                      </div>
-                    ))}
-                  </div>
-                  {digits.length >= 4 && found.length === 0 && <EmptyState>뒷자리 {digits}와 일치하는 재원생이 없어요.</EmptyState>}
                 </div>
               </div>
             )}

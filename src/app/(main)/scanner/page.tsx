@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * QR 스캐너 (명세 §9) — 기기 모니터링 → 전체화면 스캔 → 입장 처리.
- * ⚠️ 실제 카메라·QR 인식 미구현 (명세 §12) — 스캔은 데모 버튼으로 시뮬레이션.
+ * 실카메라 스캔(html5-qrcode) + 연락처 뒷 4자리 다이얼 현장 입장 — qr-poc 이식.
  */
 export default async function ScannerPage() {
   await requireModuleAccess("scanner");
