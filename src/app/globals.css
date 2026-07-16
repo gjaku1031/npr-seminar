@@ -2,7 +2,7 @@
 
 /*
  * 디자인 토큰 (설계 §8, 결정 S1) — 핸드오프 npr-seminar-handoff/tokens/*.css 이식.
- * 적용 범위: 색 · radius · shadow · motion (typography·spacing·fonts는 후속 도입 자리만 남김).
+ * 적용 범위: 색 · radius · shadow · motion · spacing(컨테이너·카드 여백).
  *
  * 두 층으로 구성한다:
  *   1) :root         — 원본 토큰(팔레트+시맨틱)을 CSS 변수로 그대로. var(--surface-page) 등 직접 사용 가능.
@@ -101,6 +101,28 @@
 
   /* ── blur (backdrop용 합성 필터) ── raw 유지: backdrop-filter: var(--blur-veil) 로 사용 */
   --blur-veil: saturate(1.4) blur(14px);
+
+  /* ── spacing · layout (핸드오프 tokens/spacing.css verbatim) ──
+     셸·허브·카드가 참조하는 컨테이너 폭/여백 — 누락 시 padding 선언 전체가 무효화되어
+     전 화면이 가장자리에 붙는다 (2026-07-17 보완). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --container-max: 1200px;
+  --container-pad: 24px;
+  --container-pad-mobile: 20px;
+  --card-pad: 24px;
+  --card-pad-lg: 32px;
+  --section-gap: 96px;
 }
 
 /* ══════════════════════════════════════════════════════════
