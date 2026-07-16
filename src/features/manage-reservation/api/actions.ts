@@ -12,9 +12,9 @@ import { errorState, successState, type ActionState } from "@/shared/lib/action"
 
 export type ManageReservationState = ActionState<{ code: string }>;
 
-/** 예약 관리 — 취소 · 회차 이동 · QR 재발급 (명세 §5.4 · §5.5 · 12.2 · 12.3 · 12.12) */
+/** 예약 관리 — 취소 · 회차 이동 · QR 재발급 (명세 §10.8 · §11) */
 
-/** 취소 — 운영자(staff)/학부모 셀프(parent) 구분 기록 (명세 12.3) */
+/** 취소 — 관리자(staff)/학부모 셀프(parent) 구분, 행위자 기준 로그 (명세 §11) */
 export async function cancelReservationAction(
   _prev: ManageReservationState,
   formData: FormData,
@@ -27,13 +27,13 @@ export async function cancelReservationAction(
   try {
     const r = await cancelReservation(parsed.data.reservationId, parsed.data.by);
     revalidateViews();
-    return successState({ code: r.code }, "예약이 취소되었습니다. 취소 안내 문자가 발송됩니다.");
+    return successState({ code: r.code }, "예약이 취소되었습니다. 취소 확인 문자가 발송됩니다.");
   } catch (e) {
     return toErrorState(e);
   }
 }
 
-/** 회차 이동 — 예약번호·QR 유지. 대상 회차의 정원·중복도 검사된다 (명세 12.2) */
+/** 회차 이동 — 예약번호·QR 유지. 대상 회차의 정원·중복도 검사된다 (명세 §10.8) */
 export async function moveReservationAction(
   _prev: ManageReservationState,
   formData: FormData,
@@ -49,13 +49,13 @@ export async function moveReservationAction(
   try {
     const r = await moveReservation(parsed.data.reservationId, parsed.data.toSessionId);
     revalidateViews();
-    return successState({ code: r.code }, "회차가 변경되었습니다. 변경 확정 문자가 발송됩니다.");
+    return successState({ code: r.code }, "예약을 변경했습니다. 변경 확정 문자가 발송됩니다.");
   } catch (e) {
     return toErrorState(e);
   }
 }
 
-/** QR 재발급 — 이전 코드는 무효화되고 codeHistory에 남는다 (명세 12.12) */
+/** QR 재발급 — 이전 코드는 무효화되고 codeHistory에 남는다 */
 export async function reissueCodeAction(
   _prev: ManageReservationState,
   formData: FormData,
@@ -73,9 +73,10 @@ export async function reissueCodeAction(
 }
 
 function revalidateViews() {
-  revalidatePath("/phone");
+  revalidatePath("/students");
   revalidatePath("/sessions");
   revalidatePath("/reserve");
+  revalidatePath("/stats");
 }
 
 function toErrorState(e: unknown): ManageReservationState {
