@@ -13,6 +13,8 @@ import { errorState, successState, type ActionState } from "@/shared/lib/action"
 export interface CreatedTicket {
   id: string;
   code: string;
+  /** 입장 QR 토큰 — 티켓의 실 QR(/q/{token}) 렌더에 사용 */
+  qrToken: string;
   name: string;
   reservedBy: string;
   phone: string;
@@ -97,8 +99,8 @@ export async function createGuestReservationAction(
   }
 }
 
-function toTicket(r: { id: string; code: string; name: string; reservedBy: string; phone: string; groupId: string | null }): CreatedTicket {
-  return { id: r.id, code: r.code, name: r.name, reservedBy: r.reservedBy, phone: r.phone, groupId: r.groupId };
+function toTicket(r: { id: string; code: string; qrToken: string; name: string; reservedBy: string; phone: string; groupId: string | null }): CreatedTicket {
+  return { id: r.id, code: r.code, qrToken: r.qrToken, name: r.name, reservedBy: r.reservedBy, phone: r.phone, groupId: r.groupId };
 }
 
 function revalidateReservationViews() {
