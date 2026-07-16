@@ -1,5 +1,5 @@
 {
-  "id": "5bcd4669-1484-45c6-9c9c-1f50856c95da",
+  "id": "5a01e751-1f83-4c9f-8622-905f36972efb",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -21,17 +21,31 @@
           "primaryKey": false,
           "notNull": true
         },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "teacher_id": {
           "name": "teacher_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "teacher_name": {
+          "name": "teacher_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "campus": {
+          "name": "campus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         }
       },
       "indexes": {},
@@ -67,6 +81,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "no": {
+          "name": "no",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -91,26 +111,45 @@
           "name": "class_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "parent_phone": {
-          "name": "parent_phone",
+        "class_name": {
+          "name": "class_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "no_show_count": {
-          "name": "no_show_count",
-          "type": "integer",
+        "teacher_name": {
+          "name": "teacher_name",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "''"
         },
-        "converted_from": {
-          "name": "converted_from",
-          "type": "jsonb",
+        "campus": {
+          "name": "campus",
+          "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "mother_phone": {
+          "name": "mother_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "father_phone": {
+          "name": "father_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -120,7 +159,38 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "students_mother_phone_idx": {
+          "name": "students_mother_phone_idx",
+          "columns": [
+            {
+              "expression": "mother_phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "students_father_phone_idx": {
+          "name": "students_father_phone_idx",
+          "columns": [
+            {
+              "expression": "father_phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "students_class_id_classes_id_fk": {
           "name": "students_class_id_classes_id_fk",
@@ -183,44 +253,18 @@
           "name": "role",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'admin'"
         },
         "name": {
           "name": "name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "teacher_id": {
-          "name": "teacher_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "users_teacher_id_teachers_id_fk": {
-          "name": "users_teacher_id_teachers_id_fk",
-          "tableFrom": "users",
-          "tableTo": "teachers",
-          "columnsFrom": [
-            "teacher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -243,6 +287,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "campus": {
+          "name": "campus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'전체'"
         },
         "date": {
           "name": "date",
@@ -304,22 +355,22 @@
           "notNull": true,
           "default": false
         },
-        "reminders": {
-          "name": "reminders",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "banner": {
           "name": "banner",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'navy'"
+          "default": "'violet'"
         },
         "notice": {
           "name": "notice",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "survey_sms": {
+          "name": "survey_sms",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -390,6 +441,34 @@
           "notNull": true,
           "default": "''"
         },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'비재원생'"
+        },
+        "teacher_name": {
+          "name": "teacher_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "campus": {
+          "name": "campus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
         "phone": {
           "name": "phone",
           "type": "text",
@@ -408,6 +487,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'reserved'"
+        },
+        "reserved_by": {
+          "name": "reserved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'수동'"
         },
         "attend_count": {
           "name": "attend_count",
@@ -429,6 +522,25 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "scanner_no": {
+          "name": "scanner_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entered_at": {
+          "name": "entered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logs": {
+          "name": "logs",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "history": {
           "name": "history",
@@ -510,6 +622,27 @@
           "method": "btree",
           "with": {}
         },
+        "reservations_student_session_idx": {
+          "name": "reservations_student_session_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "reservations_group_idx": {
           "name": "reservations_group_idx",
           "columns": [
@@ -560,203 +693,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.counsel_bookings": {
-      "name": "counsel_bookings",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "slot_id": {
-          "name": "slot_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "teacher_id": {
-          "name": "teacher_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date": {
-          "name": "date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "time": {
-          "name": "time",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grade": {
-          "name": "grade",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "phone": {
-          "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_session_id": {
-          "name": "from_session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "counsel_bookings_slot_id_counsel_slots_id_fk": {
-          "name": "counsel_bookings_slot_id_counsel_slots_id_fk",
-          "tableFrom": "counsel_bookings",
-          "tableTo": "counsel_slots",
-          "columnsFrom": [
-            "slot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "counsel_bookings_teacher_id_teachers_id_fk": {
-          "name": "counsel_bookings_teacher_id_teachers_id_fk",
-          "tableFrom": "counsel_bookings",
-          "tableTo": "teachers",
-          "columnsFrom": [
-            "teacher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "counsel_bookings_from_session_id_sessions_id_fk": {
-          "name": "counsel_bookings_from_session_id_sessions_id_fk",
-          "tableFrom": "counsel_bookings",
-          "tableTo": "sessions",
-          "columnsFrom": [
-            "from_session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.counsel_slots": {
-      "name": "counsel_slots",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "teacher_id": {
-          "name": "teacher_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date": {
-          "name": "date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "time": {
-          "name": "time",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "booked": {
-          "name": "booked",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        }
-      },
-      "indexes": {
-        "counsel_slots_teacher_idx": {
-          "name": "counsel_slots_teacher_idx",
-          "columns": [
-            {
-              "expression": "teacher_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "date",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "counsel_slots_teacher_id_teachers_id_fk": {
-          "name": "counsel_slots_teacher_id_teachers_id_fk",
-          "tableFrom": "counsel_slots",
-          "tableTo": "teachers",
-          "columnsFrom": [
-            "teacher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.devices": {
       "name": "devices",
       "schema": "",
@@ -780,6 +716,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "scanner_no": {
+          "name": "scanner_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
         },
         "on": {
           "name": "on",
@@ -848,6 +790,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "campus": {
+          "name": "campus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "ok": {
           "name": "ok",
@@ -945,25 +893,52 @@
           "primaryKey": false,
           "notNull": true
         },
+        "campus": {
+          "name": "campus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "student": {
+          "name": "student",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "teacher_name": {
+          "name": "teacher_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
         "rating": {
           "name": "rating",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "helpful": {
-          "name": "helpful",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "again": {
-          "name": "again",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
         },
         "comment": {
           "name": "comment",
@@ -971,6 +946,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "photo": {
+          "name": "photo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "photo_name": {
+          "name": "photo_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
