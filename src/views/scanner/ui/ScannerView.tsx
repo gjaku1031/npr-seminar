@@ -8,6 +8,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { Device } from "@/entities/device";
 import type { Reservation } from "@/entities/reservation";
 import type { Session } from "@/entities/session";
@@ -273,8 +274,10 @@ export function ScannerView({ sessions, students, reservations, devices }: Scann
     );
   }
 
-  /* ── 전체화면 스캐너 (명세 §9.2) ── */
-  return (
+  /* ── 전체화면 스캐너 (명세 §9.2) ──
+   * 포털로 body에 띄운다: 콘솔 셸 <main>의 진입 애니메이션이 스태킹 컨텍스트를 만들어
+   * 내부 z-index로는 상단 TopNav(z-50) 위를 덮을 수 없다. 기기 선택 후에만 렌더되므로 클라이언트 전용. */
+  return createPortal(
     <div data-screen-label="QR 스캐너 — 스캔 화면" style={{ position: "fixed", inset: 0, zIndex: 90, background: "#0A0F1A", display: "flex", flexDirection: "column", animation: "ds-fade-in var(--dur-base) var(--ease-out) both" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 22px", color: "var(--gray-1)", flexWrap: "wrap" }}>
         <button onClick={() => { setDevice(null); setPanel({ kind: "idle" }); }} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(248,250,252,0.1)", border: "none", color: "var(--gray-1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-body)", padding: "9px 14px", borderRadius: "var(--radius-pill)" }}>
@@ -371,6 +374,7 @@ export function ScannerView({ sessions, students, reservations, devices }: Scann
           <Toast tone="success">{toast}</Toast>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
