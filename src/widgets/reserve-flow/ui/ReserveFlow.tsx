@@ -9,14 +9,14 @@
  */
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import type { Reservation } from "@/entities/reservation";
+import { ReservationQr, type Reservation } from "@/entities/reservation";
 import type { Session } from "@/entities/session";
 import { isVisibleAtCampus } from "@/entities/session";
 import type { Student } from "@/entities/student";
 import { CAMPUSES } from "@/shared/config/campus";
 import { fmtSessionDate } from "@/shared/lib/format";
 import { idleState } from "@/shared/lib/action";
-import { Badge, Button, Icons, Input, KV, QrBox, ResStatusBadge } from "@/shared/ui";
+import { Badge, Button, Icons, Input, KV, ResStatusBadge } from "@/shared/ui";
 import {
   createGuestReservationAction,
   createMemberReservationAction,
@@ -404,7 +404,7 @@ export function ReserveFlow({ sessions, students, reservations, compact = false 
               <ResStatusBadge status={managed.status} size="sm" />
             </div>
             <div style={{ padding: "18px 20px", display: "flex", gap: 16, alignItems: "center" }}>
-              <QrBox code={managed.code} size={104} />
+              <ReservationQr qrToken={managed.qrToken} size={104} />
               <div style={{ display: "flex", flexDirection: "column", gap: 9, minWidth: 0 }}>
                 <KV k="예약 학생명" v={managed.name} />
                 <KV k="일시" v={`${fmtSessionDate(managedSession.date)} ${managedSession.time}`} />
@@ -708,7 +708,7 @@ export function ReserveFlow({ sessions, students, reservations, compact = false 
             <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, marginTop: 4, lineHeight: 1.35 }}>{session.title}</div>
           </div>
           <div style={{ padding: "18px 20px", display: "flex", gap: 16, alignItems: "center" }}>
-            <QrBox code={primary.code} size={112} style={{ animation: "ds-pop var(--dur-slow) var(--ease-spring) 400ms both" }} />
+            <ReservationQr qrToken={primary.qrToken} size={112} style={{ animation: "ds-pop var(--dur-slow) var(--ease-spring) 400ms both" }} />
             <div style={{ display: "flex", flexDirection: "column", gap: 9, minWidth: 0 }}>
               <KV k="예약 학생명" v={primary.name} />
               <KV k="일시" v={`${fmtSessionDate(session.date)} ${session.time}`} />
