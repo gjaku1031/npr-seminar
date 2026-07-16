@@ -1,29 +1,21 @@
-import { getStatsOverview, requireModuleAccess } from "@/server/services";
-import { ModuleScaffold, ScaffoldCount } from "@/shared/ui";
+import { listAllReservations, listSessions, listStudents, listSurveyResponses, requireModuleAccess } from "@/server/services";
+import { StatsView } from "@/views/stats";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 통계 대시보드 (명세 12.6) — 원장·실장 전용.
- * 강사(gangsa)는 차단된다 (flows GANGSA-G1: 직접 진입 시 허브 리다이렉트).
+ * 통계 (명세 §8) — 설명회 × 캠퍼스 필터가 즉시 반응하도록 원자료를 내려준다(와이어프레임 동일).
+ * 서버 집계 계약은 getStatsOverview(services)가 담당 — BE 전환 시 그 경로로 대체한다.
  */
 export default async function StatsPage() {
   await requireModuleAccess("stats");
 
-  const stats = await getStatsOverview();
+  const [sessions, reservations, students] = await Promise.all([
+    listSessions(),
+    listAllReservations(),
+    listStudents(),
+  ]);
+  const surveys = (await Promise.all(sessions.map((s) => listSurveyResponses(s.id)))).flat();
 
-  return (
-    <ModuleScaffold
-      title="통계"
-      description="누적 예약 · 참석률 · 노쇼율 · 전환율 · 채널 분포"
-      spec="12.6"
-    >
-      <div className="flex flex-wrap gap-2">
-        <ScaffoldCount label="누적 예약" value={stats.totalReservations} />
-        <ScaffoldCount label="참석률 %" value={stats.attendanceRate} />
-        <ScaffoldCount label="노쇼율 %" value={stats.noShowRate} />
-        <ScaffoldCount label="전환율 %" value={stats.conversionRate} />
-      </div>
-    </ModuleScaffold>
-  );
+  return <StatsView sessions={sessions} reservations={reservations} students={students} surveys={surveys} />;
 }
