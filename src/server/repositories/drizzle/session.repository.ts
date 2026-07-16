@@ -1,9 +1,9 @@
 import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../db/client";
-import { reservations, sessions, students } from "../../db/schema";
+import { reservations, sessions } from "../../db/schema";
 import type { SessionRepository } from "../session.port";
-import type { Session, SessionStats } from "@/entities/session";
+import { DEFAULT_SURVEY_SMS, type Session, type SessionStats } from "@/entities/session";
 
 type SessionRow = typeof sessions.$inferSelect;
 
@@ -15,6 +15,7 @@ function toSession(row: SessionRow): Session {
   return {
     id: row.id,
     title: row.title,
+    campus: row.campus,
     date: row.date,
     round: row.round,
     time: row.time,
@@ -24,9 +25,9 @@ function toSession(row: SessionRow): Session {
     attendField: row.attendField,
     active: row.active,
     ended: row.ended,
-    reminders: row.reminders,
     banner: row.banner,
     notice: row.notice,
+    surveySms: row.surveySms,
   };
 }
 
@@ -53,7 +54,7 @@ export const drizzleSessionRepository: SessionRepository = {
   async create(draft) {
     const rows = await getDb()
       .insert(sessions)
-      .values({ ...draft, active: true, ended: false, reminders: [] })
+      .values({ ...draft, active: true, ended: false, surveySms: DEFAULT_SURVEY_SMS })
       .returning();
     return toSession(rows[0]);
   },
@@ -64,19 +65,18 @@ export const drizzleSessionRepository: SessionRepository = {
     return toSession(rows[0]);
   },
 
-  async toggleReminder(sessionId, reminderId, enabled) {
-    const current = await this.findById(sessionId);
-    if (!current) throw new Error(`세션을 찾을 수 없습니다: ${sessionId}`);
-    const next = current.reminders.map((r) => (r.id === reminderId ? { ...r, enabled } : r));
+  /** 설문 문자 본문 저장 (명세 §6.4) */
+  async updateSurveySms(id, surveySms) {
     const rows = await getDb()
       .update(sessions)
-      .set({ reminders: next })
-      .where(eq(sessions.id, sessionId))
+      .set({ surveySms })
+      .where(eq(sessions.id, id))
       .returning();
+    if (!rows[0]) throw new Error(`세션을 찾을 수 없습니다: ${id}`);
     return toSession(rows[0]);
   },
 
-  /** 상태별 집계를 한 질의로 — 현황 카드 5장이 매번 부르는 경로 (명세 §7.4) */
+  /** 상태별 집계를 한 질의로 — 현황 스탯 4장이 매번 부르는 경로 (명세 §6.3) */
   async stats(sessionId) {
     const rows = await getDb()
       .select({ status: reservations.status, count: sql<number>`count(*)::int` })
@@ -96,25 +96,13 @@ export const drizzleSessionRepository: SessionRepository = {
   },
 
   /**
-   * 종료: 학생 노쇼 카운트 증가 → 미체크 노쇼 태깅 → 세션 ended (명세 12.4).
-   * 순서가 중요하다 — ①이 아직 'reserved'인 행을 세므로 ②보다 먼저 실행돼야 한다.
-   *
-   * ⚠️ neon-http 드라이버는 대화형 트랜잭션을 지원하지 않아 batch()로 원자 처리한다.
-   *    진짜 트랜잭션이 필요해지면 db/client.ts만 neon-serverless(WebSocket)로 교체하면 된다
-   *    — 설계 §6.2 시나리오 ①(드라이버 교체)의 범위이고, 이 파일 위로는 영향이 없다.
+   * 종료: 미체크 → 내부 no_show 태깅 + 세션 ended (명세 §6.6).
+   * v4.0에서 학생 노쇼 카운트가 폐기되어 단순해졌다 — batch()로 원자 처리 유지.
+   * ⚠️ neon-http 드라이버는 대화형 트랜잭션 미지원 — 필요 시 db/client.ts만 교체 (설계 §6.6).
    */
   async endSession(id) {
     const db = getDb();
-    const [, tagged] = await db.batch([
-      db.execute(sql`
-        UPDATE ${students} SET no_show_count = no_show_count + sub.cnt
-        FROM (
-          SELECT student_id, COUNT(*)::int AS cnt FROM ${reservations}
-          WHERE session_id = ${id} AND status = 'reserved' AND student_id IS NOT NULL
-          GROUP BY student_id
-        ) AS sub
-        WHERE ${students}.id = sub.student_id
-      `),
+    const [tagged] = await db.batch([
       db
         .update(reservations)
         .set({ status: "no_show" })
@@ -125,7 +113,7 @@ export const drizzleSessionRepository: SessionRepository = {
     return tagged.length;
   },
 
-  /** 삭제: 예약은 스키마의 onDelete cascade가 함께 지운다 — 단일 statement라 원자적 (명세 §7.7) */
+  /** 삭제: 예약은 스키마의 onDelete cascade가 함께 지운다 — 단일 statement라 원자적 (명세 §6.7) */
   async deleteWithReservations(id) {
     const db = getDb();
     const [{ count }] = await db

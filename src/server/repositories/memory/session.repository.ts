@@ -1,6 +1,7 @@
 import "server-only";
 import { isActiveReservation } from "@/entities/reservation";
 import type { Session, SessionStats } from "@/entities/session";
+import { DEFAULT_SURVEY_SMS } from "@/entities/session";
 import type { SessionRepository } from "../session.port";
 import { clone, db } from "./store";
 
@@ -24,9 +25,7 @@ export const memorySessionRepository: SessionRepository = {
   },
 
   async listActive() {
-    return clone(
-      [...db().sessions.values()].filter((s) => s.active && !s.ended).sort(byDateDesc),
-    );
+    return clone([...db().sessions.values()].filter((s) => s.active && !s.ended).sort(byDateDesc));
   },
 
   async findById(id) {
@@ -40,7 +39,7 @@ export const memorySessionRepository: SessionRepository = {
       ...draft,
       active: true,
       ended: false,
-      reminders: [],
+      surveySms: DEFAULT_SURVEY_SMS,
     };
     db().sessions.set(session.id, session);
     return clone(session);
@@ -54,14 +53,12 @@ export const memorySessionRepository: SessionRepository = {
     return clone(next);
   },
 
-  async toggleReminder(sessionId, reminderId, enabled) {
-    const row = db().sessions.get(sessionId);
-    if (!row) throw new Error(`세션을 찾을 수 없습니다: ${sessionId}`);
-    const next = {
-      ...row,
-      reminders: row.reminders.map((r) => (r.id === reminderId ? { ...r, enabled } : r)),
-    };
-    db().sessions.set(sessionId, next);
+  /** 설문 문자 본문 저장 (명세 §6.4) */
+  async updateSurveySms(id, surveySms) {
+    const row = db().sessions.get(id);
+    if (!row) throw new Error(`세션을 찾을 수 없습니다: ${id}`);
+    const next = { ...row, surveySms };
+    db().sessions.set(id, next);
     return clone(next);
   },
 
@@ -69,7 +66,7 @@ export const memorySessionRepository: SessionRepository = {
     return statsOf(sessionId);
   },
 
-  /** 종료: ended=true + reserved 일괄 no_show + 학생 noShowCount++ (명세 12.4) */
+  /** 종료: ended=true + reserved 일괄 no_show — 내부 집계, 명단 미표기 (명세 §6.6) */
   async endSession(id) {
     const store = db();
     const row = store.sessions.get(id);
@@ -81,17 +78,11 @@ export const memorySessionRepository: SessionRepository = {
       if (res.sessionId !== id || res.status !== "reserved") continue;
       store.reservations.set(resId, { ...res, status: "no_show" });
       tagged += 1;
-      if (res.studentId) {
-        const student = store.students.get(res.studentId);
-        if (student) {
-          store.students.set(student.id, { ...student, noShowCount: student.noShowCount + 1 });
-        }
-      }
     }
     return tagged;
   },
 
-  /** 삭제: 세션 + 연동 예약 (명세 §7.7) */
+  /** 삭제: 세션 + 연동 예약 (명세 §6.7) */
   async deleteWithReservations(id) {
     const store = db();
     let removed = 0;

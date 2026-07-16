@@ -1,26 +1,26 @@
 import "server-only";
-import { matchesPhoneSuffix, type Student, type StudentDraft } from "@/entities/student";
+import { matchesParentPhone } from "@/entities/student";
+import { unitMatchesTab } from "@/entities/class";
 import type { StudentRepository } from "../student.port";
 import { clone, db } from "./store";
 
-function build(draft: StudentDraft): Student {
-  return { id: crypto.randomUUID(), ...draft, noShowCount: 0, convertedFrom: null };
-}
-
 const digits = (s: string) => s.replace(/\D/g, "");
 
+/**
+ * v4.0: 재원생 명단은 읽기 전용 참조 데이터 (명세 §4).
+ * 검색은 이름·학교·연락처(모/부), 필터는 캠퍼스·단위 탭·담임.
+ */
 export const memoryStudentRepository: StudentRepository = {
   async list(query) {
-    const store = db();
-    let rows = [...store.students.values()];
+    let rows = [...db().students.values()];
 
-    if (query?.teacherId) {
-      const classIds = new Set(
-        [...store.classes.values()].filter((c) => c.teacherId === query.teacherId).map((c) => c.id),
-      );
-      rows = rows.filter((s) => s.classId !== null && classIds.has(s.classId));
+    if (query?.campus && query.campus !== "전체") {
+      rows = rows.filter((s) => s.campus === query.campus);
     }
-    if (query?.classId) rows = rows.filter((s) => s.classId === query.classId);
+    if (query?.unitTab && query.unitTab !== "전체") {
+      rows = rows.filter((s) => unitMatchesTab(s.unit, query.unitTab!));
+    }
+    if (query?.teacherName) rows = rows.filter((s) => s.teacherName === query.teacherName);
     if (query?.search) {
       const q = query.search.trim().toLowerCase();
       const qd = digits(q);
@@ -28,7 +28,8 @@ export const memoryStudentRepository: StudentRepository = {
         (s) =>
           s.name.toLowerCase().includes(q) ||
           s.school.toLowerCase().includes(q) ||
-          (qd.length > 0 && digits(s.parentPhone).includes(qd)),
+          (qd.length > 0 &&
+            (digits(s.motherPhone).includes(qd) || digits(s.fatherPhone).includes(qd))),
       );
     }
     return clone(rows);
@@ -39,48 +40,9 @@ export const memoryStudentRepository: StudentRepository = {
     return row ? clone(row) : null;
   },
 
-  /** 부분·뒷자리 매칭 — 모바일 조회(전체)·현장 입장(뒤 4자리) 공용 (명세 §8.6 · 10.2) */
+  /** 부분·뒷자리 매칭 — **모/부 모두** (명세 §9.3 · §10.3) */
   async listByParentPhone(phone) {
     const q = digits(phone);
-    if (q.length === 0) return [];
-    return clone(
-      [...db().students.values()].filter(
-        (s) => digits(s.parentPhone).includes(q) || matchesPhoneSuffix(s.parentPhone, q),
-      ),
-    );
-  },
-
-  async create(draft) {
-    const row = build(draft);
-    db().students.set(row.id, row);
-    return clone(row);
-  },
-
-  /** 엑셀 업로드 — 연락처 중복은 병합 (명세 §4.10) */
-  async upsertMany(drafts) {
-    const store = db();
-    let created = 0;
-    let merged = 0;
-    for (const draft of drafts) {
-      const existing = [...store.students.values()].find(
-        (s) => digits(s.parentPhone) === digits(draft.parentPhone) && s.name === draft.name,
-      );
-      if (existing) {
-        store.students.set(existing.id, { ...existing, ...draft });
-        merged += 1;
-      } else {
-        const row = build(draft);
-        store.students.set(row.id, row);
-        created += 1;
-      }
-    }
-    return { created, merged };
-  },
-
-  /** 비재원 → 재원 전환 (명세 12.14) */
-  async convertGuest(draft, from) {
-    const row: Student = { ...build(draft), convertedFrom: from };
-    db().students.set(row.id, row);
-    return clone(row);
+    return clone([...db().students.values()].filter((s) => matchesParentPhone(s, q)));
   },
 };
