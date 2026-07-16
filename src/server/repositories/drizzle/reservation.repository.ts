@@ -15,11 +15,17 @@ type ReservationRow = typeof reservations.$inferSelect;
 
 const ACTIVE_STATUSES = ["reserved", "entered"] as const;
 
+/** jsonb 안의 Date는 문자열(ISO)로 저장·조회된다 — 도메인 타입(Date)으로 복원한다 */
+function reviveAt<T extends { [K in F]: Date }, F extends keyof T>(rows: T[], field: F): T[] {
+  return rows.map((row) => ({ ...row, [field]: new Date(row[field]) }));
+}
+
 /** Row→도메인. 스키마 변경이 여기서 컴파일 에러로 드러난다 (설계 §6.1-②) */
 function toReservation(row: ReservationRow): Reservation {
   return {
     id: row.id,
     code: row.code,
+    qrToken: row.qrToken,
     sessionId: row.sessionId,
     studentId: row.studentId,
     name: row.name,
@@ -39,10 +45,10 @@ function toReservation(row: ReservationRow): Reservation {
     reservedAt: row.reservedAt,
     scannerNo: row.scannerNo,
     enteredAt: row.enteredAt,
-    logs: row.logs,
-    history: row.history,
+    logs: reviveAt(row.logs, "at"),
+    history: reviveAt(row.history, "when"),
     codeHistory: row.codeHistory,
-    audit: row.audit,
+    audit: reviveAt(row.audit, "when"),
     groupId: row.groupId,
     cancelledBy: row.cancelledBy,
   };
@@ -95,6 +101,16 @@ export const drizzleReservationRepository: ReservationRepository = {
 
   async findByCode(code) {
     const rows = await getDb().select().from(reservations).where(eq(reservations.code, code)).limit(1);
+    return rows[0] ? toReservation(rows[0]) : null;
+  },
+
+  /** QR 토큰 조회 — 스캔·패스 페이지 (명세 §9.2) */
+  async findByQrToken(token) {
+    const rows = await getDb()
+      .select()
+      .from(reservations)
+      .where(eq(reservations.qrToken, token))
+      .limit(1);
     return rows[0] ? toReservation(rows[0]) : null;
   },
 
@@ -164,6 +180,7 @@ export const drizzleReservationRepository: ReservationRepository = {
       .values({
         ...draft,
         code: await nextCode(draft.sessionId),
+        qrToken: crypto.randomUUID(),
         status: "reserved",
         logs: [{ label: createdLogLabel(draft.channel), at: now }],
       })
@@ -181,6 +198,7 @@ export const drizzleReservationRepository: ReservationRepository = {
       values.push({
         ...draft,
         code: await nextCode(draft.sessionId),
+        qrToken: crypto.randomUUID(),
         status: "reserved" as const,
         groupId,
         logs: [{ label: createdLogLabel(draft.channel), at: now }],
@@ -262,13 +280,14 @@ export const drizzleReservationRepository: ReservationRepository = {
     return toReservation(rows[0]);
   },
 
-  /** QR 재발급 — 이전 코드는 codeHistory로 */
+  /** QR 재발급 — 이전 코드는 codeHistory로, QR 토큰도 회전(이전 QR 무효화) */
   async reissueCode(id) {
     const current = await mustFind(id);
     const rows = await getDb()
       .update(reservations)
       .set({
         code: reissuedCode(current.code, current.codeHistory.length + 1),
+        qrToken: crypto.randomUUID(),
         codeHistory: [...current.codeHistory, current.code],
       })
       .where(eq(reservations.id, id))
