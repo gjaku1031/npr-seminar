@@ -5,7 +5,8 @@ import type { User } from "@/entities/user";
 import type { SmsLog, SmsTemplate } from "@/entities/sms";
 import { summarize, type SurveyDraft, type SurveyResponse, type SurveySummary } from "@/entities/survey";
 import type { Device } from "@/entities/device";
-import type { SmsTargetGroup } from "@/entities/reservation";
+import type { Reservation, SmsTargetGroup } from "@/entities/reservation";
+import type { Session } from "@/entities/session";
 import type { Campus, CampusScope } from "@/shared/config/campus";
 import {
   classRepository,
@@ -17,6 +18,8 @@ import {
   teacherRepository,
   userRepository,
 } from "../repositories";
+import { sendSmsBatch } from "../sms/gateway";
+import { renderSmsBody, reservationVars } from "../sms/template";
 import { InvalidStateError, NotFoundError } from "./errors";
 
 /**
@@ -63,38 +66,49 @@ export async function listSmsLogs(): Promise<SmsLog[]> {
 }
 
 /**
- * 발송 — ⚠️ 실제 게이트웨이 미연동 (명세 §12). 지금은 로그 적재까지.
- * 게이트웨이 연동 시 이 함수 내부만 바뀐다: 발송 호출 → 결과로 ok/fail 채움.
+ * 발송 실행 + 로그 적재 — SOLAPI 게이트웨이 연동 (명세 §12 실서비스 전환, qr-poc 이식).
+ * 수신자별 변수 치환 본문을 배치 발송하고 결과(ok/fail)를 로그로 남긴다 (명세 §5.4).
+ * ok 집계: 게이트웨이 비활성(로컬·키 없음)의 skip은 목업 시절과 동일하게 성공으로 취급한다.
  */
-async function recordSend(input: {
+async function sendAndRecord(input: {
   templateName: string;
-  sessionTitle: string;
+  session: Session;
+  body: string;
+  recipients: Reservation[];
   campus: CampusScope;
-  recipients: number;
   auto?: boolean;
 }): Promise<SmsLog> {
-  if (input.recipients <= 0) throw new InvalidStateError("발송 대상이 없습니다.");
+  if (input.recipients.length <= 0) throw new InvalidStateError("발송 대상이 없습니다.");
+
+  const result = await sendSmsBatch(
+    input.recipients.map((r) => ({
+      to: r.phone,
+      body: renderSmsBody(input.body, reservationVars(r, input.session)),
+    })),
+  );
+
   return smsRepository.addLog({
     when: new Date(),
-    to: input.recipients,
+    to: input.recipients.length,
     template: input.templateName,
-    session: input.sessionTitle,
+    session: input.session.title,
     campus: input.campus,
-    ok: input.recipients,
-    fail: 0,
+    ok: result.sent + result.skipped,
+    fail: result.failed,
     auto: input.auto ?? false,
   });
 }
 
 /**
  * 그룹 문자 발송 (명세 §5.2) — 대상 = 설명회 × 그룹(예약자 전체/미체크만/입장 완료/취소자) × 캠퍼스.
- * 수신 인원은 서버가 산출한다(클라이언트 카운트 신뢰 금지).
+ * 수신 인원은 서버가 산출한다(클라이언트 카운트 신뢰 금지). 본문 변수는 수신자별 치환 (명세 §5.1).
  */
 export async function sendGroupSms(input: {
   sessionId: string;
   group: SmsTargetGroup;
   campus: Campus;
   templateName: string;
+  body: string;
 }): Promise<SmsLog> {
   const session = await sessionRepository.findById(input.sessionId);
   if (!session) throw new NotFoundError("설명회를 찾을 수 없습니다.");
@@ -104,14 +118,15 @@ export async function sendGroupSms(input: {
   );
   const recipients =
     input.group === "all"
-      ? rows.filter((r) => r.status !== "cancelled").length
-      : rows.filter((r) => r.status === input.group).length;
+      ? rows.filter((r) => r.status !== "cancelled")
+      : rows.filter((r) => r.status === input.group);
 
-  return recordSend({
+  return sendAndRecord({
     templateName: input.templateName,
-    sessionTitle: session.title,
-    campus: input.campus,
+    session,
+    body: input.body,
     recipients,
+    campus: input.campus,
   });
 }
 
@@ -122,13 +137,14 @@ export async function sendSurveySms(sessionId: string): Promise<SmsLog> {
 
   const entered = (await reservationRepository.listBySession(sessionId)).filter(
     (r) => r.status === "entered",
-  ).length;
+  );
 
-  return recordSend({
+  return sendAndRecord({
     templateName: "만족도 설문 요청",
-    sessionTitle: session.title,
-    campus: "전체",
+    session,
+    body: session.surveySms,
     recipients: entered,
+    campus: "전체",
   });
 }
 

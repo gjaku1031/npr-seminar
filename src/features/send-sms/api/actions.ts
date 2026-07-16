@@ -18,7 +18,7 @@ export type SmsState = ActionState<{ recipients?: number; templateId?: string }>
  * ⚠️ 게이트웨이 미연동 — 발송은 로그 적재까지 (명세 §12). 수신 인원은 서버가 산출.
  */
 
-/** 그룹 발송 — 설명회 × 그룹 × 캠퍼스 (명세 §5.2) */
+/** 그룹 발송 — 설명회 × 그룹 × 캠퍼스, 본문은 수신자별 변수 치환 (명세 §5.1~5.2) */
 export async function sendGroupSmsAction(_prev: SmsState, formData: FormData): Promise<SmsState> {
   const parsed = z
     .object({
@@ -26,12 +26,14 @@ export async function sendGroupSmsAction(_prev: SmsState, formData: FormData): P
       group: z.enum(["all", "reserved", "entered", "cancelled"]),
       campus: z.enum(["A캠퍼스", "B캠퍼스", "C캠퍼스"]),
       templateName: z.string().trim().min(1).max(50).default("직접 작성"),
+      body: z.string().trim().min(1, "본문을 입력하세요.").max(2000),
     })
     .safeParse({
       sessionId: formData.get("sessionId"),
       group: formData.get("group"),
       campus: formData.get("campus"),
       templateName: formData.get("templateName") ?? "직접 작성",
+      body: formData.get("body"),
     });
   if (!parsed.success) return errorState(parsed.error.issues[0]?.message ?? "입력값을 확인하세요.");
 

@@ -3,7 +3,8 @@
 /**
  * 문자 발송 (명세 §5, flows ADMIN-F3) — 와이어프레임 SmsScreen 이식.
  * 템플릿 목록/생성/저장/삭제 · 변수 칩 6종 · byte/LMS · 대상(설명회×그룹×캠퍼스) ·
- * 캠퍼스별 발신번호 · 실기기 프리뷰 · 발송 로그. 발송은 로그 적재까지 (명세 §12).
+ * 캠퍼스별 발신번호 · 실기기 프리뷰 · 발송 로그.
+ * 발송은 SOLAPI 게이트웨이 실연동 — 본문 변수는 서버가 수신자별 치환한다 (server/sms).
  */
 
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -111,6 +112,7 @@ export function SmsView({ sessions, templates, logs, reservations }: SmsViewProp
     fd.set("group", group);
     fd.set("campus", campus);
     fd.set("templateName", templates.find((t) => t.id === tplId)?.name ?? "직접 작성");
+    fd.set("body", body);
     run(() => sendGroupSmsAction(idleState, fd));
   };
 

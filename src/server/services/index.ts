@@ -32,12 +32,15 @@ export {
   addGuestReservation,
   checkIn,
   checkInByCode,
+  checkInByQrToken,
+  getReservationByQrToken,
   rollbackEntry,
   cancelReservation,
   moveReservation,
   reissueReservationCode,
   walkInCheckIn,
 } from "./reservation.service";
+export type { QrScanOutcome } from "./reservation.service";
 
 // 재원생 (명세 §4 — 읽기 전용 참조)
 export { listStudents, getStudent, findStudentsByParentPhone } from "./student.service";

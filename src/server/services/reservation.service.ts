@@ -12,7 +12,10 @@ import { isFull } from "@/entities/session";
 import type { CancelledBy } from "@/entities/reservation";
 import type { Student } from "@/entities/student";
 import type { Campus } from "@/shared/config/campus";
-import { reservationRepository, sessionRepository, studentRepository } from "../repositories";
+import { fmtDateTime } from "@/shared/lib/format";
+import { reservationRepository, sessionRepository, smsRepository, studentRepository } from "../repositories";
+import { sendSms, sendSmsBatch } from "../sms/gateway";
+import { inquiryOf, renderSmsBody, reservationVars } from "../sms/template";
 import {
   CapacityExceededError,
   DuplicateReservationError,
@@ -48,6 +51,59 @@ async function assertCanReserve(draft: ReservationDraft, seats = 1): Promise<voi
   // ② 정원: reserved + entered 기준. 가족 예약은 인원 합계로 판정한다.
   const active = await reservationRepository.countActive(draft.sessionId);
   if (isFull(active + seats - 1, session.capacity)) throw new CapacityExceededError();
+}
+
+const CONFIRM_TEMPLATE_NAME = "예약 확정 + QR";
+const CONFIRM_FALLBACK_BODY =
+  "[npr] {학생명} 학부모님, {설명회명} 예약이 확정되었습니다.\n일시: {일시}\n장소: {장소}\n입장 QR: {QR링크}";
+
+/**
+ * 예약 확정 + QR 문자 (명세 §10.7 · qr-poc 이식) — 자녀별 QR 링크를 학부모 연락처로 발송하고
+ * 발송 로그를 남긴다 (명세 §5.4). 발송 실패가 예약을 실패시키지 않는다.
+ * ok 집계: 게이트웨이 비활성(로컬·키 없음)의 skip은 목업 시절과 동일하게 성공으로 취급한다.
+ */
+async function notifyReservationConfirmed(rows: Reservation[]): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    const session = await sessionRepository.findById(rows[0].sessionId);
+    if (!session) return;
+    const templates = await smsRepository.listTemplates();
+    const body =
+      templates.find((t) => t.name === CONFIRM_TEMPLATE_NAME)?.body ?? CONFIRM_FALLBACK_BODY;
+    const result = await sendSmsBatch(
+      rows.map((r) => ({ to: r.phone, body: renderSmsBody(body, reservationVars(r, session)) })),
+    );
+    await smsRepository.addLog({
+      when: new Date(),
+      to: rows.length,
+      template: CONFIRM_TEMPLATE_NAME,
+      session: session.title,
+      campus: rows[0].campus || "전체",
+      ok: result.sent + result.skipped,
+      fail: result.failed,
+      auto: false,
+    });
+  } catch (error) {
+    console.error("[sms] 예약 확정 문자 발송 실패:", error);
+  }
+}
+
+/** 입장 확인 문자 (명세 §9.2 "입장 완료 문자 발송됨" · qr-poc 이식) — 스캔·현장 입장 공통 */
+async function notifyEntryConfirmed(reservation: Reservation): Promise<void> {
+  if (!reservation.enteredAt) return;
+  try {
+    const session = await sessionRepository.findById(reservation.sessionId);
+    if (!session) return;
+    const body = [
+      "[npr 입장 확인]",
+      `${reservation.name} 학부모님, ${session.title} 입장이 확인되었습니다.`,
+      `입장 시간: ${fmtDateTime(reservation.enteredAt)}`,
+      `문의: ${inquiryOf(reservation.campus)}`,
+    ].join("\n");
+    await sendSms(reservation.phone, body);
+  } catch (error) {
+    console.error("[sms] 입장 확인 문자 발송 실패:", error);
+  }
 }
 
 /** 재원생 → 예약 초안 — 스냅샷 필드(반명·담임·캠퍼스·단위)를 학생에서 채운다 */
@@ -102,10 +158,12 @@ export async function findReservationsByPhone(digits: string): Promise<Reservati
   return reservationRepository.listByPhoneDigits(digits);
 }
 
-/** 단건 예약 — 모든 경로의 공용 진입점 */
+/** 단건 예약 — 모든 경로의 공용 진입점. 확정 문자(QR 링크)까지 발송한다 */
 export async function createReservation(draft: ReservationDraft): Promise<Reservation> {
   await assertCanReserve(draft);
-  return reservationRepository.create(draft);
+  const created = await reservationRepository.create(draft);
+  await notifyReservationConfirmed([created]);
+  return created;
 }
 
 /**
@@ -138,7 +196,9 @@ export async function createFamilyReservation(input: {
     );
   }
   for (const draft of drafts) await assertCanReserve(draft, drafts.length);
-  return reservationRepository.createGroup(drafts);
+  const created = await reservationRepository.createGroup(drafts);
+  await notifyReservationConfirmed(created);
+  return created;
 }
 
 /**
@@ -184,7 +244,9 @@ export async function setRosterReservation(
     attendCount: 1,
   });
   await assertCanReserve(draft);
-  return reservationRepository.create(draft);
+  const created = await reservationRepository.create(draft);
+  await notifyReservationConfirmed([created]);
+  return created;
 }
 
 /** 수동 추가 — 비재원생 (명세 §4.8). 반명 '비재원생', 담임 공란, 경로는 전화/선생님/현장 예약 */
@@ -217,7 +279,9 @@ export async function addGuestReservation(input: {
     member: false,
   };
   await assertCanReserve(draft);
-  return reservationRepository.create(draft);
+  const created = await reservationRepository.create(draft);
+  await notifyReservationConfirmed([created]);
+  return created;
 }
 
 /** 모바일 비재원생 예약 (명세 §10.6) — 동일 연락처 유효 예약 차단은 불변식 ①이 처리한다 */
@@ -249,15 +313,19 @@ export async function createGuestReservation(input: {
     member: false,
   };
   await assertCanReserve(draft);
-  return reservationRepository.create(draft);
+  const created = await reservationRepository.create(draft);
+  await notifyReservationConfirmed([created]);
+  return created;
 }
 
-/** 수동 체크인 / QR 스캔 입장 — 스캐너 번호 기록 (명세 §9.2) */
+/** 수동 체크인 / QR 스캔 입장 — 스캐너 번호 기록 + 입장 확인 문자 (명세 §9.2) */
 export async function checkIn(id: string, scannerNo: number): Promise<Reservation> {
   const reservation = await reservationRepository.findById(id);
   if (!reservation) throw new NotFoundError("예약을 찾을 수 없습니다.");
   if (!canCheckIn(reservation.status)) throw new InvalidStateError("미체크 예약만 입장 처리할 수 있습니다.");
-  return reservationRepository.checkIn(id, scannerNo);
+  const entered = await reservationRepository.checkIn(id, scannerNo);
+  await notifyEntryConfirmed(entered);
+  return entered;
 }
 
 /** QR 코드로 입장 (명세 §9.2) */
@@ -265,6 +333,43 @@ export async function checkInByCode(code: string, scannerNo: number): Promise<Re
   const reservation = await reservationRepository.findByCode(code);
   if (!reservation) throw new NotFoundError("예약번호를 찾을 수 없습니다.");
   return checkIn(reservation.id, scannerNo);
+}
+
+/** QR 스캔 결과 — 중복 스캔은 오류가 아니라 안내 (API 명세 §2.4 already_checked_in) */
+export interface QrScanOutcome {
+  reservation: Reservation;
+  alreadyEntered: boolean;
+}
+
+/** QR 패스 페이지 조회 (공개) — 토큰으로 예약·세션을 함께 읽는다 */
+export async function getReservationByQrToken(token: string): Promise<Reservation | null> {
+  return reservationRepository.findByQrToken(token);
+}
+
+/**
+ * QR 토큰 입장 (명세 §9.2 · API 명세 §2.4) — 실카메라 스캔 경로. qr-poc verifyQRToken 이식.
+ * 무효 토큰/취소/회차 불일치는 도메인 에러로, 중복 스캔은 성공 + alreadyEntered로 구분한다.
+ */
+export async function checkInByQrToken(
+  token: string,
+  sessionId: string,
+  scannerNo: number,
+): Promise<QrScanOutcome> {
+  const reservation = await reservationRepository.findByQrToken(token);
+  if (!reservation) throw new NotFoundError("유효하지 않은 QR 코드입니다.");
+  if (reservation.status === "cancelled") {
+    throw new InvalidStateError("취소된 예약의 QR 코드입니다.");
+  }
+  if (reservation.sessionId !== sessionId) {
+    const other = await sessionRepository.findById(reservation.sessionId);
+    throw new InvalidStateError(
+      `선택한 설명회의 QR이 아닙니다.${other ? ` 이 QR은 '${other.title}' 예약입니다.` : ""}`,
+    );
+  }
+  if (reservation.status === "entered") return { reservation, alreadyEntered: true };
+
+  const entered = await checkIn(reservation.id, scannerNo);
+  return { reservation: entered, alreadyEntered: false };
 }
 
 /** 입장 취소(롤백) — 사유 필수 */
