@@ -32,25 +32,33 @@ src/
 
 **서버 불변식** (설계 §6.4): 중복예약·정원초과를 모바일·전화·수동·현장 **모든 경로**에서 차단한다. 명세 §11이 "정책 공백"으로 남긴 항목을 서버가 단일 지점(`reservation.service.ts`)에서 강제한다.
 
+**QR 입장·문자** (qr-poc 이식): 예약마다 난수 `qrToken`을 발급하고, 예약 확정 문자(SOLAPI)에 `/q/{token}` 패스 페이지 링크를 담는다. 스캐너 모듈은 실카메라(html5-qrcode)로 QR 속 토큰을 읽어 체크인하며, 우측 다이얼(연락처 뒷 4자리)로 현장 입장을 처리한다. 입장 시 확인 문자가 발송된다.
+
 **역할** (설계 §6.5, flows 기준): `owner`·`siljang` = 8모듈 전체 / `gangsa` = 재원생·통계 차단 / 학부모 = 로그인 없이 `/reserve`만.
 
 ## 개발
 
 ```bash
 pnpm install
-pnpm dev          # DB 없이 바로 구동 (인메모리 리포지토리 + 시드: 재원생 40명·설명회 2개)
+pnpm dev          # DB 없이 바로 구동 (인메모리 리포지토리 + 시드: 재원생 30명·단일 설명회)
 ```
 
-로그인은 역할 선택(`/login`) — 원장·실장·강사.
+로그인은 역할 선택(`/login`).
 
-Neon(Postgres) 연결:
+### Neon(Postgres) 연결 — Vercel 플러그인
+
+1. Vercel 프로젝트 → **Storage → Create Database → Neon** 연동 (`DATABASE_URL` 자동 주입)
+2. 로컬은 Vercel 대시보드(또는 `vercel env pull`)의 `DATABASE_URL`을 `.env.local`에 복사
 
 ```bash
-cp .env.example .env.local   # DATABASE_URL 채우기 (Vercel Neon 플러그인이면 자동 주입)
-pnpm db:generate             # 스키마 → 마이그레이션 SQL
-pnpm db:migrate              # 적용
+cp .env.example .env.local   # DATABASE_URL 채우기
+pnpm db:migrate              # drizzle/ 마이그레이션 적용
+pnpm db:seed                 # v4.0 시드 적재 (인메모리 시드와 동일 데이터셋 — 화면 결과 동일)
 pnpm dev                     # DATABASE_URL 감지 → drizzle 구현으로 전환
 ```
+
+- Vercel 배포는 `vercel-build`(마이그레이션 → 빌드)가 실행된다. 시드는 최초 1회 로컬에서 `pnpm db:seed`.
+- 문자 발송(SOLAPI)·QR 링크 도메인은 `.env.example`의 `SOLAPI_*`·`SMS_*`·`BASE_URL` 참고 — 키가 없으면 발송은 스킵되고 로그만 남는다(기능은 계속 동작). 비프로덕션은 `SMS_RECIPIENT_ALLOWLIST`에 있는 번호로만 발송된다.
 
 품질 게이트: `pnpm typecheck && pnpm lint && pnpm build`
 
