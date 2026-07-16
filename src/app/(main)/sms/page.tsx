@@ -3,7 +3,7 @@ import { SmsView } from "@/views/sms";
 
 export const dynamic = "force-dynamic";
 
-/** 문자 발송 (명세 §5). ⚠️ 실제 게이트웨이 미연동 — 발송은 로그 적재까지 (명세 §12). */
+/** 문자 발송 (명세 §5) — SOLAPI 게이트웨이 실연동 (키 미설정 시 로그 적재만, server/sms/gateway.ts). */
 export default async function SmsPage() {
   await requireModuleAccess("sms");
 
