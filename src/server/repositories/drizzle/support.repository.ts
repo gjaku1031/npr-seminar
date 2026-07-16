@@ -1,20 +1,13 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../db/client";
-import {
-  classes,
-  counselBookings,
-  counselSlots,
-  devices,
-  smsLogs,
-  smsTemplates,
-  surveyResponses,
-  teachers,
-  users,
-} from "../../db/schema";
+import { classes, devices, smsLogs, smsTemplates, surveyResponses, teachers, users } from "../../db/schema";
+import type { Class } from "@/entities/class";
+import type { SmsLog, SmsTemplate } from "@/entities/sms";
+import type { SurveyResponse } from "@/entities/survey";
+import type { Device } from "@/entities/device";
 import type {
   ClassRepository,
-  CounselRepository,
   DeviceRepository,
   SmsRepository,
   SurveyRepository,
@@ -22,18 +15,75 @@ import type {
   UserRepository,
 } from "../support.port";
 
-/** 부가 도메인 drizzle 구현 — 조작이 단순해 한 파일에 모았다 (support.port.ts와 대칭). */
+/** Row→도메인 변환들 — DB 전용 컬럼(createdAt 등)은 도메인으로 새어나가지 않는다 */
+
+type ClassRow = typeof classes.$inferSelect;
+function toClass(row: ClassRow): Class {
+  return {
+    id: row.id,
+    name: row.name,
+    teacherId: row.teacherId,
+    teacherName: row.teacherName,
+    campus: row.campus,
+    unit: row.unit,
+  };
+}
+
+type SurveyRow = typeof surveyResponses.$inferSelect;
+function toSurvey(row: SurveyRow): SurveyResponse {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    campus: row.campus,
+    unit: row.unit,
+    student: row.student,
+    className: row.className,
+    teacherName: row.teacherName,
+    phone: row.phone,
+    rating: row.rating,
+    comment: row.comment,
+    photo: row.photo,
+    photoName: row.photoName ?? undefined,
+    createdAt: row.createdAt,
+  };
+}
+
+type SmsLogRow = typeof smsLogs.$inferSelect;
+function toSmsLog(row: SmsLogRow): SmsLog {
+  return {
+    id: row.id,
+    when: row.when,
+    to: row.to,
+    template: row.template,
+    session: row.session,
+    campus: row.campus,
+    ok: row.ok,
+    fail: row.fail,
+    auto: row.auto,
+  };
+}
+
+type DeviceRow = typeof devices.$inferSelect;
+function toDevice(row: DeviceRow): Device {
+  return {
+    id: row.id,
+    label: row.label,
+    model: row.model,
+    scannerNo: row.scannerNo,
+    on: row.on,
+    battery: row.battery,
+    last: row.last,
+  };
+}
 
 export const drizzleClassRepository: ClassRepository = {
   async list() {
-    return getDb().select().from(classes);
+    const rows = await getDb().select().from(classes);
+    return rows.map(toClass);
   },
   async findById(id) {
     const rows = await getDb().select().from(classes).where(eq(classes.id, id)).limit(1);
-    return rows[0] ?? null;
-  },
-  async listByTeacher(teacherId) {
-    return getDb().select().from(classes).where(eq(classes.teacherId, teacherId));
+    return rows[0] ? toClass(rows[0]) : null;
   },
 };
 
@@ -48,20 +98,10 @@ export const drizzleTeacherRepository: TeacherRepository = {
 };
 
 export const drizzleUserRepository: UserRepository = {
-  async listByRole(role) {
-    const rows = await getDb()
-      .select({ role: users.role, name: users.name, teacherId: users.teacherId })
-      .from(users)
-      .where(and(eq(users.role, role), eq(users.active, true)));
-    return rows;
-  },
-  async findById(id) {
-    const rows = await getDb()
-      .select({ role: users.role, name: users.name, teacherId: users.teacherId })
-      .from(users)
-      .where(eq(users.id, id))
-      .limit(1);
-    return rows[0] ?? null;
+  /** 단일 관리자 (명세 §1.1) — 시드 행이 없어도 기본값을 보장한다 */
+  async getAdmin() {
+    const rows = await getDb().select().from(users).where(eq(users.role, "admin")).limit(1);
+    return rows[0] ? { role: rows[0].role, name: rows[0].name } : { role: "admin", name: "관리자" };
   },
 };
 
@@ -71,7 +111,7 @@ export const drizzleSmsRepository: SmsRepository = {
   },
   async createTemplate(name, body) {
     const rows = await getDb().insert(smsTemplates).values({ name, body }).returning();
-    return rows[0];
+    return rows[0] as SmsTemplate;
   },
   async saveTemplate(id, body) {
     const rows = await getDb()
@@ -80,14 +120,24 @@ export const drizzleSmsRepository: SmsRepository = {
       .where(eq(smsTemplates.id, id))
       .returning();
     if (!rows[0]) throw new Error(`템플릿을 찾을 수 없습니다: ${id}`);
-    return rows[0];
+    return rows[0] as SmsTemplate;
+  },
+  async deleteTemplate(id) {
+    await getDb().delete(smsTemplates).where(eq(smsTemplates.id, id));
+  },
+  async countTemplates() {
+    const [{ count }] = await getDb()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(smsTemplates);
+    return count;
   },
   async listLogs() {
-    return getDb().select().from(smsLogs).orderBy(desc(smsLogs.when));
+    const rows = await getDb().select().from(smsLogs).orderBy(desc(smsLogs.when));
+    return rows.map(toSmsLog);
   },
   async addLog(log) {
     const rows = await getDb().insert(smsLogs).values(log).returning();
-    return rows[0];
+    return toSmsLog(rows[0]);
   },
 };
 
@@ -96,76 +146,23 @@ export const drizzleSurveyRepository: SurveyRepository = {
     const rows = await getDb()
       .select()
       .from(surveyResponses)
-      .where(eq(surveyResponses.sessionId, sessionId));
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.sessionId,
-      rating: r.rating,
-      helpful: r.helpful,
-      again: r.again,
-      comment: r.comment,
-    }));
+      .where(eq(surveyResponses.sessionId, sessionId))
+      .orderBy(desc(surveyResponses.createdAt));
+    return rows.map(toSurvey);
   },
   async create(draft) {
     const rows = await getDb().insert(surveyResponses).values(draft).returning();
-    const r = rows[0];
-    return {
-      id: r.id,
-      sessionId: r.sessionId,
-      rating: r.rating,
-      helpful: r.helpful,
-      again: r.again,
-      comment: r.comment,
-    };
-  },
-};
-
-export const drizzleCounselRepository: CounselRepository = {
-  async listSlots(teacherId) {
-    const q = getDb().select().from(counselSlots);
-    return teacherId ? q.where(eq(counselSlots.teacherId, teacherId)) : q;
-  },
-  async listBookings(teacherId) {
-    const q = getDb().select().from(counselBookings);
-    return teacherId ? q.where(eq(counselBookings.teacherId, teacherId)) : q;
-  },
-  /**
-   * 슬롯 점유 + 신청 생성.
-   * 슬롯 갱신을 `booked=false` 조건부로 걸어 이중 예약을 DB가 거른다 —
-   * neon-http에 대화형 트랜잭션이 없어도 경합에서 한 명만 성공한다 (설계 §8).
-   */
-  async book(draft) {
-    const claimed = await getDb()
-      .update(counselSlots)
-      .set({ booked: true })
-      .where(and(eq(counselSlots.id, draft.slotId), eq(counselSlots.booked, false)))
-      .returning();
-    const slot = claimed[0];
-    if (!slot) throw new Error("이미 예약되었거나 존재하지 않는 상담 슬롯입니다.");
-
-    const rows = await getDb()
-      .insert(counselBookings)
-      .values({
-        slotId: slot.id,
-        teacherId: slot.teacherId,
-        date: slot.date,
-        time: slot.time,
-        name: draft.name,
-        grade: draft.grade,
-        phone: draft.phone,
-        from: draft.from,
-      })
-      .returning();
-    return rows[0];
+    return toSurvey(rows[0]);
   },
 };
 
 export const drizzleDeviceRepository: DeviceRepository = {
   async list() {
-    return getDb().select().from(devices);
+    const rows = await getDb().select().from(devices).orderBy(asc(devices.scannerNo));
+    return rows.map(toDevice);
   },
   async findById(id) {
     const rows = await getDb().select().from(devices).where(eq(devices.id, id)).limit(1);
-    return rows[0] ?? null;
+    return rows[0] ? toDevice(rows[0]) : null;
   },
 };

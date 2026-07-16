@@ -6,7 +6,6 @@ import { drizzleReservationRepository } from "./drizzle/reservation.repository";
 import { drizzleStudentRepository } from "./drizzle/student.repository";
 import {
   drizzleClassRepository,
-  drizzleCounselRepository,
   drizzleDeviceRepository,
   drizzleSmsRepository,
   drizzleSurveyRepository,
@@ -19,7 +18,6 @@ import { memoryReservationRepository } from "./memory/reservation.repository";
 import { memoryStudentRepository } from "./memory/student.repository";
 import {
   memoryClassRepository,
-  memoryCounselRepository,
   memoryDeviceRepository,
   memorySmsRepository,
   memorySurveyRepository,
@@ -32,7 +30,6 @@ import type { ReservationRepository } from "./reservation.port";
 import type { StudentRepository } from "./student.port";
 import type {
   ClassRepository,
-  CounselRepository,
   DeviceRepository,
   SmsRepository,
   SurveyRepository,
@@ -47,6 +44,7 @@ import type {
  *
  * 모든 도메인이 drizzle·memory 두 구현을 갖는다 — memory는 데모용이 아니라
  * "계약만으로 전 기능이 돈다"는 상시 증명이다 (설계 §6.3 · §10).
+ * v4.0: 상담(counsel) 도메인 보류로 제외 — 간담회 확정 시 §10 절차로 재도입.
  */
 const impl = resolveRepoImpl();
 
@@ -76,10 +74,6 @@ export const surveyRepository: SurveyRepository = pick(
   drizzleSurveyRepository,
   memorySurveyRepository,
 );
-export const counselRepository: CounselRepository = pick(
-  drizzleCounselRepository,
-  memoryCounselRepository,
-);
 export const deviceRepository: DeviceRepository = pick(drizzleDeviceRepository, memoryDeviceRepository);
 
 export type { SessionRepository } from "./session.port";
@@ -91,6 +85,5 @@ export type {
   UserRepository,
   SmsRepository,
   SurveyRepository,
-  CounselRepository,
   DeviceRepository,
 } from "./support.port";
