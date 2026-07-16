@@ -1,0 +1,99 @@
+<!-- @dsCard group="Reservation App" viewport="1280x800" name="입시설명회 — 예약 앱" subtitle="홈 → 상세 → 회차/좌석 → 티켓 → 마이페이지 → 관리자, 클릭 스루" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>입시설명회 — 예약</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="data.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="HomeScreen.jsx"></script>
+<script type="text/babel" src="DetailScreen.jsx"></script>
+<script type="text/babel" src="BookingScreen.jsx"></script>
+<script type="text/babel" src="TicketScreen.jsx"></script>
+<script type="text/babel" src="MyPageScreen.jsx"></script>
+<script type="text/babel" src="AdminScreen.jsx"></script>
+<script type="text/babel">
+function App() {
+  const I = window.DSRIcons;
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('dsr-route') || 'null'); } catch (e) { return null; } })();
+  const [route, setRoute] = React.useState(saved || { screen: 'home', params: {} });
+
+  const go = (screen, params = {}) => {
+    const r = { screen, params };
+    setRoute(r);
+    try { localStorage.setItem('dsr-route', JSON.stringify(r)); } catch (e) {}
+    window.scrollTo(0, 0);
+  };
+
+  const nav = [
+    { id: 'home', label: '설명회 탐색' },
+    { id: 'mypage', label: '마이페이지' },
+    { id: 'admin', label: '관리자' },
+  ];
+  const navActive = route.screen === 'admin' ? 'admin' : route.screen === 'mypage' ? 'mypage' : 'home';
+
+  const screens = {
+    home: window.HomeScreen,
+    detail: window.DetailScreen,
+    booking: window.BookingScreen,
+    ticket: window.TicketScreen,
+    mypage: window.MyPageScreen,
+    admin: window.AdminScreen,
+  };
+  const Screen = screens[route.screen] || window.HomeScreen;
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      {/* 헤더 */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 50,
+        background: 'rgba(248,250,252,0.82)', backdropFilter: 'var(--blur-veil)',
+        borderBottom: '1px solid var(--border-hairline)',
+      }}>
+        <div style={{ maxWidth: 'var(--container-max)', margin: '0 auto', padding: '0 var(--container-pad)', height: 64, display: 'flex', alignItems: 'center', gap: 32 }}>
+          <a onClick={() => go('home')} style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer' }}>
+            <span style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--violet-900)', color: 'var(--mint-400)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><I.ticket size={16} /></span>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18, color: 'var(--violet-900)', letterSpacing: '-0.02em' }}>입시설명회</span>
+          </a>
+          <nav style={{ display: 'flex', gap: 4, flex: 1 }}>
+            {nav.map((n) => (
+              <a key={n.id} onClick={() => go(n.id)} style={{
+                padding: '8px 14px', borderRadius: 'var(--radius-pill)', cursor: 'pointer',
+                fontSize: 14, fontWeight: navActive === n.id ? 700 : 500,
+                color: navActive === n.id ? 'var(--violet-900)' : 'var(--text-muted)',
+                background: navActive === n.id ? 'var(--violet-100)' : 'transparent',
+                whiteSpace: 'nowrap',
+                transition: 'all var(--dur-fast) var(--ease-out)',
+              }}>{n.label}</a>
+            ))}
+          </nav>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ position: 'relative', color: 'var(--text-muted)', display: 'inline-flex', cursor: 'pointer' }}>
+              <I.bell size={19} />
+              <span style={{ position: 'absolute', top: -2, right: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--mint-500)', border: '2px solid var(--gray-1)' }}></span>
+            </span>
+            <span style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--mint-100)', color: 'var(--mint-700)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>수</span>
+          </div>
+        </div>
+      </header>
+
+      {/* 화면 — key 리마운트로 페이지 전환 애니메이션 */}
+      <main key={route.screen + JSON.stringify(route.params)} style={{ animation: 'ds-fade-in var(--dur-base) var(--ease-out) both' }}>
+        <Screen go={go} params={route.params} />
+      </main>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

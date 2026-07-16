@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>npr 입시설명회 — 권한별 유저플로우</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  body { background: var(--surface-page); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-3); border-radius: 6px; border: 2.5px solid var(--gray-1); }
+  a { color: var(--violet-800); }
+  a:hover { color: var(--violet-900); }
+  code { color: var(--text-strong); }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="20" fill="#1D4ED8"/>
+    <circle cx="30" cy="32" r="6" fill="#38BDF8"/>
+    <circle cx="30" cy="68" r="6" fill="#F7F8FA"/>
+    <circle cx="70" cy="50" r="6" fill="#F7F8FA"/>
+    <path d="M36 32 H70 M36 68 H70 M64 50 H36" stroke="#93C5FD" stroke-width="2.5" fill="none"/>
+    <path d="M30 38 V62" stroke="#93C5FD" stroke-width="2.5"/>
+  </svg>
+</template>
+<div id="root"></div>
+<script src="flow-data.js"></script>
+<script type="text/babel" src="flow-ui.jsx"></script>
+<script type="text/babel">
+  ReactDOM.createRoot(document.getElementById('root')).render(<window.NPRFlowApp />);
+</script>
+</body>
+</html>

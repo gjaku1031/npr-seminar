@@ -1,0 +1,215 @@
+<!-- @dsCard group="npr 운영 콘솔" viewport="1366x800" name="npr 입시설명회 운영 콘솔" subtitle="단일 관리자 — 카드 런처 허브 + 7모듈: 예약 명단·문자·설명회 운영·간담회(준비 중)·통계·QR 스캐너·모바일 프리뷰" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>npr 입시설명회 — 운영 콘솔</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="data.js"></script>
+<style>
+  .npr-scanline {
+    position: absolute; left: 14px; right: 14px; height: 3px; border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--mint-500), transparent);
+    box-shadow: 0 0 14px rgba(14, 165, 233, 0.7);
+    animation: npr-scan 2.2s var(--ease-in-out) infinite;
+  }
+  @keyframes npr-scan { 0%, 100% { top: 16px; } 50% { top: calc(100% - 18px); } }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-3); border-radius: 6px; border: 2.5px solid var(--gray-1); }
+  #root { position: relative; z-index: 1; }
+  .npr-aurora { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .npr-aurora span { position: absolute; border-radius: 50%; filter: blur(90px); }
+  .npr-aurora .b1 { width: 540px; height: 540px; left: -150px; top: -170px; background: rgba(37,99,235,0.10); animation: ds-blob 16s var(--ease-in-out) infinite; }
+  .npr-aurora .b2 { width: 440px; height: 440px; right: -130px; top: 30%; background: rgba(14,165,233,0.09); animation: ds-blob 20s var(--ease-in-out) 2s infinite; }
+  @media (prefers-reduced-motion: reduce) { .npr-aurora span { animation: none; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="20" fill="#1D4ED8"/>
+    <rect x="30" y="38" width="40" height="10" rx="3" fill="#38BDF8"/>
+    <rect x="30" y="53" width="26" height="9" rx="3" fill="#F7F8FA"/>
+    <text x="50" y="30" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="15" fill="#F7F8FA">npr</text>
+  </svg>
+</template>
+<div class="npr-aurora"><span class="b1"></span><span class="b2"></span></div>
+<div id="root"></div>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="MobileFlow.jsx"></script>
+<script type="text/babel" src="LoginScreen.jsx"></script>
+<script type="text/babel" src="HubScreen.jsx"></script>
+<script type="text/babel" src="StudentsScreen.jsx"></script>
+<script type="text/babel" src="SmsScreen.jsx"></script>
+<script type="text/babel" src="SessionsScreen.jsx"></script>
+<script type="text/babel" src="CounselScreen.jsx"></script>
+<script type="text/babel" src="StatsScreen.jsx"></script>
+<script type="text/babel" src="ScannerScreen.jsx"></script>
+<script type="text/babel" src="PreviewScreen.jsx"></script>
+<script type="text/babel">
+function App() {
+  const I = window.NPRIcons;
+  const D = window.NPR_DATA;
+  const { TopNav } = window.DesignSystem_179b2a;
+  const [students, setStudents] = React.useState(D.students);
+  const [sessions, setSessions] = React.useState(D.sessions);
+  const [reservations, setReservations] = React.useState(D.reservations);
+  const [smsTemplates, setSmsTemplates] = React.useState(D.smsTemplates);
+  const [smsLogs, setSmsLogs] = React.useState(D.smsLogs);
+  const [surveyResponses, setSurveyResponses] = React.useState(D.surveyResponses);
+  const counter = React.useRef(1000);
+
+  /* "07/16(수) 14:03:22" */
+  const fmtNow = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); const w = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()]; return `${p(d.getMonth() + 1)}/${p(d.getDate())}(${w}) ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+
+  const store = {
+    students, sessions, reservations, smsTemplates, smsLogs, surveyResponses,
+    teachers: D.teachers, classes: D.classes, devices: D.devices,
+    CAMPUSES: D.CAMPUSES, UNIT_TABS: D.UNIT_TABS, unitOf: D.unitOf, unitMatchesTab: D.unitMatchesTab, fmtNow,
+    /* 예약 명단 드랍다운 — '-' | 예약 (모)/(부)/(모,부) | 수동 예약 | 예약취소 */
+    setRosterReservation: (st, sessionId, opt) => {
+      const now = fmtNow();
+      setReservations((p) => {
+        const ex = p.find((r) => r.sessionId === sessionId && r.studentId === st.id);
+        if (opt === '-') return ex ? p.filter((r) => r !== ex) : p;
+        if (opt === '예약취소') return ex ? p.map((r) => r === ex ? { ...r, status: 'cancelled', logs: (r.logs || []).concat({ label: '수동 예약 취소', at: now }) } : r) : p;
+        const by = opt === '예약 (모)' ? '모' : opt === '예약 (부)' ? '부' : opt === '예약 (모,부)' ? '모,부' : '';
+        const source = '수동';
+        const label = '수동 예약'; /* 관리자 조작은 항상 수동 로그 — 웹앱 로그는 학부모 예약에서만 */
+        if (ex) return p.map((r) => r === ex ? { ...r, status: r.status === 'entered' ? 'entered' : 'reserved', reservedBy: by, source, channel: 'manual', logs: (r.logs || []).concat({ label, at: now }) } : r);
+        const id = 'r' + (counter.current++);
+        return [{ id, code: `NPR-${sessionId.toUpperCase()}-${String(counter.current).padStart(4, '0')}`, sessionId, studentId: st.id, name: st.name, school: st.school, grade: st.grade, className: st.className, teacherName: st.teacherName, campus: st.campus, unit: st.unit, phone: st.motherPhone, channel: 'manual', status: 'reserved', reservedBy: by, source, attendCount: 1, member: true, time: now, scannerNo: null, enteredAt: null, logs: [{ label, at: now }] }, ...p];
+      });
+    },
+    /* 수동 추가(비재원생) — 반명 '비재원생', 담임 공란, 경로 전화/선생님/현장 예약 */
+    addGuest: (g, sessionId, via) => {
+      const now = fmtNow();
+      const id = 'r' + (counter.current++);
+      const rec = { id, code: `NPR-${sessionId.toUpperCase()}-${String(counter.current).padStart(4, '0')}`, sessionId, studentId: null, name: g.name, school: g.school, grade: g.grade, className: '비재원생', teacherName: '', campus: g.campus, unit: '', phone: g.phone, channel: 'manual', status: 'reserved', reservedBy: g.reservedBy || '', source: via, attendCount: 1, member: false, time: now, scannerNo: null, enteredAt: null, logs: [{ label: '수동 예약', at: now }] };
+      setReservations((p) => [rec, ...p]);
+      return rec;
+    },
+    addReservation: (r) => {
+      const now = fmtNow();
+      const id = 'r' + (counter.current++);
+      const rec = { logs: [{ label: r.channel === 'mobile' ? '웹앱 예약' : '수동 예약', at: now }], scannerNo: null, enteredAt: null, source: r.channel === 'mobile' ? '웹앱' : '수동', reservedBy: r.reservedBy || '', ...r, id, code: `NPR-${r.sessionId.toUpperCase()}-${String(counter.current).padStart(4, '0')}`, status: 'reserved', time: now };
+      setReservations((p) => [rec, ...p]);
+      return rec;
+    },
+    /* 가족(형제) 예약 — 모바일. matchedBy: '모'|'부' */
+    addReservationGroup: (base, picks, attendCount, matchedBy) => {
+      const now = fmtNow();
+      const gid = picks.length > 1 ? 'grp' + (counter.current++) : null;
+      const recs = picks.map((st) => {
+        const id = 'r' + (counter.current++);
+        return { id, code: `NPR-${base.sessionId.toUpperCase()}-${String(counter.current).padStart(4, '0')}`, sessionId: base.sessionId, studentId: st.id, name: st.name, school: st.school, grade: st.grade, className: st.className, teacherName: st.teacherName, campus: st.campus, unit: st.unit, phone: matchedBy === '부' ? st.fatherPhone : st.motherPhone, channel: 'mobile', member: true, attendCount, status: 'reserved', reservedBy: matchedBy || '모', source: '웹앱', time: now, groupId: gid, scannerNo: null, enteredAt: null, logs: [{ label: '웹앱 예약', at: now }] };
+      });
+      setReservations((p) => [...recs, ...p]);
+      return recs;
+    },
+    cancelReservation: (id, by) => { const now = fmtNow(); setReservations((p) => p.map((r) => r.id === id ? { ...r, status: 'cancelled', cancelledBy: by || 'staff', logs: (r.logs || []).concat({ label: by === 'parent' ? '웹앱 예약 취소' : '수동 예약 취소', at: now }) } : r)); },
+    checkIn: (id, scannerNo) => { const now = fmtNow(); setReservations((p) => p.map((r) => r.id === id ? { ...r, status: 'entered', scannerNo: scannerNo || 1, enteredAt: now } : r)); },
+    moveReservation: (id, toSessionId) => setReservations((p) => p.map((r) => r.id === id ? { ...r, sessionId: toSessionId, history: (r.history || []).concat({ from: r.sessionId, to: toSessionId, when: '방금' }) } : r)),
+    reissueCode: (id) => setReservations((p) => p.map((r) => { if (r.id !== id) return r; const codeHistory = (r.codeHistory || []).concat(r.code); const base = r.code.replace(/-R\d+$/, ''); return { ...r, code: `${base}-R${codeHistory.length}`, codeHistory }; })),
+    rollbackEntry: (id, reason) => setReservations((p) => p.map((r) => r.id === id ? { ...r, status: 'reserved', scannerNo: null, enteredAt: null, audit: (r.audit || []).concat({ action: '입장 취소', reason, when: '방금' }) } : r)),
+    /* 설명회 종료 — 미체크 → no_show (내부 로직·통계용, 명단 열에는 미표기) */
+    endSession: (id) => {
+      setReservations((p) => p.map((r) => r.sessionId === id && r.status === 'reserved' ? { ...r, status: 'no_show' } : r));
+      setSessions((p) => p.map((s) => s.id === id ? { ...s, ended: true } : s));
+    },
+    addSession: (s) => { const rec = { surveySms: '[npr] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기·사진 남기기: {설문링크}', ...s, id: 'ss' + (counter.current++), active: true }; setSessions((p) => [...p, rec]); return rec; },
+    deleteSession: (id) => { setSessions((p) => p.filter((s) => s.id !== id)); setReservations((p) => p.filter((r) => r.sessionId !== id)); },
+    updateSurveySms: (id, text) => setSessions((p) => p.map((s) => s.id === id ? { ...s, surveySms: text } : s)),
+    addSurveyResponse: (resp) => { const rec = { ...resp, id: 'sv' + (counter.current++) }; setSurveyResponses((p) => [rec, ...p]); return rec; },
+    saveTemplate: (id, body) => setSmsTemplates((p) => p.map((t) => t.id === id ? { ...t, body } : t)),
+    addTemplate: (name, body) => { const t = { id: 'tp' + (counter.current++), name, body }; setSmsTemplates((p) => [...p, t]); return t; },
+    deleteTemplate: (id) => setSmsTemplates((p) => p.filter((t) => t.id !== id)),
+    addSmsLog: (l) => setSmsLogs((p) => [{ ...l, id: 'l' + (counter.current++), when: fmtNow() }, ...p]),
+  };
+
+  /* 로그인 — 단일 관리자 (qr-poc식) */
+  const savedUser = (() => { try { const u = JSON.parse(localStorage.getItem('npr-user') || 'null'); return u && u.role === 'admin' ? u : null; } catch (e) { return null; } })();
+  const [user, setUser] = React.useState(savedUser);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const login = (u) => { setUser(u); try { localStorage.setItem('npr-user', JSON.stringify(u)); } catch (e) {} };
+  const logout = () => { setUser(null); setMenuOpen(false); try { localStorage.removeItem('npr-user'); } catch (e) {} };
+  store.user = user;
+
+  const saved = (() => { try { return localStorage.getItem('npr-route'); } catch (e) { return null; } })();
+  const [route, setRoute] = React.useState(saved || 'hub');
+  const go = (r) => { setRoute(r); try { localStorage.setItem('npr-route', r); } catch (e) {} window.scrollTo(0, 0); };
+
+  const menu = [
+    { label: '예약 명단', value: 'students' },
+    { label: '문자 발송', value: 'sms' },
+    { label: '설명회 운영', value: 'sessions' },
+    { label: '간담회 예약', value: 'counsel' },
+    { label: '통계', value: 'stats' },
+    { label: 'QR 스캐너', value: 'scanner' },
+    { label: '모바일 프리뷰', value: 'preview' },
+  ];
+  const screens = { students: window.StudentsScreen, sms: window.SmsScreen, sessions: window.SessionsScreen, counsel: window.CounselScreen, stats: window.StatsScreen, scanner: window.ScannerScreen, preview: window.PreviewScreen };
+
+  const rightSlot = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+      <span style={{ position: 'relative', color: 'var(--text-muted)', display: 'inline-flex', cursor: 'pointer' }}>
+        <I.bell size={19} />
+        <span style={{ position: 'absolute', top: -2, right: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--mint-500)', border: '2px solid var(--gray-1)' }}></span>
+      </span>
+      <div style={{ position: 'relative' }}>
+        <span onClick={() => setMenuOpen((o) => !o)} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--mint-100)', color: 'var(--mint-700)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', border: menuOpen ? '2px solid var(--violet-800)' : '2px solid transparent', transition: 'border var(--dur-fast) var(--ease-out)' }}>관</span>
+        {menuOpen && (
+          <React.Fragment>
+            <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }}></div>
+            <div style={{ position: 'absolute', top: 42, right: 0, width: 208, background: 'var(--surface-card)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-float)', border: '1px solid var(--border-hairline)', overflow: 'hidden', zIndex: 91, animation: 'ds-fade-up var(--dur-fast) var(--ease-out) both' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-hairline)' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-strong)' }}>관리자</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--mint-500)' }}></span>전체 권한</div>
+              </div>
+              <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13.5, color: 'var(--status-danger)', fontFamily: 'var(--font-body)', textAlign: 'left', fontWeight: 600 }}><I.logOut size={15} /> 로그아웃</button>
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+
+  if (!user) return <window.LoginScreen onLogin={login} />;
+
+  if (route === 'hub') {
+    return (
+      <div style={{ minHeight: '100vh' }}>
+        <header style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 28, height: 28, borderRadius: 9, background: 'var(--violet-800)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 11 }}>npr</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 16.5, color: 'var(--violet-900)', letterSpacing: '-0.02em' }}>입시설명회</span>
+          </span>
+          {rightSlot}
+        </header>
+        <main key="hub" style={{ animation: 'ds-fade-in var(--dur-base) var(--ease-out) both' }}>
+          <window.HubScreen store={store} go={go} />
+        </main>
+      </div>
+    );
+  }
+
+  const Screen = screens[route] || window.HubScreen;
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      <TopNav brand="입시설명회" brandBadge="npr" items={menu} value={route} onChange={go} onBrandClick={() => go('hub')} right={rightSlot} />
+      <main key={route} style={{ maxWidth: 'var(--container-max)', margin: '0 auto', padding: '28px var(--container-pad) 60px', animation: 'ds-fade-in var(--dur-base) var(--ease-out) both' }}>
+        <Screen store={store} go={go} />
+      </main>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

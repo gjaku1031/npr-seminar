@@ -1,0 +1,82 @@
+/* 입시설명회 — color tokens
+   쿨 & 프로페셔널 (라이트): 화이트/쿨그레이 표면, 네이비 잉크, 프로 블루 + 스카이 포인트
+   주의: 토큰명 violet-N, mint-N은 리네임 이력 잔재 — 실제 값은 블루, 스카이 (다음 정리 때 blue-N, sky-N으로 복원 예정) */
+
+:root {
+  /* ── Base: Gray (cool surfaces) ──────────────── */
+  --gray-0: #FFFFFF;
+  --gray-1: #F7F8FA;
+  --gray-2: #EFF1F5;
+  --gray-3: #E2E6EC;
+
+  /* ── Base: Violet→Blue (primary) ─────────────── */
+  --violet-950: #0F1B33;
+  --violet-900: #1B3FA8;
+  --violet-800: #1D4ED8;
+  --violet-700: #2563EB;
+  --violet-600: #3B82F6;
+  --violet-500: #60A5FA;
+  --violet-200: #BFDBFE;
+  --violet-100: #DBEAFE;
+  --violet-50:  #EFF5FF;
+
+  /* ── Base: Mint→Sky (accent) ─────────────────── */
+  --mint-700: #0369A1;
+  --mint-600: #0284C7;
+  --mint-500: #0EA5E9;
+  --mint-400: #38BDF8;
+  --mint-200: #BAE6FD;
+  --mint-100: #E0F2FE;
+  --mint-50:  #F0F9FF;
+
+  /* ── Base: Ink neutrals (slate) ──────────────── */
+  --ink-900: #0F172A;
+  --ink-700: #334155;
+  --ink-500: #64748B;
+  --ink-400: #94A3B8;
+  --ink-300: #CBD5E1;
+  --ink-200: #E2E8F0;
+
+  /* ── Semantic: text ──────────────────────────── */
+  --text-strong: var(--ink-900);
+  --text-body: var(--ink-700);
+  --text-muted: var(--ink-500);
+  --text-faint: var(--ink-400);
+  --text-on-brand: #F8FAFC;
+  --text-on-accent: #082F49;
+  --text-brand: var(--violet-800);
+  --text-accent: var(--mint-600);
+
+  /* ── Semantic: surface ───────────────────────── */
+  --surface-page: var(--gray-1);
+  --surface-card: var(--gray-0);
+  --surface-sunken: var(--gray-2);
+  --surface-brand: #101828;
+  --surface-brand-soft: var(--violet-50);
+  --surface-accent-soft: var(--mint-50);
+  --surface-scrim: rgba(15, 23, 42, 0.46);
+
+  /* ── Semantic: border ────────────────────────── */
+  --border-hairline: rgba(15, 23, 42, 0.09);
+  --border-soft: rgba(15, 23, 42, 0.15);
+  --border-strong: rgba(15, 23, 42, 0.30);
+  --border-brand: var(--violet-800);
+  --border-accent: var(--mint-500);
+
+  /* ── Semantic: status ────────────────────────── */
+  --status-success: #0E9F6E;
+  --status-success-soft: #E2F5EE;
+  --status-warning: #D97706;
+  --status-warning-soft: #FBEFDA;
+  --status-danger: #DC2626;
+  --status-danger-soft: #FBE7E7;
+  --status-info: #0284C7;
+  --status-info-soft: #E3F1FA;
+
+  /* ── Interaction ─────────────────────────────── */
+  --interactive-primary: var(--violet-800);
+  --interactive-primary-hover: #1A45C2;
+  --interactive-primary-active: #16389E;
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.30);
+  --selection-bg: var(--violet-100);
+}

@@ -1,0 +1,61 @@
+<!-- @dsCard group="Components" viewport="700x300" name="Core" subtitle="Button · IconButton · Badge · Tag · Card" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body style="margin: 0; padding: 18px 20px;">
+<div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Badge, Tag, Card } = window.DesignSystem_179b2a;
+
+const shareIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"></path></svg>;
+const heartIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3.4 1-4.5 2.5C10.9 4 9.3 3 7.5 3A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"></path></svg>;
+const arrowIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"></path></svg>;
+
+function Demo() {
+  const [sel, setSel] = React.useState('수시');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Button variant="primary">예약하기</Button>
+        <Button variant="accent" iconRight={arrowIcon}>바로 신청</Button>
+        <Button variant="secondary">자세히 보기</Button>
+        <Button variant="ghost">취소</Button>
+        <Button variant="primary" disabled>마감</Button>
+        <Button variant="primary" size="sm">sm</Button>
+        <Button variant="primary" size="lg">lg 예약하기</Button>
+        <IconButton variant="outline" label="공유">{shareIcon}</IconButton>
+        <IconButton variant="ghost" label="찜">{heartIcon}</IconButton>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Badge tone="success" dot>예약 확정</Badge>
+        <Badge tone="warning" dot>마감 임박</Badge>
+        <Badge tone="accent">잔여 12석</Badge>
+        <Badge tone="danger">마감</Badge>
+        <Badge tone="info">온라인 병행</Badge>
+        <Badge tone="neutral">지난 설명회</Badge>
+        <Badge tone="solid">NEW</Badge>
+        <span style={{ width: 10 }}></span>
+        {['수시', '정시', '논술'].map((t) => (
+          <Tag key={t} selected={sel === t} onClick={() => setSel(t)}>{t}</Tag>
+        ))}
+        <Tag count={24} onClick={() => {}}>서울</Tag>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <Card interactive padding="16px"><b style={{ color: 'var(--text-strong)', fontSize: 13.5 }}>elevated · interactive</b><div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>hover 시 리프트</div></Card>
+        <Card variant="brand" padding="16px"><b style={{ fontSize: 13.5 }}>brand</b><div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>딥 잉크 강조 표면</div></Card>
+        <Card variant="accent" padding="16px"><b style={{ color: 'var(--mint-700)', fontSize: 13.5 }}>accent</b><div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>바이올렛 틴트 표면</div></Card>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

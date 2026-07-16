@@ -1,0 +1,256 @@
+/* npr 유저플로우 데이터 — v3.3 (2026-07-16 · 단일 관리자 + 학부모) · E2E/디버깅용
+   노드: { id, type, title, note?, state?, sms?, gate?, branches?:[{cond, nodes:[]}] }
+   type: start | screen | action | decision | state | sms | gate | end
+   ID 규칙: <PERSONA>-<FLOW>-<STEP> (예: ADMIN-F4-04)
+   ※ flows.json은 이 파일의 내보내기 사본 — 수정은 여기서 하고 flows.json + features/*.feature 재생성 */
+(function () {
+  const ADMIN_FLOWS = [
+    {
+      id: 'ADMIN-F1', name: '로그인 & 라우팅',
+      nodes: [
+        { id: 'ADMIN-F1-01', type: 'start', title: '콘솔 접속 (index.html)' },
+        { id: 'ADMIN-F1-02', type: 'screen', title: '로그인 화면 — 단일 관리자', note: '역할 선택 없음(qr-poc식). 학부모·학생은 로그인 없이 mobile.html만 이용.' },
+        { id: 'ADMIN-F1-03', type: 'state', title: '입장하기 → 로그인 저장', state: 'npr-user = admin' },
+        { id: 'ADMIN-F1-04', type: 'screen', title: '허브 (카드 런처 7장)', note: '예약 명단·문자·설명회 운영·간담회(준비 중)·통계·QR 스캐너·프리뷰. 라우트는 npr-route 저장.' },
+        { id: 'ADMIN-F1-05', type: 'action', title: '아바타 메뉴 → 로그아웃', state: 'npr-user 삭제' },
+        { id: 'ADMIN-F1-06', type: 'end', title: '로그인 화면 복귀' },
+      ],
+    },
+    {
+      id: 'ADMIN-F2', name: '예약 명단', desc: '설명회별 재원생 전체 + 비재원생 · 11열',
+      nodes: [
+        { id: 'ADMIN-F2-01', type: 'screen', title: '예약 명단 진입', note: '열 11개(가운데 정렬): No·학번·학생이름·반명·학교·학년·담임명·연락처(모/부)·예약·입장·로그.' },
+        { id: 'ADMIN-F2-02', type: 'action', title: '범위 선택', note: '상단 설명회 Select(한 줄 360px) + 우측 캠퍼스 탭(전체/A/B/C · 기본 A).' },
+        { id: 'ADMIN-F2-03', type: 'action', title: '필터', note: '검색(이름·학교·연락처) · 단위 탭(전체·초등·중1·중2·중3·특목·고등·과학·비재원생, 특목=예중1·예고1 포함) · 담임 Select.' },
+        { id: 'ADMIN-F2-04', type: 'decision', title: '예약 드랍다운 변경 (재원생 행)', note: '옵션: \'-\' / 예약(모) / 예약(부) / 예약(모,부) / 수동 예약 / 예약취소', branches: [
+          { cond: '예약(모/부/모,부)', nodes: [
+            { id: 'ADMIN-F2-05', type: 'state', title: '참석 학부모 지정 (관리자 조작)', state: '→ reserved · reservedBy=모/부/모,부 · logs+=[수동 예약 시각]' },
+          ] },
+          { cond: '수동 예약', nodes: [
+            { id: 'ADMIN-F2-06', type: 'state', title: '수동 예약으로 기록', state: '→ reserved · logs+=[수동 예약 시각]' },
+          ] },
+          { cond: '예약취소', nodes: [
+            { id: 'ADMIN-F2-07', type: 'state', title: '관리자 취소', state: '→ cancelled · logs+=[수동 예약 취소 시각]' },
+          ] },
+          { cond: '\'-\'', nodes: [
+            { id: 'ADMIN-F2-08', type: 'state', title: '예약 제거', state: 'Reservation 삭제' },
+          ] },
+        ] },
+        { id: 'ADMIN-F2-09', type: 'action', title: '입장·로그 열 확인', note: '입장: \'스캐너 #N ↵ 시각\' 2줄 / 대기 / —. 로그: 최근 이력 2줄(라벨↵시각) + hover 시 전체 이력 툴팁(웹앱 예약·수동 예약·웹앱 예약 취소·수동 예약 취소).' },
+        { id: 'ADMIN-F2-10', type: 'decision', title: '수동 추가 (비재원생)', note: '이름*·연락처*·학교·학년·캠퍼스 + 참석 학부모(모/부 복수 탭) + 예약 경로(전화예약/선생님 예약/현장 예약).', branches: [
+          { cond: '이름·연락처 입력 + 경로 선택', nodes: [
+            { id: 'ADMIN-F2-11', type: 'state', title: '명단 추가', state: '+Reservation(member=false) · 반명=비재원생 · 담임 공란 · reservedBy=모/부 · source=선택 경로 · logs+=[수동 예약 시각]' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'ADMIN-F3', name: '문자 발송',
+      nodes: [
+        { id: 'ADMIN-F3-01', type: 'screen', title: '문자 발송 진입' },
+        { id: 'ADMIN-F3-02', type: 'action', title: '템플릿 선택/생성/저장 + 변수 칩', note: '{학생명}{설명회명}{일시}{장소}{QR링크}{문의전화} · byte 카운터(>90 LMS). {문의전화}는 캠퍼스별 치환.' },
+        { id: 'ADMIN-F3-03', type: 'action', title: '대상 선택', note: '설명회 × 그룹(예약자 전체/미체크만/입장 완료/취소자) × 캠퍼스(A/B/C — 전체 없음). 선택 캠퍼스의 발신번호·문의전화 표시(CAMPUS_INFO).' },
+        { id: 'ADMIN-F3-04', type: 'decision', title: '발송 가능?', note: '대상 0명·빈 본문이면 비활성.', branches: [
+          { cond: '가능', nodes: [
+            { id: 'ADMIN-F3-05', type: 'state', title: '발송 → 로그(캠퍼스 포함)', sms: '선택 템플릿 · 그룹 · 캠퍼스' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'ADMIN-F4', name: '설명회 운영 & 만족도 설문',
+      nodes: [
+        { id: 'ADMIN-F4-01', type: 'screen', title: '설명회 운영 진입 + 좌측 목록 선택', note: '사이드바 드래그 리사이즈(190~460px) · 새 설명회 버튼 우상단 고정.' },
+        { id: 'ADMIN-F4-02', type: 'action', title: '새 설명회 생성', note: '명*·날짜*·회차·정원·장소* + 설명 + 참석 인원 토글 + 페이지 꾸미기(배너 테마·안내문) → 모바일 즉시 노출. 시작 시간 입력 없음(생성 시 10:00 고정).', state: '+Session' },
+        { id: 'ADMIN-F4-03', type: 'screen', title: '현황 — 스탯 4장', note: '총예약/입장/미체크/취소 + 예약률%.' },
+        { id: 'ADMIN-F4-04', type: 'action', title: '설문 문자 내용 편집', note: 'Session.surveySms — 변수 {학생명}{설명회명}{설문링크}.', state: 'surveySms 갱신' },
+        { id: 'ADMIN-F4-05', type: 'decision', title: '설문 보내기 (입장>0)', branches: [
+          { cond: '발송', nodes: [
+            { id: 'ADMIN-F4-06', type: 'sms', title: '참석 학부모에게 설문 URL 발송', sms: '만족도 설문 요청 (별점·후기·사진 수집 URL)' },
+          ] },
+        ] },
+        { id: 'ADMIN-F4-07', type: 'screen', title: '만족도 설문 결과 테이블', note: '캠퍼스·단위명·학생명·반명·담임명·학부모HP·별점·후기·사진첨부 + 평균·응답률. 후기 hover 툴팁 · 사진=파일명 링크(목업) · 엑셀 저장(목업).' },
+        { id: 'ADMIN-F4-08', type: 'decision', title: '설명회 종료', branches: [
+          { cond: '종료 처리', nodes: [
+            { id: 'ADMIN-F4-09', type: 'state', title: '미체크 내부 노쇼 집계', state: 'reserved → no_show (명단 미표기 · 통계용)' },
+          ] },
+        ] },
+        { id: 'ADMIN-F4-10', type: 'decision', title: '설명회 삭제', branches: [
+          { cond: '삭제 확인', nodes: [
+            { id: 'ADMIN-F4-11', type: 'state', title: '세션 + 연동 예약 제거', state: '-Session · -Reservation', sms: '취소 안내' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'ADMIN-F5', name: '간담회 예약 (미구현)',
+      nodes: [
+        { id: 'ADMIN-F5-01', type: 'screen', title: '간담회 예약 — 준비 중 placeholder', note: '구 상담 예약에서 개명. 기능 미구현, 요구사항 확정 후 구현.' },
+        { id: 'ADMIN-F5-02', type: 'end', title: '기능 없음 (E2E 대상 아님)' },
+      ],
+    },
+    {
+      id: 'ADMIN-F6', name: '통계',
+      nodes: [
+        { id: 'ADMIN-F6-01', type: 'screen', title: '통계 진입' },
+        { id: 'ADMIN-F6-02', type: 'action', title: '범위 선택', note: '우상단 설명회 드랍다운 + 캠퍼스 필터(전체/A/B/C).' },
+        { id: 'ADMIN-F6-03', type: 'action', title: '지표 카드', note: '총 예약 · 입장 완료 · 참석률 · 노쇼율(내부).' },
+        { id: 'ADMIN-F6-04', type: 'action', title: '채널별 예약 도넛', note: '모바일(웹앱) / 수동 — 2종만.' },
+        { id: 'ADMIN-F6-05', type: 'action', title: '단위별 예약률·참석률', note: '전체 + 초등·중1·중2·중3·특목·고등·과학. 예약률=예약/단위 인원, 참석률=참석/예약.' },
+      ],
+    },
+    {
+      id: 'ADMIN-F7', name: 'QR 스캐너',
+      nodes: [
+        { id: 'ADMIN-F7-01', type: 'screen', title: '기기 모니터링 (스캐너 #1~#4)', note: '캠퍼스 입구별 · ON/OFF · 배터리 경고(40%↓).' },
+        { id: 'ADMIN-F7-02', type: 'decision', title: '기기 선택', branches: [
+          { cond: 'ON — 이 기기로 스캔', nodes: [
+            { id: 'ADMIN-F7-03', type: 'screen', title: '전체화면 스캐너' },
+          ] },
+          { cond: 'OFF — 연결하기', nodes: [
+            { id: 'ADMIN-F7-04', type: 'screen', title: '카메라 권한(허용/거부)' },
+          ] },
+        ] },
+        { id: 'ADMIN-F7-05', type: 'decision', title: 'QR 인식 (데모)', branches: [
+          { cond: '인식 성공', nodes: [
+            { id: 'ADMIN-F7-06', type: 'state', title: '입장 처리 + \'○○ 학부모님 입장 확인되셨습니다\' 팝업 2초', state: 'reserved → entered · scannerNo·enteredAt', sms: '입장 완료 안내' },
+          ] },
+        ] },
+        { id: 'ADMIN-F7-07', type: 'decision', title: '현장 입장 (연락처 뒤 4자리 · 모/부 모두 매칭)', branches: [
+          { cond: '기존 예약 있음', nodes: [
+            { id: 'ADMIN-F7-08', type: 'state', title: '체크인', state: '→ entered · scannerNo 기록' },
+          ] },
+          { cond: '재원생·무예약', nodes: [
+            { id: 'ADMIN-F7-09', type: 'state', title: '즉석 예약 + 체크인', state: '+Reservation(수동) → entered' },
+          ] },
+          { cond: '비재원생', nodes: [
+            { id: 'ADMIN-F7-10', type: 'action', title: '예약 명단 → 비재원생 추가 안내' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'ADMIN-F8', name: '모바일 프리뷰',
+      nodes: [
+        { id: 'ADMIN-F8-01', type: 'screen', title: '폰 프레임 안 MobileFlow 구동', note: '테스트 전용 · 실제 문자 미발송.' },
+        { id: 'ADMIN-F8-02', type: 'state', title: '프리뷰 예약·설문이 store 즉시 반영', note: '예약 명단·설문 결과에서 확인 가능.' },
+      ],
+    },
+  ];
+
+  const PARENT_FLOWS = [
+    {
+      id: 'PARENT-P1', name: '설명회 선택', desc: '모바일 · 로그인 없음',
+      nodes: [
+        { id: 'PARENT-P1-01', type: 'start', title: 'mobile.html 접속 (로그인 없음)' },
+        { id: 'PARENT-P1-02', type: 'screen', title: '캠퍼스 선택 (STEP 1)', note: 'A/B/C 카드 — 선택 캠퍼스 설명회만 노출(campus=전체 포함).' },
+        { id: 'PARENT-P1-03', type: 'screen', title: '설명회 목록 (STEP 2)', note: '제목·일시·장소 + 안내문 배지. 잔여석 UI 없음.' },
+        { id: 'PARENT-P1-04', type: 'decision', title: '마감 여부', branches: [
+          { cond: '마감', nodes: [
+            { id: 'PARENT-P1-05', type: 'end', title: '카드 비활성 (마감 배지)' },
+          ] },
+          { cond: '예약 가능', nodes: [
+            { id: 'PARENT-P1-06', type: 'screen', title: '→ 재원생 예약 (P2)' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'PARENT-P2', name: '재원생 예약 (모/부 매칭 · 가족)',
+      nodes: [
+        { id: 'PARENT-P2-01', type: 'screen', title: '재원생 예약 화면', note: '설명회 정보 + 안내문 콜아웃.' },
+        { id: 'PARENT-P2-02', type: 'action', title: '학부모 연락처 조회', note: '모/부 연락처 모두 매칭.' },
+        { id: 'PARENT-P2-03', type: 'decision', title: '일치 학생?', branches: [
+          { cond: '불일치', nodes: [
+            { id: 'PARENT-P2-04', type: 'screen', title: '에러 → 비재원생 예약 유도 (P3)' },
+          ] },
+          { cond: '일치', nodes: [
+            { id: 'PARENT-P2-05', type: 'action', title: '자녀 다중 체크(가족) + 참석 학부모(모/부 복수 선택)', note: '이미 예약된 자녀는 \'이미 예약됨\' 배지 + 선택 불가(중복 예약 방지). 참석 학부모 칩은 참석 인원 수집 설명회에서만 — 미수집 시 reservedBy=매칭된 모/부.' },
+            { id: 'PARENT-P2-06', type: 'state', title: '예약 확정', state: '+Reservation(들) · reservedBy=모/부/모,부(선택) · logs+=[웹앱 예약] · 가족이면 groupId', sms: '자녀별 예약 확정 + QR' },
+            { id: 'PARENT-P2-07', type: 'screen', title: '예약 완료 티켓', note: '\'예약 학생명\' 표기 · 가족 목록 · 예약변경/취소 + URL 공유(링크 복사) 버튼 · 예약번호·캘린더 UI 없음.' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'PARENT-P3', name: '비재원생 예약',
+      nodes: [
+        { id: 'PARENT-P3-01', type: 'screen', title: '폼: 이름*·학교·학년·연락처* + 참석 학부모(모/부 복수)', note: '참석 학부모 칩은 참석 인원 수집 설명회에서만.' },
+        { id: 'PARENT-P3-02', type: 'decision', title: '동일 연락처 중복?', note: '같은 설명회에 동일 연락처의 비재원 유효 예약이 있으면 차단.', branches: [
+          { cond: '중복', nodes: [
+            { id: 'PARENT-P3-03', type: 'end', title: '\'이미 예약된 연락처\' 차단 안내' },
+          ] },
+          { cond: '신규', nodes: [
+            { id: 'PARENT-P3-04', type: 'state', title: '예약 생성', state: '+Reservation(member=false · 반명=비재원생 · reservedBy=선택) · logs+=[웹앱 예약]', sms: '예약 확정 + QR' },
+            { id: 'PARENT-P3-05', type: 'end', title: '콘솔 예약 명단에 비재원생 행으로 노출' },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'PARENT-P4', name: '예약 조회 · 변경 · 취소',
+      nodes: [
+        { id: 'PARENT-P4-01', type: 'screen', title: '예약 조회 (연락처만)', note: '예약 완료 화면의 예약변경/취소 버튼 또는 목록 링크로 진입. 조회 시 예약 내역 목록 표시 → 선택.' },
+        { id: 'PARENT-P4-02', type: 'decision', title: '일치?', branches: [
+          { cond: '불일치', nodes: [
+            { id: 'PARENT-P4-03', type: 'screen', title: '에러 안내' },
+          ] },
+          { cond: '일치', nodes: [
+            { id: 'PARENT-P4-04', type: 'screen', title: '내 예약 티켓' },
+            { id: 'PARENT-P4-05', type: 'decision', title: '관리 선택', branches: [
+              { cond: '예약 변경', nodes: [
+                { id: 'PARENT-P4-06', type: 'state', title: '회차 이동 (QR 유지)', note: '단일 회차 운영 시에도 코드 유지 — 이동할 회차 없으면 빈 목록 안내.', state: 'sessionId 이동 · history[]', sms: '변경 확정' },
+              ] },
+              { cond: '예약 취소', nodes: [
+                { id: 'PARENT-P4-07', type: 'state', title: '학부모 취소', state: '→ cancelled · logs+=[웹앱 예약 취소 시각]', sms: '취소 확인' },
+              ] },
+            ] },
+          ] },
+        ] },
+      ],
+    },
+    {
+      id: 'PARENT-P5', name: '만족도 설문 (별점·후기·사진)',
+      nodes: [
+        { id: 'PARENT-P5-01', type: 'start', title: '설문 문자 URL 진입 (또는 목록 하단 링크)' },
+        { id: 'PARENT-P5-02', type: 'action', title: '별점(1~5) + 후기(주관식) + 사진 첨부(선택)' },
+        { id: 'PARENT-P5-03', type: 'decision', title: '제출 가능?', note: '별점 미선택 시 비활성.', branches: [
+          { cond: '가능', nodes: [
+            { id: 'PARENT-P5-04', type: 'state', title: '응답 저장', state: '+SurveyResponse{campus·unit·별점·후기·photo}' },
+            { id: 'PARENT-P5-05', type: 'end', title: '감사 화면 → 콘솔 설문 결과 테이블 반영 (ADMIN-F4-07)' },
+          ] },
+        ] },
+      ],
+    },
+  ];
+
+  window.NPR_FLOWS = {
+    personas: [
+      {
+        key: 'admin', name: '관리자', role: '학원 운영 · 단일 관리자 계정',
+        goal: '설명회 예약·현장 입장·문자·설문·통계를 하나의 콘솔에서 운영한다.',
+        entry: '로그인(관리자) → 허브 7개 모듈',
+        scenario: [
+          '예약 명단에서 설명회·캠퍼스·단위·담임별 현황 관리',
+          '드랍다운으로 예약 등록·취소, 수동 추가(비재원생)',
+          '현장 QR 스캔·입장 처리(스캐너 번호 기록)',
+          '종료 후 만족도 설문 발송·결과 확인, 통계 리뷰',
+        ],
+        perms: [{ label: '전체 7모듈', on: true }, { label: '간담회(준비 중)', on: false }],
+        flows: ADMIN_FLOWS,
+      },
+      {
+        key: 'parent', name: '학부모 / 학생', role: '설명회 예약자 (모바일)',
+        goal: '자녀 설명회를 예약·관리하고 참석 후 설문을 남긴다.',
+        entry: 'mobile.html — 로그인 없음',
+        scenario: [
+          '설명회 선택·예약(모/부 번호 매칭, 가족 동시 예약)',
+          '예약 조회·회차 변경·취소',
+          '참석 후 별점·후기·사진 설문 제출',
+        ],
+        perms: [{ label: '모바일 예약', on: true }, { label: '콘솔 접근', on: false }, { label: '로그인', on: false }],
+        flows: PARENT_FLOWS,
+      },
+    ],
+  };
+})();

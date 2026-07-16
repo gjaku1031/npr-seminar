@@ -1,0 +1,22 @@
+<!-- @dsCard group="Surface" viewport="700x170" name="Interaction States" subtitle="hover 리프트 · press 축소 · focus 블루 링 — 직접 올려보세요" -->
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  .s { height: 100px; border-radius: var(--radius-lg); background: var(--surface-card); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-card); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; color: var(--text-muted); transition: all var(--dur-fast) var(--ease-out); cursor: pointer; }
+  .s b { color: var(--text-strong); font-family: var(--font-display); font-size: 14px; }
+  .hov:hover { transform: translateY(-4px); box-shadow: var(--shadow-raised); }
+  .prs:active { transform: scale(0.96); background: var(--surface-sunken); }
+  .foc { box-shadow: var(--focus-ring); border-color: var(--violet-800); }
+  .dis { opacity: 0.45; cursor: not-allowed; }
+</style>
+</head>
+<body style="margin: 0; padding: 18px 22px;">
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+  <div class="s hov"><b>hover</b>-4px 리프트 + raised</div>
+  <div class="s prs"><b>press</b>scale 0.96 + sunken</div>
+  <div class="s foc"><b>focus</b>블루 링 3px</div>
+  <div class="s dis"><b>disabled</b>opacity 0.45</div>
+</div>
+</body>
+</html>

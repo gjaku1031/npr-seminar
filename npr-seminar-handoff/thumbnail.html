@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+<style>
+  html, body { margin: 0; width: 1280px; height: 854px; overflow: hidden; }
+  .tile { display: flex; width: 1280px; height: 854px; }
+  .main { flex: 1; background: var(--violet-900); display: flex; align-items: center; justify-content: center; }
+  .main span { font-family: var(--font-display); font-weight: 800; font-size: 176px; letter-spacing: -0.03em; color: var(--gray-1); white-space: nowrap; }
+  .strip { width: 300px; display: flex; flex-direction: column; }
+  .strip div { flex: 1; }
+</style>
+</head>
+<body>
+<div class="tile">
+  <div class="main"><span>입시설명회</span></div>
+  <div class="strip">
+    <div style="background: var(--mint-400);"></div>
+    <div style="background: var(--mint-500);"></div>
+    <div style="background: var(--violet-600);"></div>
+    <div style="background: var(--violet-950);"></div>
+  </div>
+</div>
+</body>
+</html>

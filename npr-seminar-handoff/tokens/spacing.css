@@ -1,0 +1,24 @@
+/* 입시설명회 — spacing tokens (4px 그리드) */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* layout */
+  --container-max: 1200px;
+  --container-pad: 24px;
+  --container-pad-mobile: 20px;
+  --card-pad: 24px;
+  --card-pad-lg: 32px;
+  --section-gap: 96px;
+}

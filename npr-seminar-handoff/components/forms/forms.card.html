@@ -1,0 +1,45 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Forms" subtitle="Input · Select · Checkbox · Radio · Switch" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body style="margin: 0; padding: 18px 20px;">
+<div id="root"></div>
+<script type="text/babel">
+const { Input, Select, Checkbox, Radio, Switch } = window.DesignSystem_179b2a;
+
+const searchIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>;
+
+function Demo() {
+  const [name, setName] = React.useState('김수민');
+  const [round, setRound] = React.useState('2회차 · 14:00');
+  const [agree, setAgree] = React.useState(true);
+  const [who, setWho] = React.useState('student');
+  const [alarm, setAlarm] = React.useState(true);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px 20px' }}>
+      <Input label="학생 이름" value={name} onChange={setName} placeholder="이름 입력" />
+      <Input label="검색" placeholder="대학·전형으로 검색" icon={searchIcon} />
+      <Select label="회차 선택" options={['1회차 · 10:00', '2회차 · 14:00', '3회차 · 17:00']} value={round} onChange={setRound} />
+      <Input label="연락처" value="010-1234" onChange={() => {}} error="올바른 번호를 입력해 주세요" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Checkbox label="개인정보 수집·이용에 동의합니다" checked={agree} onChange={setAgree} />
+        <Switch label="마감 임박 알림 받기" checked={alarm} onChange={setAlarm} />
+      </div>
+      <div style={{ display: 'flex', gap: 20 }}>
+        <Radio label="수험생" checked={who === 'student'} onChange={() => setWho('student')} />
+        <Radio label="학부모" description="자녀 동반 가능" checked={who === 'parent'} onChange={() => setWho('parent')} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!-- @dsCard group="Motion" viewport="700x230" name="Easing" subtitle="ease-out 등장 · spring 팝 · smooth 레이아웃" -->
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  .track { position: relative; height: 40px; background: var(--gray-2); border-radius: var(--radius-pill); }
+  .ball { position: absolute; top: 5px; left: 5px; width: 30px; height: 30px; border-radius: 50%; }
+  @keyframes run { 0%, 12% { transform: translateX(0); } 55%, 100% { transform: translateX(560px); } }
+  .r1 { animation: run 2.6s var(--ease-out) infinite; }
+  .r2 { animation: run 2.6s var(--ease-spring) infinite; }
+  .r3 { animation: run 2.6s var(--ease-smooth) infinite; }
+</style>
+</head>
+<body style="margin: 0; padding: 18px 22px; display: flex; flex-direction: column; gap: 12px;">
+<div>
+  <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 5px;">--ease-out · cubic-bezier(.25, 1, .5, 1) — 요소 등장, hover</div>
+  <div class="track"><span class="ball r1" style="background: var(--violet-900);"></span></div>
+</div>
+<div>
+  <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 5px;">--ease-spring · cubic-bezier(.34, 1.45, .5, 1) — 팝, 스탬프, 토글</div>
+  <div class="track"><span class="ball r2" style="background: var(--mint-500);"></span></div>
+</div>
+<div>
+  <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 5px;">--ease-smooth · cubic-bezier(.45, 0, .15, 1) — 레이아웃 이동, 게이지</div>
+  <div class="track"><span class="ball r3" style="background: var(--violet-600);"></span></div>
+</div>
+</body>
+</html>

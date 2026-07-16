@@ -1,0 +1,31 @@
+/* 입시설명회 — base resets */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-body-md);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+  color: var(--text-body);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+::selection { background: var(--selection-bg); color: var(--ink-900); }
+
+a { color: var(--violet-800); text-decoration: none; transition: color var(--dur-fast) var(--ease-out); }
+a:hover { color: var(--mint-600); }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  color: var(--text-strong);
+  letter-spacing: var(--tracking-heading);
+  line-height: var(--leading-heading);
+  margin: 0;
+}
+
+button { font-family: var(--font-body); }

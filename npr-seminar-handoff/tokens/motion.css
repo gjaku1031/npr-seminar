@@ -1,0 +1,103 @@
+/* 입시설명회 — motion tokens & shared keyframes
+   감각적이지만 차분한 모션: 스프링 있는 등장, 부드러운 지속 */
+
+:root {
+  /* easing */
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1); /* @kind other */
+  --ease-spring: cubic-bezier(0.34, 1.45, 0.5, 1); /* @kind other */
+  --ease-smooth: cubic-bezier(0.45, 0, 0.15, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+
+  /* duration */
+  --dur-fast: 160ms; /* @kind other */
+  --dur-base: 280ms; /* @kind other */
+  --dur-slow: 480ms; /* @kind other */
+  --dur-hero: 800ms; /* @kind other */
+
+  /* stagger 간격 */
+  --stagger: 70ms; /* @kind other */
+}
+
+/* ── shared keyframes ─────────────────────────── */
+
+@keyframes ds-fade-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes ds-scale-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ds-pop {
+  0%   { opacity: 0; transform: scale(0.6); }
+  70%  { transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ds-slide-in-right {
+  from { opacity: 0; transform: translateX(32px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ds-sheet-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-stamp {
+  0%   { opacity: 0; transform: scale(1.7) rotate(-14deg); }
+  55%  { opacity: 1; transform: scale(0.94) rotate(-8deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-8deg); }
+}
+
+@keyframes ds-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+@keyframes ds-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@keyframes ds-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes ds-grow-x {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes ds-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.40); }
+  50%      { box-shadow: 0 0 24px 5px rgba(37, 99, 235, 0.22); }
+}
+
+@keyframes ds-gradient-move {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes ds-blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(34px, -24px) scale(1.08); }
+  66%      { transform: translate(-26px, 18px) scale(0.94); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

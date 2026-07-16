@@ -1,0 +1,22 @@
+/* 입시설명회 — radius · shadow · blur (라이트 톤) */
+
+:root {
+  /* radius */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+  --radius-pill: 999px;
+
+  /* shadows — 슬레이트가 섞인 차가운 그림자 + 블루/스카이 글로우 */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 14px rgba(15, 23, 42, 0.06);
+  --shadow-raised: 0 2px 6px rgba(15, 23, 42, 0.07), 0 12px 28px rgba(15, 23, 42, 0.10);
+  --shadow-float: 0 6px 16px rgba(15, 23, 42, 0.11), 0 24px 56px rgba(15, 23, 42, 0.16);
+  --shadow-inset-hairline: inset 0 0 0 1px rgba(15, 23, 42, 0.10);
+  --shadow-accent-glow: 0 0 0 4px rgba(14, 165, 233, 0.22);
+  --shadow-brand-glow: 0 0 0 3px rgba(37, 99, 235, 0.25), 0 0 24px rgba(37, 99, 235, 0.18);
+
+  /* blur */
+  --blur-veil: saturate(1.4) blur(14px); /* @kind other */ /* 고정 헤더 등 반투명 표면 */
+}

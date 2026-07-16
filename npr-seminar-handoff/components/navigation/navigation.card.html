@@ -1,0 +1,46 @@
+<!-- @dsCard group="Components" viewport="700x430" name="Navigation" subtitle="Tabs · Stepper · TopNav · LauncherCard" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body style="margin: 0; padding: 18px 20px;">
+<div id="root"></div>
+<script type="text/babel">
+const { Tabs, Stepper, TopNav, LauncherCard } = window.DesignSystem_179b2a;
+
+function Demo() {
+  const [tab, setTab] = React.useState('up');
+  const [pill, setPill] = React.useState('전체');
+  const [step, setStep] = React.useState(1);
+  const [nav, setNav] = React.useState('a');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <Tabs
+        items={[{ label: '예정된 설명회', value: 'up', count: 2 }, { label: '지난 설명회', value: 'past', count: 5 }, { label: '취소됨', value: 'cancel' }]}
+        value={tab} onChange={setTab}
+      />
+      <Tabs variant="pill" items={['전체', '수시', '정시', '논술']} value={pill} onChange={setPill} />
+      <div onClick={() => setStep((step + 1) % 3)} style={{ cursor: 'pointer' }}>
+        <Stepper steps={['회차 선택', '정보 입력', '예약 완료']} current={step} />
+        <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 8 }}>클릭해서 단계 진행 보기</div>
+      </div>
+      <div style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-hairline)' }}>
+        <TopNav sticky={false} items={[{ label: '재원생 관리', value: 'a' }, { label: '전화예약', value: 'b' }, { label: '문자 발송', value: 'c' }]} value={nav} onChange={setNav} onBrandClick={() => {}} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <LauncherCard icon={<span style={{ fontWeight: 800 }}>學</span>} title="재원생 관리" stat="40명 · 미예약 9" onClick={() => {}} />
+        <LauncherCard tone="brand" icon={<span style={{ fontWeight: 800 }}>QR</span>} title="설명회 운영" stat="진행 중 1" onClick={() => {}} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

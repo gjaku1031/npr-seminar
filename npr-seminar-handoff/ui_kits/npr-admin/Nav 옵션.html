@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="design_doc_mode" content="canvas">
+<title>npr 콘솔 — 네비게이션 옵션</title>
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; }
+  .frame { position: absolute; width: 880px; height: 560px; border-radius: 18px; overflow: hidden; background: var(--surface-page); box-shadow: var(--shadow-raised); border: 1px solid var(--border-hairline); }
+  .opt { position: absolute; top: 14px; right: 14px; z-index: 30; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--ink-900); color: #fff; font-size: 12.5px; font-weight: 700; font-family: var(--font-body); }
+  .cap { position: absolute; width: 880px; font-family: var(--font-body); color: var(--text-muted); font-size: 13.5px; line-height: 1.6; }
+  .cap b { color: var(--text-strong); font-size: 15px; font-family: var(--font-display); display: block; margin-bottom: 2px; }
+  /* 공용 목업 조각 */
+  .logo { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 800; }
+  .logo .chip { width: 26px; height: 26px; border-radius: 8px; background: var(--violet-800); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--mint-100); color: var(--mint-700); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; font-family: var(--font-body); }
+  .skel { border-radius: 8px; background: var(--gray-2); }
+  .content { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+  .row { height: 40px; border-radius: 10px; background: var(--surface-card); border: 1px solid var(--border-hairline); }
+  .statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stat { height: 74px; border-radius: 14px; background: var(--surface-card); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-card); }
+  .navitem { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-body); font-size: 13.5px; font-weight: 600; color: var(--text-muted); padding: 8px 14px; border-radius: 999px; white-space: nowrap; }
+  .navitem.on { background: var(--violet-100); color: var(--violet-900); font-weight: 700; }
+  .ico { width: 17px; height: 17px; border-radius: 5px; background: currentColor; opacity: 0.75; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint-500); }
+</style>
+</head>
+<body>
+
+<!-- 1a 상단 헤더 탭바 -->
+<section id="1a" class="frame" style="left: 40px; top: 60px;">
+  <span class="opt">1a</span>
+  <div style="height: 60px; display: flex; align-items: center; gap: 26px; padding: 0 24px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline);">
+    <span class="logo" style="color: var(--violet-900); font-size: 16px;"><span class="chip">npr</span>입시설명회</span>
+    <nav style="display: flex; gap: 4px; flex: 1;">
+      <span class="navitem on">재원생 관리</span><span class="navitem">전화예약</span><span class="navitem">문자 발송</span><span class="navitem">설명회 운영</span><span class="navitem">QR 스캐너</span><span class="navitem">모바일 프리뷰</span>
+    </nav>
+    <span class="avatar">원</span>
+  </div>
+  <div class="content">
+    <div class="skel" style="height: 34px; width: 300px;"></div>
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 632px;"><b>1a · 상단 헤더 탭바</b>사이드바 제거, 화면 폭 전체를 콘텐츠에. 활성 탭은 블루 필. 가장 넓은 테이블 뷰.</div>
+
+<!-- 1b 아이콘 레일 -->
+<section id="1b" class="frame" style="left: 980px; top: 60px;">
+  <span class="opt">1b</span>
+  <div style="display: flex; height: 100%;">
+    <div style="width: 64px; background: var(--surface-brand); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 8px;">
+      <span class="logo"><span class="chip" style="background: rgba(124,92,255,0.25); color: var(--mint-400);">npr</span></span>
+      <div style="height: 14px;"></div>
+      <span style="width: 40px; height: 40px; border-radius: 12px; background: rgba(248,250,252,0.14); box-shadow: inset 3px 0 0 var(--mint-500); display: flex; align-items: center; justify-content: center;"><span class="ico" style="color: #fff;"></span></span>
+      <span style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;"><span class="ico" style="color: rgba(248,250,252,0.55);"></span></span>
+      <span style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;"><span class="ico" style="color: rgba(248,250,252,0.55);"></span></span>
+      <span style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;"><span class="ico" style="color: rgba(248,250,252,0.55);"></span></span>
+      <span style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;"><span class="ico" style="color: rgba(248,250,252,0.55);"></span></span>
+      <span style="flex: 1;"></span>
+      <span class="avatar">원</span>
+    </div>
+    <div style="position: relative; flex: 1;">
+      <div style="position: absolute; left: 10px; top: 118px; z-index: 5; padding: 6px 12px; border-radius: 8px; background: var(--ink-900); color: #fff; font-size: 12px; font-family: var(--font-body); font-weight: 600;">전화예약 ←hover 라벨</div>
+      <div class="content">
+        <div class="skel" style="height: 34px; width: 300px;"></div>
+        <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+        <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="cap" style="left: 980px; top: 632px;"><b>1b · 아이콘 레일</b>64px 미니 레일 + hover 시 라벨 툴팁. 네이비 유지하면서 공간 최소. 활성 = 민트 인디케이터.</div>
+
+<!-- 1c 하단 플로팅 글래스 독 -->
+<section id="1c" class="frame" style="left: 40px; top: 740px;">
+  <span class="opt">1c</span>
+  <div style="height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px;">
+    <span class="logo" style="color: var(--violet-900); font-size: 15px;"><span class="chip">npr</span>입시설명회</span>
+    <span class="avatar">원</span>
+  </div>
+  <div class="content" style="padding-top: 4px;">
+    <div class="skel" style="height: 34px; width: 300px;"></div>
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+  </div>
+  <div style="position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 4px; padding: 8px; border-radius: 999px; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-float);">
+    <span class="navitem on" style="box-shadow: 0 4px 14px rgba(37,99,235,0.25);">재원생</span>
+    <span class="navitem">전화예약</span><span class="navitem">문자</span><span class="navitem">설명회</span><span class="navitem">QR</span><span class="navitem">프리뷰</span>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 1312px;"><b>1c · 플로팅 글래스 독</b>하단 중앙 부유 독 — 태블릿 현장 운영과 잘 어울리는 터치 친화형. 글래스 블러 + 활성 글로우.</div>
+
+<!-- 1d 상단 필 세그먼트 -->
+<section id="1d" class="frame" style="left: 980px; top: 740px;">
+  <span class="opt">1d</span>
+  <div style="height: 92px; background: var(--surface-brand); padding: 0 24px; display: flex; flex-direction: column; justify-content: center; gap: 10px;">
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <span class="logo" style="color: #fff; font-size: 15px;"><span class="chip" style="background: rgba(124,92,255,0.3); color: var(--mint-400);">npr</span>입시설명회 <span style="font-size: 10px; letter-spacing: 0.14em; color: var(--mint-400); margin-left: 4px;">ADMIN</span></span>
+      <span style="display: flex; align-items: center; gap: 10px;"><span class="dot"></span><span class="avatar">원</span></span>
+    </div>
+    <div style="display: inline-flex; gap: 2px; padding: 4px; border-radius: 999px; background: rgba(248,250,252,0.10); width: fit-content;">
+      <span class="navitem on" style="background: var(--surface-card); color: var(--violet-900);">재원생 관리</span>
+      <span class="navitem" style="color: rgba(248,250,252,0.65);">전화예약</span>
+      <span class="navitem" style="color: rgba(248,250,252,0.65);">문자 발송</span>
+      <span class="navitem" style="color: rgba(248,250,252,0.65);">설명회 운영</span>
+      <span class="navitem" style="color: rgba(248,250,252,0.65);">QR 스캐너</span>
+      <span class="navitem" style="color: rgba(248,250,252,0.65);">모바일 프리뷰</span>
+    </div>
+  </div>
+  <div class="content">
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+  </div>
+</section>
+<div class="cap" style="left: 980px; top: 1312px;"><b>1d · 네이비 헤더 + 필 세그먼트</b>브랜드 네이비를 상단 밴드로 유지. 세그먼트가 슬라이딩 인디케이터로 이동(스프링).</div>
+
+<!-- 1e 접이식 사이드바 -->
+<section id="1e" class="frame" style="left: 40px; top: 1420px;">
+  <span class="opt">1e</span>
+  <div style="display: flex; height: 100%;">
+    <div style="width: 200px; background: var(--surface-card); border-right: 1px solid var(--border-hairline); display: flex; flex-direction: column; padding: 16px 10px; gap: 4px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 8px 12px;">
+        <span class="logo" style="color: var(--violet-900); font-size: 14.5px;"><span class="chip">npr</span>입시설명회</span>
+        <span style="width: 22px; height: 22px; border-radius: 6px; background: var(--gray-2); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-muted);">⟨</span>
+      </div>
+      <span class="navitem on" style="border-radius: 10px; width: auto;"><span class="ico"></span>재원생 관리</span>
+      <span class="navitem" style="border-radius: 10px;"><span class="ico"></span>전화예약</span>
+      <span class="navitem" style="border-radius: 10px;"><span class="ico"></span>문자 발송</span>
+      <span class="navitem" style="border-radius: 10px;"><span class="ico"></span>설명회 운영</span>
+      <span class="navitem" style="border-radius: 10px;"><span class="ico"></span>QR 스캐너</span>
+      <span style="flex: 1;"></span>
+      <span class="avatar" style="margin-left: 8px;">원</span>
+    </div>
+    <div class="content" style="flex: 1;">
+      <div class="skel" style="height: 34px; width: 280px;"></div>
+      <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+      <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+    </div>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 1992px;"><b>1e · 라이트 접이식 사이드바</b>네이비 대신 화이트 사이드바(가벼움) + ⟨ 버튼으로 아이콘-온리(1b 형태)로 접힘.</div>
+
+<!-- ══ 2차 제안 ══ -->
+
+<!-- 2a 커맨드 팔레트 -->
+<section id="2a" class="frame" style="left: 40px; top: 2100px;">
+  <span class="opt">2a</span>
+  <div style="height: 54px; display: flex; align-items: center; gap: 16px; padding: 0 24px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline);">
+    <span class="logo" style="color: var(--violet-900); font-size: 15px;"><span class="chip">npr</span></span>
+    <span style="flex: 1; max-width: 380px; height: 34px; border-radius: 999px; background: var(--gray-2); display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--text-faint); font-size: 12.5px; font-family: var(--font-body);">⌘K — 화면·학생·설명회 검색으로 이동</span>
+    <span style="flex: 1;"></span>
+    <span class="avatar">원</span>
+  </div>
+  <div class="content">
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div>
+  </div>
+  <div style="position: absolute; left: 50%; top: 120px; transform: translateX(-50%); width: 420px; border-radius: 16px; background: rgba(255,255,255,0.97); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-float); padding: 12px; font-family: var(--font-body);">
+    <div style="height: 38px; border-radius: 10px; background: var(--gray-2); display: flex; align-items: center; padding: 0 12px; font-size: 13px; color: var(--text-strong);">전화예약|</div>
+    <div style="padding: 10px 12px; border-radius: 10px; background: var(--violet-100); color: var(--violet-900); font-size: 13px; font-weight: 700; margin-top: 8px;">→ 전화예약 관리로 이동</div>
+    <div style="padding: 10px 12px; font-size: 13px; color: var(--text-muted);">→ 김수민 (재원생) 예약 상세</div>
+    <div style="padding: 10px 12px; font-size: 13px; color: var(--text-muted);">→ 수동예약 등록 실행</div>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 2672px;"><b>2a · 커맨드 팔레트 중심</b>고정 네비 최소화, ⌘K 팔레트로 화면·학생·액션 점프. 파워유저용 초고속.</div>
+
+<!-- 2b 브라우저 탭 워크스페이스 -->
+<section id="2b" class="frame" style="left: 980px; top: 2100px;">
+  <span class="opt">2b</span>
+  <div style="height: 44px; display: flex; align-items: flex-end; gap: 2px; padding: 0 16px; background: var(--gray-2);">
+    <span class="logo" style="color: var(--violet-900); font-size: 13px; margin: 0 10px 10px 0;"><span class="chip" style="width: 22px; height: 22px;">npr</span></span>
+    <span style="padding: 9px 18px; border-radius: 12px 12px 0 0; background: var(--surface-page); font-size: 12.5px; font-weight: 700; color: var(--text-strong); font-family: var(--font-body); border: 1px solid var(--border-hairline); border-bottom: none;">재원생 관리</span>
+    <span style="padding: 9px 18px; font-size: 12.5px; color: var(--text-muted); font-family: var(--font-body);">전화예약 ×</span>
+    <span style="padding: 9px 18px; font-size: 12.5px; color: var(--text-muted); font-family: var(--font-body);">설명회 운영 ×</span>
+    <span style="padding: 9px 12px; font-size: 14px; color: var(--text-faint); font-family: var(--font-body);">+</span>
+  </div>
+  <div style="height: 34px; display: flex; align-items: center; padding: 0 20px; font-size: 12px; color: var(--text-faint); font-family: var(--font-body); background: var(--surface-page); border-bottom: 1px solid var(--border-hairline);">npr 콘솔 / 재원생 관리 / 중등부 A</div>
+  <div class="content">
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+  </div>
+</section>
+<div class="cap" style="left: 980px; top: 2672px;"><b>2b · 멀티탭 워크스페이스</b>브라우저처럼 화면을 탭으로 열어두고 전환 — 설명회 당일 여러 화면 동시 운영에 강함.</div>
+
+<!-- 2c 우측 세로 독 -->
+<section id="2c" class="frame" style="left: 40px; top: 2780px;">
+  <span class="opt">2c</span>
+  <div style="display: flex; height: 100%;">
+    <div class="content" style="flex: 1;">
+      <div style="display: flex; justify-content: space-between; align-items: center;"><span class="logo" style="color: var(--violet-900); font-size: 15px;"><span class="chip">npr</span>입시설명회</span></div>
+      <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+      <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+    </div>
+    <div style="width: 92px; margin: 14px; border-radius: 20px; background: var(--surface-brand); display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 10px; box-shadow: var(--shadow-raised);">
+      <span style="width: 44px; height: 44px; border-radius: 14px; background: rgba(248,250,252,0.16); box-shadow: 0 0 0 2px var(--mint-500); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;"><span class="ico" style="color: #fff; width: 15px; height: 15px;"></span><span style="font-size: 8.5px; color: #fff; font-family: var(--font-body);">재원생</span></span>
+      <span style="width: 44px; height: 44px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;"><span class="ico" style="color: rgba(248,250,252,0.5); width: 15px; height: 15px;"></span><span style="font-size: 8.5px; color: rgba(248,250,252,0.5); font-family: var(--font-body);">예약</span></span>
+      <span style="width: 44px; height: 44px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;"><span class="ico" style="color: rgba(248,250,252,0.5); width: 15px; height: 15px;"></span><span style="font-size: 8.5px; color: rgba(248,250,252,0.5); font-family: var(--font-body);">문자</span></span>
+      <span style="width: 44px; height: 44px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;"><span class="ico" style="color: rgba(248,250,252,0.5); width: 15px; height: 15px;"></span><span style="font-size: 8.5px; color: rgba(248,250,252,0.5); font-family: var(--font-body);">운영</span></span>
+      <span style="width: 44px; height: 44px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;"><span class="ico" style="color: rgba(248,250,252,0.5); width: 15px; height: 15px;"></span><span style="font-size: 8.5px; color: rgba(248,250,252,0.5); font-family: var(--font-body);">QR</span></span>
+      <span style="flex: 1;"></span>
+      <span class="avatar">원</span>
+    </div>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 3352px;"><b>2c · 우측 플로팅 독</b>오른손 엄지 동선(태블릿) 최적. 떠 있는 라운드 독이라 콘텐츠와 분리감.</div>
+
+<!-- 2d 카드 런처 허브 -->
+<section id="2d" class="frame" style="left: 980px; top: 2780px;">
+  <span class="opt">2d</span>
+  <div style="height: 54px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px;">
+    <span class="logo" style="color: var(--violet-900); font-size: 15px;"><span class="chip">npr</span>입시설명회</span>
+    <span class="avatar">원</span>
+  </div>
+  <div style="padding: 10px 24px; font-family: var(--font-display); font-weight: 800; font-size: 24px; color: var(--text-strong);">무엇을 하시겠어요?</div>
+  <div style="padding: 8px 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-family: var(--font-body);">
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-brand); color: #fff; padding: 16px; box-shadow: var(--shadow-raised);"><span class="ico" style="color: var(--mint-400);"></span><div style="font-weight: 800; margin-top: 46px;">재원생 관리</div><div style="font-size: 11.5px; opacity: 0.65;">40명 · 미예약 17</div></div>
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-card); border: 1px solid var(--border-hairline); padding: 16px; box-shadow: var(--shadow-card);"><span class="ico" style="color: var(--violet-800);"></span><div style="font-weight: 800; margin-top: 46px; color: var(--text-strong);">전화예약</div><div style="font-size: 11.5px; color: var(--text-faint);">오늘 6건</div></div>
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-card); border: 1px solid var(--border-hairline); padding: 16px; box-shadow: var(--shadow-card);"><span class="ico" style="color: var(--violet-800);"></span><div style="font-weight: 800; margin-top: 46px; color: var(--text-strong);">문자 발송</div><div style="font-size: 11.5px; color: var(--text-faint);">성공률 99%</div></div>
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-card); border: 1px solid var(--border-hairline); padding: 16px; box-shadow: var(--shadow-card);"><span class="ico" style="color: var(--violet-800);"></span><div style="font-weight: 800; margin-top: 46px; color: var(--text-strong);">설명회 운영</div><div style="font-size: 11.5px; color: var(--text-faint);">진행 중 1</div></div>
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-card); border: 1px solid var(--border-hairline); padding: 16px; box-shadow: var(--shadow-card);"><span class="ico" style="color: var(--violet-800);"></span><div style="font-weight: 800; margin-top: 46px; color: var(--text-strong);">QR 스캐너</div><div style="font-size: 11.5px; color: var(--text-faint);">기기 2대 ON</div></div>
+    <div style="height: 150px; border-radius: 18px; background: var(--surface-card); border: 1px solid var(--border-hairline); padding: 16px; box-shadow: var(--shadow-card);"><span class="ico" style="color: var(--violet-800);"></span><div style="font-weight: 800; margin-top: 46px; color: var(--text-strong);">모바일 프리뷰</div><div style="font-size: 11.5px; color: var(--text-faint);">테스트 전용</div></div>
+  </div>
+</section>
+<div class="cap" style="left: 980px; top: 3352px;"><b>2d · 카드 런처 허브</b>홈=런처. 각 모듈로 들어가면 상단에 ‘← 홈’만. 현황 숫자가 카드에 라이브로.</div>
+
+<!-- 2e 스피드다이얼 FAB -->
+<section id="2e" class="frame" style="left: 40px; top: 3460px;">
+  <span class="opt">2e</span>
+  <div class="content" style="padding-top: 18px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;"><span class="logo" style="color: var(--violet-900); font-size: 15px;"><span class="chip">npr</span>입시설명회</span><span class="avatar">원</span></div>
+    <div class="statgrid"><div class="stat"></div><div class="stat"></div><div class="stat"></div><div class="stat"></div></div>
+    <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+  </div>
+  <div style="position: absolute; left: 26px; bottom: 24px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; font-family: var(--font-body);">
+    <span style="padding: 9px 16px; border-radius: 999px; background: var(--surface-card); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-raised); font-size: 12.5px; font-weight: 700; color: var(--text-strong);">📄 문자 발송</span>
+    <span style="padding: 9px 16px; border-radius: 999px; background: var(--surface-card); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-raised); font-size: 12.5px; font-weight: 700; color: var(--text-strong);">전화예약</span>
+    <span style="padding: 9px 16px; border-radius: 999px; background: var(--surface-card); border: 1px solid var(--border-hairline); box-shadow: var(--shadow-raised); font-size: 12.5px; font-weight: 700; color: var(--text-strong);">QR 스캐너</span>
+    <span style="padding: 9px 16px; border-radius: 999px; background: var(--violet-100); border: 1px solid var(--violet-200); box-shadow: var(--shadow-raised); font-size: 12.5px; font-weight: 800; color: var(--violet-900);">재원생 관리 ←현재</span>
+    <span style="width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--violet-800), var(--violet-600)); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 10px 28px rgba(37,99,235,0.4);">≡</span>
+  </div>
+</section>
+<div class="cap" style="left: 40px; top: 4032px;"><b>2e · 스피드다이얼 FAB</b>좌하단 원형 버튼 → 메뉴가 스프링 스태거로 펼쳐짐. 콘텐츠 100% 몰입형, 모션 존재감 최대.</div>
+
+</body>
+</html>
