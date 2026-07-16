@@ -1,6 +1,6 @@
 // entities/user 공개 API (barrel). (설계 §4.1)
 export {
-  ROLE_MODULES,
+  ALL_MODULES,
   canAccessModule,
   allowedModules,
   moduleLabel,
