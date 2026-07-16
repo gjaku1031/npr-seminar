@@ -1,26 +1,25 @@
 /**
- * 사용자·역할·권한 도메인 모델 — 명세 12.1 + flows.json 페르소나.
+ * 사용자·역할·권한 도메인 모델 — 명세 v4.0 §1.1.
  *
- * ★ 진실원 = npr-seminar-flows.json (2026-07-16 결정) ★
- * feature-spec.md §12.1은 `owner|desk|teacher`에 강사=재원생(담당반)·상담·통계를 준다고 기술하지만,
- * 더 최신인 flows.json(_meta가 스스로 "진실원"이라 명시)은 `owner|siljang|gangsa`에
- * 강사=재원생·통계 **차단**, 나머지 운영 모듈 허용으로 규정한다. 충돌 확인 후 flows.json 채택.
+ * v4.0 개편: 역할 3종(owner/siljang/gangsa) → **단일 관리자 계정**.
+ * 역할별 게이팅이 사라졌다 — 로그인하면 전 모듈 사용 가능(간담회만 '준비 중' 잠금).
+ * 학부모/학생은 로그인 없이 공개 예약(/reserve)만 이용한다.
+ *
+ * canAccessModule을 남겨두는 이유: 라우트 가드(requireModuleAccess)의 판정 지점을
+ * 한 곳에 유지하기 위함 — 역할이 다시 늘어나면 이 함수만 확장한다 (설계 §6.5).
  */
 
-/** 콘솔 로그인 역할. 학부모(parent)는 로그인 없이 모바일 예약만 이용하므로 여기 없다. */
-export type UserRole = "owner" | "siljang" | "gangsa";
+/** 콘솔 로그인 역할 — 단일 관리자 (명세 §1.1) */
+export type UserRole = "admin";
 
 export interface User {
   role: UserRole;
   name: string;
-  /** gangsa 역할일 때 담당 강사 id — 설명회 운영에서 본인 반 필터링에 사용 (flows GANGSA-F5) */
-  teacherId: string | null;
 }
 
-/** 허브의 8개 모듈 (명세 §3.1) */
+/** 허브의 7개 모듈 (명세 §1.1) — v4.0에서 전화예약(phone) 모듈 삭제 */
 export type ModuleKey =
   | "students"
-  | "phone"
   | "sms"
   | "sessions"
   | "counsel"
@@ -29,25 +28,21 @@ export type ModuleKey =
   | "preview";
 
 export const moduleLabel: Record<ModuleKey, string> = {
-  students: "재원생 관리",
-  phone: "전화예약 관리",
+  students: "예약 명단",
   sms: "문자 발송",
   sessions: "설명회 운영",
-  counsel: "상담 예약",
+  counsel: "간담회 예약",
   stats: "통계",
   scanner: "QR 스캐너",
   preview: "모바일 프리뷰",
 };
 
 export const roleLabel: Record<UserRole, string> = {
-  owner: "원장",
-  siljang: "실장",
-  gangsa: "강사",
+  admin: "관리자",
 };
 
-const ALL_MODULES: ModuleKey[] = [
+export const ALL_MODULES: ModuleKey[] = [
   "students",
-  "phone",
   "sms",
   "sessions",
   "counsel",
@@ -57,22 +52,13 @@ const ALL_MODULES: ModuleKey[] = [
 ];
 
 /**
- * 역할별 허용 모듈 (flows.json).
- * - owner  : 8모듈 전체
- * - siljang: 원장과 100% 동일
- * - gangsa : 재원생 관리·통계 차단, 나머지는 원장과 동일하게 보기+동작 가능 (GANGSA-F1·F5)
+ * 간담회는 접근은 가능하되 화면이 '준비 중' placeholder다 (명세 §7) —
+ * 게이팅이 아니라 기능 미구현이므로 여기서 막지 않는다.
  */
-export const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
-  owner: ALL_MODULES,
-  siljang: ALL_MODULES,
-  gangsa: ["phone", "sms", "sessions", "counsel", "scanner", "preview"],
-};
-
-/** 라우트 가드·허브 카드 잠금의 단일 판정 함수 (flows GANGSA-G1: 차단 시 허브로 리다이렉트) */
 export function canAccessModule(role: UserRole, module: ModuleKey): boolean {
-  return ROLE_MODULES[role].includes(module);
+  return role === "admin" && ALL_MODULES.includes(module);
 }
 
 export function allowedModules(role: UserRole): ModuleKey[] {
-  return ROLE_MODULES[role];
+  return role === "admin" ? ALL_MODULES : [];
 }
