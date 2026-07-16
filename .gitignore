@@ -21,3 +21,4 @@ npm-debug.log*
 
 # local tool config
 .claude/
+.vercel
