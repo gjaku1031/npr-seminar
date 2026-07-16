@@ -32,6 +32,8 @@ export const reservations = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     /** `NPR-SSx-0000`, 재발급 시 `-Rn` */
     code: text("code").notNull(),
+    /** 입장 QR 토큰 — 난수 발급, `/q/{token}` 링크·스캔 키 (API 명세 §0-5). 재발급 시 회전 */
+    qrToken: text("qr_token").notNull(),
     sessionId: uuid("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
@@ -73,6 +75,8 @@ export const reservations = pgTable(
   },
   (t) => [
     uniqueIndex("reservations_code_uniq").on(t.code),
+    // QR 스캔 조회 키 — 토큰은 유일해야 한다 (명세 §9.2)
+    uniqueIndex("reservations_qr_token_uniq").on(t.qrToken),
     index("reservations_session_idx").on(t.sessionId),
     index("reservations_phone_idx").on(t.phone),
     index("reservations_student_session_idx").on(t.sessionId, t.studentId),

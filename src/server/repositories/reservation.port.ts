@@ -27,6 +27,8 @@ export interface ReservationRepository {
   findById(id: string): Promise<Reservation | null>;
   /** 예약번호 조회 — QR 스캔 (명세 §9.2) */
   findByCode(code: string): Promise<Reservation | null>;
+  /** QR 토큰 조회 — 실카메라 스캔·QR 패스 페이지의 키 (명세 §9.2 · API 명세 §2.4) */
+  findByQrToken(token: string): Promise<Reservation | null>;
   /** 연락처 부분 매칭 조회 — 모바일 셀프 관리(연락처만, ≥4자리) (명세 §10.8) */
   listByPhoneDigits(digits: string): Promise<Reservation[]>;
   /** 가족 묶음 조회 (명세 §10.5) */

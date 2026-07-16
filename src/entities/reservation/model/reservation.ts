@@ -50,6 +50,11 @@ export interface Reservation {
   id: string;
   /** 예약번호 `NPR-SSx-0000`. 재발급 시 `-Rn` 접미 */
   code: string;
+  /**
+   * 입장 QR 토큰 — QR에는 예약번호(추측 가능) 대신 서버 발급 난수 토큰을 넣는다 (API 명세 §0-5).
+   * QR 링크 `/q/{qrToken}`의 키이며, 재발급 시 코드와 함께 회전된다.
+   */
+  qrToken: string;
   sessionId: string;
   /** 재원생 예약이면 학생 id, 비재원생이면 null (명세 §2) */
   studentId: string | null;

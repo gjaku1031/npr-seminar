@@ -25,6 +25,7 @@ function build(draft: ReservationDraft, groupId: string | null): Reservation {
   return {
     id: crypto.randomUUID(),
     code: nextCode(draft.sessionId),
+    qrToken: crypto.randomUUID(),
     ...draft,
     status: "reserved",
     reservedAt: now,
@@ -68,6 +69,12 @@ export const memoryReservationRepository: ReservationRepository = {
 
   async findByCode(code) {
     const row = [...db().reservations.values()].find((r) => r.code === code);
+    return row ? clone(row) : null;
+  },
+
+  /** QR 토큰 조회 — 스캔·패스 페이지 (명세 §9.2) */
+  async findByQrToken(token) {
+    const row = [...db().reservations.values()].find((r) => r.qrToken === token);
     return row ? clone(row) : null;
   },
 
@@ -184,12 +191,13 @@ export const memoryReservationRepository: ReservationRepository = {
     return clone(next);
   },
 
-  /** QR 재발급 — 이전 코드는 codeHistory로 */
+  /** QR 재발급 — 이전 코드는 codeHistory로, QR 토큰도 회전(이전 QR 무효화) */
   async reissueCode(id) {
     const row = mustFind(id);
     const next: Reservation = {
       ...row,
       code: reissuedCode(row.code, row.codeHistory.length + 1),
+      qrToken: crypto.randomUUID(),
       codeHistory: [...row.codeHistory, row.code],
     };
     db().reservations.set(id, next);
