@@ -5,7 +5,7 @@ import "server-only";
  * @/server/services 로만 들어온다 (ESLint R1). 리포지토리·db는 여기서 재노출하지 않는다.
  */
 
-// 설명회 (명세 §7)
+// 설명회 (명세 §6)
 export {
   listSessions,
   listOpenSessions,
@@ -13,19 +13,23 @@ export {
   getSession,
   getSessionStats,
   createSession,
-  toggleReminder,
+  updateSurveySms,
   endSession,
   deleteSession,
 } from "./session.service";
 
-// 예약 (명세 §5 · §7.5 · §8 · §10) — 서버 불변식 적용 지점
+// 예약 (명세 §4 · §9 · §10 · §11) — 서버 불변식 적용 지점
 export {
   listReservations,
+  listAllReservations,
   getReservation,
   findReservationByCode,
   findReservationsByPhone,
   createReservation,
   createFamilyReservation,
+  createGuestReservation,
+  setRosterReservation,
+  addGuestReservation,
   checkIn,
   checkInByCode,
   rollbackEntry,
@@ -35,41 +39,33 @@ export {
   walkInCheckIn,
 } from "./reservation.service";
 
-// 재원생 (명세 §4 · 12.14)
-export {
-  listStudents,
-  getStudent,
-  findStudentsByParentPhone,
-  addStudent,
-  importStudents,
-  convertGuest,
-} from "./student.service";
+// 재원생 (명세 §4 — 읽기 전용 참조)
+export { listStudents, getStudent, findStudentsByParentPhone } from "./student.service";
 
-// 부가 도메인 (명세 §6 · 12.7 · 12.10 · §8.1)
+// 부가 도메인 (명세 §5 · §6.4~6.5 · §9.1)
 export {
   listClasses,
-  listClassesByTeacher,
   listTeachers,
-  listUsersByRole,
+  getAdminUser,
   listSmsTemplates,
   createSmsTemplate,
   saveSmsTemplate,
+  deleteSmsTemplate,
   listSmsLogs,
-  sendSms,
+  sendGroupSms,
+  sendSurveySms,
   listSurveyResponses,
   getSurveySummary,
   submitSurvey,
-  listCounselSlots,
-  listCounselBookings,
-  bookCounsel,
+  submitMobileSurvey,
   listDevices,
 } from "./support.service";
 
-// 통계 (명세 12.6)
+// 통계 (명세 §8)
 export { getStatsOverview } from "./stats.service";
-export type { StatsOverview } from "./stats.service";
+export type { StatsOverview, UnitStat } from "./stats.service";
 
-// 인증·권한 이음새 (명세 12.1 · flows GANGSA-G1) — 설계 §8
+// 인증 이음새 (명세 §1.1 단일 관리자) — 설계 §8
 export {
   currentUser,
   requireModuleAccess,
