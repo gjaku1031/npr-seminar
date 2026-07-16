@@ -9,7 +9,7 @@
  * 디자인시스템(shared/ui)의 QrBox(플레이스홀더)는 수정하지 않는다 — 실 QR은 이 컴포넌트를 쓴다.
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 export interface ReservationQrProps {
@@ -29,10 +29,14 @@ export function buildQrPath(qrToken: string): string {
   return `/q/${encodeURIComponent(qrToken)}`;
 }
 
+/** 마운트 후에만 window.origin을 읽는다 — SSR은 빈 값 (qr-poc useSyncExternalStore 패턴) */
+const emptySubscribe = () => () => {};
+const getOrigin = () => window.location.origin;
+const getServerOrigin = () => "";
+
 export function ReservationQr({ qrToken, size = 120, downloadName, showUrl, style }: ReservationQrProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  const origin = useSyncExternalStore(emptySubscribe, getOrigin, getServerOrigin);
 
   const url = origin ? `${origin}${buildQrPath(qrToken)}` : "";
 
