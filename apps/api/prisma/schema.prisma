@@ -1,0 +1,824 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Branch {
+  id              BigInt           @id @default(autoincrement())
+  publicId        String           @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  code            String           @unique @db.VarChar(32)
+  displayName     String           @map("display_name") @db.VarChar(80)
+  sourceCode      String           @unique @map("source_code") @db.VarChar(32)
+  active          Boolean          @default(true)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  students        Student[]
+  syncBranchRuns  SyncBranchRun[]
+  stagingStudents StagingStudent[]
+  scannerDevices  ScannerDevice[]
+  seminarSessions SeminarSession[]
+
+  @@map("branches")
+}
+
+model AdminUser {
+  id           BigInt      @id @default(autoincrement())
+  publicId     String      @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  username     String      @unique @db.VarChar(120)
+  passwordHash String      @map("password_hash") @db.Text
+  displayName  String      @map("display_name") @db.VarChar(120)
+  role         String      @db.VarChar(24)
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  authAudits   AuthAudit[]
+
+  @@map("admin_users")
+}
+
+model AuthAudit {
+  id           BigInt     @id @default(autoincrement())
+  eventId      String     @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  adminUserId  BigInt?    @map("admin_user_id")
+  actorSubject String?    @map("actor_subject") @db.VarChar(160)
+  eventType    String     @map("event_type") @db.VarChar(40)
+  resultCode   String     @map("result_code") @db.VarChar(80)
+  safeMetadata Json       @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt   DateTime   @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  adminUser    AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([adminUserId, occurredAt(sort: Desc)], map: "auth_audits_admin_user_id_occurred_at_idx")
+  @@map("auth_audits")
+}
+
+model SyncRun {
+  id                      BigInt                   @id @default(autoincrement())
+  publicId                String                   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  runType                 String                   @map("run_type") @db.VarChar(32)
+  status                  String                   @db.VarChar(40)
+  initiatedBy             String?                  @map("initiated_by") @db.VarChar(160)
+  snapshotId              String?                  @map("snapshot_id") @db.VarChar(80)
+  snapshotHash            Bytes?                   @map("snapshot_hash") @db.ByteA
+  stagingHash             Bytes?                   @map("staging_hash") @db.ByteA
+  publishable             Boolean                  @default(false)
+  loginAttempted          Boolean                  @default(false) @map("login_attempted")
+  ambiguityCount          Int                      @default(0) @map("ambiguity_count")
+  rawRowCount             Int                      @default(0) @map("raw_row_count")
+  includedAssignmentCount Int                      @default(0) @map("included_assignment_count")
+  uniqueStudentCount      Int                      @default(0) @map("unique_student_count")
+  excludedCount           Int                      @default(0) @map("excluded_count")
+  startedAt               DateTime                 @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt              DateTime?                @map("finished_at") @db.Timestamptz(6)
+  publishedAt             DateTime?                @map("published_at") @db.Timestamptz(6)
+  publishedBy             String?                  @map("published_by") @db.VarChar(160)
+  errorCode               String?                  @map("error_code") @db.VarChar(100)
+  metrics                 Json                     @default("{}") @db.JsonB
+  branchRuns              SyncBranchRun[]
+  stagingStudents         StagingStudent[]
+  conflicts               SyncConflict[]
+  studentFirstSeen        Student[]                @relation("student_first_seen")
+  studentLastSeen         Student[]                @relation("student_last_seen")
+  assignmentFirstSeen     StudentClassAssignment[] @relation("assignment_first_seen")
+  assignmentLastSeen      StudentClassAssignment[] @relation("assignment_last_seen")
+  studentHistory          StudentHistory[]
+  circuitAudits           TongAuthCircuitAudit[]
+  openedCircuits          TongAuthCircuit[]
+  syncAuditEvents         SyncAuditEvent[]
+
+  @@index([startedAt(sort: Desc), id(sort: Desc)], map: "sync_runs_started_at_idx")
+  @@index([status, startedAt(sort: Desc)])
+  @@map("sync_runs")
+}
+
+model SyncAuditEvent {
+  id           BigInt   @id @default(autoincrement())
+  eventId      String   @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  syncRunId    BigInt   @map("sync_run_id")
+  branchCode   String?  @map("branch_code") @db.VarChar(32)
+  eventType    String   @map("event_type") @db.VarChar(40)
+  actorSubject String   @map("actor_subject") @db.VarChar(160)
+  counts       Json?    @db.JsonB
+  errorCode    String?  @map("error_code") @db.VarChar(100)
+  safeMetadata Json     @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  syncRun      SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([syncRunId, id], map: "sync_audit_events_run_sequence_idx")
+  @@index([occurredAt, id], map: "sync_audit_events_occurred_idx")
+  @@map("sync_audit_events")
+}
+
+model SyncBranchRun {
+  id               BigInt    @id @default(autoincrement())
+  publicId         String    @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  syncRunId        BigInt    @map("sync_run_id")
+  branchId         BigInt    @map("branch_id")
+  sequenceNo       Int       @map("sequence_no") @db.SmallInt
+  status           String    @db.VarChar(32)
+  fetchedCount     Int       @default(0) @map("fetched_count")
+  stagedCount      Int       @default(0) @map("staged_count")
+  includedCount    Int       @default(0) @map("included_count")
+  excludedCount    Int       @default(0) @map("excluded_count")
+  insertedCount    Int       @default(0) @map("inserted_count")
+  updatedCount     Int       @default(0) @map("updated_count")
+  inactivatedCount Int       @default(0) @map("inactivated_count")
+  snapshotHash     Bytes?    @map("snapshot_hash") @db.ByteA
+  errorCode        String?   @map("error_code") @db.VarChar(100)
+  startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz(6)
+  syncRun          SyncRun   @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  branch           Branch    @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([syncRunId, branchId], map: "sync_branch_runs_run_branch_unique")
+  @@unique([syncRunId, sequenceNo], map: "sync_branch_runs_run_sequence_unique")
+  @@index([branchId, startedAt(sort: Desc)], map: "sync_branch_runs_branch_started_idx")
+  @@map("sync_branch_runs")
+}
+
+model StagingStudent {
+  id                    BigInt   @id @default(autoincrement())
+  syncRunId             BigInt   @map("sync_run_id")
+  branchId              BigInt   @map("branch_id")
+  sourceOrdinal         Int      @map("source_ordinal")
+  sourceUniqueNo        String   @map("source_unique_no") @db.VarChar(160)
+  classRegistrationNo   String   @map("class_registration_no") @db.VarChar(160)
+  sourceStudentNo       String?  @map("source_student_no") @db.VarChar(160)
+  name                  String?  @db.VarChar(300)
+  className             String?  @map("class_name") @db.VarChar(300)
+  schoolName            String?  @map("school_name") @db.VarChar(300)
+  grade                 String?  @db.VarChar(100)
+  teacherName           String?  @map("teacher_name") @db.VarChar(300)
+  unitName              String?  @map("unit_name") @db.VarChar(160)
+  motherPhoneCiphertext Bytes?   @map("mother_phone_ciphertext") @db.ByteA
+  motherPhoneDigest     Bytes?   @map("mother_phone_digest") @db.ByteA
+  motherPhoneLast4      String?  @map("mother_phone_last4") @db.Char(4)
+  fatherPhoneCiphertext Bytes?   @map("father_phone_ciphertext") @db.ByteA
+  fatherPhoneDigest     Bytes?   @map("father_phone_digest") @db.ByteA
+  fatherPhoneLast4      String?  @map("father_phone_last4") @db.Char(4)
+  fatherPhoneObserved   Boolean  @default(false) @map("father_phone_observed")
+  sourceStatus          String?  @map("source_status") @db.VarChar(100)
+  rowHash               Bytes?   @map("row_hash") @db.ByteA
+  included              Boolean
+  exclusionReason       String?  @map("exclusion_reason") @db.VarChar(100)
+  primaryCandidate      Boolean  @default(false) @map("primary_candidate")
+  primarySelected       Boolean  @default(false) @map("primary_selected")
+  classResolutionStatus String?  @map("class_resolution_status") @db.VarChar(40)
+  classResolutionReason String?  @map("class_resolution_reason") @db.VarChar(80)
+  stagedAt              DateTime @default(now()) @map("staged_at") @db.Timestamptz(6)
+  syncRun               SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  branch                Branch   @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([syncRunId, branchId, sourceOrdinal], map: "staging_students_run_ordinal_unique")
+  @@unique([syncRunId, branchId, sourceUniqueNo, classRegistrationNo], map: "staging_students_source_assignment_unique")
+  @@index([syncRunId, sourceStudentNo], map: "staging_students_run_student_idx")
+  @@index([syncRunId, branchId, included], map: "staging_students_run_branch_included_idx")
+  @@index([branchId], map: "staging_students_branch_fk_idx")
+  @@map("staging_students")
+}
+
+model SyncConflict {
+  id              BigInt   @id @default(autoincrement())
+  syncRunId       BigInt   @map("sync_run_id")
+  conflictType    String   @map("conflict_type") @db.VarChar(80)
+  branchCode      String?  @map("branch_code") @db.VarChar(32)
+  sourceStudentNo String?  @map("source_student_no") @db.VarChar(160)
+  safeDetails     Json     @default("{}") @map("safe_details") @db.JsonB
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  syncRun         SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([syncRunId, conflictType], map: "sync_conflicts_run_type_idx")
+  @@map("sync_conflicts")
+}
+
+model TongAuthCircuit {
+  singletonId      Int       @id @map("singleton_id") @db.SmallInt
+  status           String    @db.VarChar(16)
+  openedAt         DateTime? @map("opened_at") @db.Timestamptz(6)
+  openedReasonCode String?   @map("opened_reason_code") @db.VarChar(100)
+  openedRunId      BigInt?   @map("opened_run_id")
+  lastResetAt      DateTime? @map("last_reset_at") @db.Timestamptz(6)
+  lastResetBy      String?   @map("last_reset_by") @db.VarChar(160)
+  version          BigInt    @default(0)
+  openedRun        SyncRun?  @relation(fields: [openedRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([openedRunId], map: "tong_auth_circuit_opened_run_fk_idx")
+  @@map("tong_auth_circuit")
+}
+
+model TongAuthCircuitAudit {
+  id           BigInt   @id @default(autoincrement())
+  eventId      String   @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  syncRunId    BigInt?  @map("sync_run_id")
+  eventType    String   @map("event_type") @db.VarChar(24)
+  actorSubject String   @map("actor_subject") @db.VarChar(160)
+  reasonCode   String   @map("reason_code") @db.VarChar(100)
+  reason       String?  @db.Text
+  occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  syncRun      SyncRun? @relation(fields: [syncRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([syncRunId], map: "tong_auth_circuit_audits_run_idx")
+  @@index([occurredAt(sort: Desc), id(sort: Desc)], map: "tong_auth_circuit_audits_occurred_idx")
+  @@map("tong_auth_circuit_audits")
+}
+
+model SyncLease {
+  lockName          String    @id @map("lock_name") @db.VarChar(100)
+  holderRunPublicId String?   @map("holder_run_public_id") @db.Uuid
+  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sync_leases")
+}
+
+model Student {
+  id                    BigInt                   @id @default(autoincrement())
+  publicId              String                   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  sourceStudentNo       String                   @unique @map("source_student_no") @db.VarChar(160)
+  branchId              BigInt                   @map("branch_id")
+  name                  String                   @db.VarChar(300)
+  className             String                   @map("class_name") @db.VarChar(300)
+  schoolName            String?                  @map("school_name") @db.VarChar(300)
+  grade                 String?                  @db.VarChar(100)
+  teacherName           String?                  @map("teacher_name") @db.VarChar(300)
+  unitName              String?                  @map("unit_name") @db.VarChar(160)
+  motherPhoneCiphertext Bytes?                   @map("mother_phone_ciphertext") @db.ByteA
+  motherPhoneDigest     Bytes?                   @map("mother_phone_digest") @db.ByteA
+  motherPhoneLast4      String?                  @map("mother_phone_last4") @db.Char(4)
+  fatherPhoneCiphertext Bytes?                   @map("father_phone_ciphertext") @db.ByteA
+  fatherPhoneDigest     Bytes?                   @map("father_phone_digest") @db.ByteA
+  fatherPhoneLast4      String?                  @map("father_phone_last4") @db.Char(4)
+  sourceStatus          String?                  @map("source_status") @db.VarChar(100)
+  sourceActive          Boolean                  @default(true) @map("source_active")
+  sourceHash            Bytes                    @map("source_hash") @db.ByteA
+  classResolutionStatus String                   @default("ONE_REGULAR") @map("class_resolution_status") @db.VarChar(40)
+  classResolutionReason String?                  @map("class_resolution_reason") @db.VarChar(80)
+  firstSeenRunId        BigInt                   @map("first_seen_run_id")
+  lastSeenRunId         BigInt                   @map("last_seen_run_id")
+  sourceInactivatedAt   DateTime?                @map("source_inactivated_at") @db.Timestamptz(6)
+  createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  branch                Branch                   @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  firstSeenRun          SyncRun                  @relation("student_first_seen", fields: [firstSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lastSeenRun           SyncRun                  @relation("student_last_seen", fields: [lastSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignments           StudentClassAssignment[]
+  history               StudentHistory[]
+  bookingLinks          FamilyBookingStudent[]
+
+  @@index([branchId, sourceActive, id], map: "students_branch_active_id_idx")
+  @@index([motherPhoneDigest], map: "students_mother_digest_idx")
+  @@index([motherPhoneLast4, branchId], map: "students_mother_last4_branch_idx")
+  @@index([fatherPhoneDigest], map: "students_father_digest_idx")
+  @@index([fatherPhoneLast4, branchId], map: "students_father_last4_branch_idx")
+  @@index([lastSeenRunId], map: "students_last_seen_run_idx")
+  @@index([firstSeenRunId], map: "students_first_seen_run_fk_idx")
+  @@map("students")
+}
+
+model StudentClassAssignment {
+  id                  BigInt    @id @default(autoincrement())
+  publicId            String    @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  studentId           BigInt    @map("student_id")
+  sourceUniqueNo      String    @map("source_unique_no") @db.VarChar(160)
+  classRegistrationNo String    @map("class_registration_no") @db.VarChar(160)
+  className           String    @map("class_name") @db.VarChar(300)
+  teacherName         String?   @map("teacher_name") @db.VarChar(300)
+  unitName            String?   @map("unit_name") @db.VarChar(160)
+  schoolName          String?   @map("school_name") @db.VarChar(300)
+  grade               String?   @db.VarChar(100)
+  sourceHash          Bytes     @map("source_hash") @db.ByteA
+  sourceActive        Boolean   @default(true) @map("source_active")
+  firstSeenRunId      BigInt    @map("first_seen_run_id")
+  lastSeenRunId       BigInt    @map("last_seen_run_id")
+  sourceInactivatedAt DateTime? @map("source_inactivated_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student             Student   @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  firstSeenRun        SyncRun   @relation("assignment_first_seen", fields: [firstSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lastSeenRun         SyncRun   @relation("assignment_last_seen", fields: [lastSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([studentId, sourceUniqueNo, classRegistrationNo], map: "student_assignments_source_unique")
+  @@index([studentId, sourceActive, className], map: "student_assignments_student_active_idx")
+  @@index([lastSeenRunId], map: "student_assignments_last_seen_idx")
+  @@index([firstSeenRunId], map: "student_assignments_first_seen_run_fk_idx")
+  @@map("student_class_assignments")
+}
+
+model StudentHistory {
+  id                    BigInt   @id @default(autoincrement())
+  studentId             BigInt   @map("student_id")
+  syncRunId             BigInt   @map("sync_run_id")
+  changeType            String   @map("change_type") @db.VarChar(32)
+  previousSnapshot      Json?    @map("previous_snapshot") @db.JsonB
+  currentSnapshot       Json?    @map("current_snapshot") @db.JsonB
+  fatherPhoneCiphertext Bytes?   @map("father_phone_ciphertext") @db.ByteA
+  fatherPhoneDigest     Bytes?   @map("father_phone_digest") @db.ByteA
+  fatherPhoneLast4      String?  @map("father_phone_last4") @db.Char(4)
+  recordedAt            DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  syncRun               SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([studentId, recordedAt(sort: Desc), id(sort: Desc)], map: "student_history_student_recorded_idx")
+  @@index([syncRunId], map: "student_history_run_idx")
+  @@map("student_history")
+}
+
+model Seminar {
+  id          BigInt           @id @default(autoincrement())
+  publicId    String           @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  title       String           @db.VarChar(300)
+  description String?          @db.Text
+  status      String           @default("DRAFT") @db.VarChar(24)
+  version     BigInt           @default(1)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions    SeminarSession[]
+
+  @@map("seminars")
+}
+
+model SeminarSession {
+  id                    BigInt                 @id @default(autoincrement())
+  publicId              String                 @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  seminarId             BigInt                 @map("seminar_id")
+  scope                 String                 @default("ALL") @db.VarChar(16)
+  branchId              BigInt?                @map("branch_id")
+  title                 String                 @db.VarChar(300)
+  place                 String                 @db.VarChar(300)
+  startsAt              DateTime               @map("starts_at") @db.Timestamptz(6)
+  endsAt                DateTime               @map("ends_at") @db.Timestamptz(6)
+  bookingOpensAt        DateTime?              @map("booking_opens_at") @db.Timestamptz(6)
+  bookingClosesAt       DateTime?              @map("booking_closes_at") @db.Timestamptz(6)
+  guestBookingEnabled   Boolean                @default(false) @map("guest_booking_enabled")
+  status                String                 @default("DRAFT") @db.VarChar(24)
+  version               BigInt                 @default(1)
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  seminar               Seminar                @relation(fields: [seminarId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  branch                Branch?                @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  capacity              SessionCapacity?
+  familyBookings        FamilyBooking[]
+  familyBookingStudents FamilyBookingStudent[]
+  checkInEvents         CheckInEvent[]
+  surveyResponses       SurveyResponse[]
+  scannerDevices        ScannerDevice[]
+
+  @@index([seminarId, startsAt], map: "seminar_sessions_seminar_starts_idx")
+  @@index([branchId, startsAt], map: "seminar_sessions_branch_starts_idx")
+  @@index([status, startsAt], map: "seminar_sessions_status_starts_idx")
+  @@map("seminar_sessions")
+}
+
+model SessionCapacity {
+  sessionId      BigInt         @id @map("session_id")
+  capacity       Int
+  reservedCount  Int            @default(0) @map("reserved_count")
+  checkedInCount Int            @default(0) @map("checked_in_count")
+  version        BigInt         @default(0)
+  updatedAt      DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+  session        SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("session_capacities")
+}
+
+model OtpProofAudit {
+  id                 BigInt          @id @default(autoincrement())
+  publicId           String          @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  proofDigest        Bytes?          @unique @map("proof_digest") @db.ByteA
+  purpose            String          @db.VarChar(40)
+  contactDigest      Bytes           @map("contact_digest") @db.ByteA
+  contactCiphertext  Bytes           @map("contact_ciphertext") @db.ByteA
+  contactLast4       String          @map("contact_last4") @db.Char(4)
+  selectedBranchCode String?         @map("selected_branch_code") @db.VarChar(32)
+  status             String          @db.VarChar(24)
+  expiresAt          DateTime        @map("expires_at") @db.Timestamptz(6)
+  verifiedAt         DateTime?       @map("verified_at") @db.Timestamptz(6)
+  consumedAt         DateTime?       @map("consumed_at") @db.Timestamptz(6)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  familyBookings     FamilyBooking[]
+  otpChallenges      OtpChallenge[]
+
+  @@index([contactDigest, purpose, status], map: "otp_proof_audits_lookup_idx")
+  @@map("otp_proof_audits")
+}
+
+model OtpChallenge {
+  id                 BigInt         @id @default(autoincrement())
+  publicId           String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  purpose            String         @db.VarChar(40)
+  contactDigest      Bytes          @map("contact_digest") @db.ByteA
+  contactCiphertext  Bytes          @map("contact_ciphertext") @db.ByteA
+  contactLast4       String         @map("contact_last4") @db.Char(4)
+  selectedBranchCode String?        @map("selected_branch_code") @db.VarChar(32)
+  codeDigest         Bytes          @map("code_digest") @db.ByteA
+  status             String         @default("PENDING") @db.VarChar(24)
+  attemptCount       Int            @default(0) @map("attempt_count")
+  maxAttempts        Int            @default(5) @map("max_attempts")
+  expiresAt          DateTime       @map("expires_at") @db.Timestamptz(6)
+  verifiedAt         DateTime?      @map("verified_at") @db.Timestamptz(6)
+  otpProofAuditId    BigInt?        @unique @map("otp_proof_audit_id")
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  otpProofAudit      OtpProofAudit? @relation(fields: [otpProofAuditId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([contactDigest, createdAt(sort: Desc)], map: "otp_challenges_contact_created_idx")
+  @@index([status, expiresAt], map: "otp_challenges_status_expires_idx")
+  @@map("otp_challenges")
+}
+
+model FamilyBooking {
+  id                 BigInt                     @id @default(autoincrement())
+  publicId           String                     @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  sessionId          BigInt                     @map("session_id")
+  contactDigest      Bytes                      @map("contact_digest") @db.ByteA
+  contactCiphertext  Bytes                      @map("contact_ciphertext") @db.ByteA
+  contactLast4       String                     @map("contact_last4") @db.Char(4)
+  attendanceParty    String                     @map("attendance_party") @db.VarChar(16)
+  seatCount          Int                        @map("seat_count")
+  status             String                     @default("RESERVED") @db.VarChar(24)
+  version            BigInt                     @default(1)
+  bookingSource      String                     @default("WEB_APP") @map("booking_source") @db.VarChar(24)
+  otpProofAuditId    BigInt                     @map("otp_proof_audit_id")
+  checkedInAt        DateTime?                  @map("checked_in_at") @db.Timestamptz(6)
+  cancelledAt        DateTime?                  @map("cancelled_at") @db.Timestamptz(6)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session            SeminarSession             @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  otpProofAudit      OtpProofAudit              @relation(fields: [otpProofAuditId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  students           FamilyBookingStudent[]
+  qrCredentials      QrCredential[]
+  bookingEvents      BookingEvent[]
+  checkInEvents      CheckInEvent[]
+  surveyResponse     SurveyResponse?
+  accessCredentials  BookingAccessCredential[]
+  managementSessions BookingManagementSession[]
+
+  @@unique([id, sessionId], map: "family_bookings_id_session_unique")
+  @@index([sessionId, status], map: "family_bookings_session_status_idx")
+  @@index([sessionId, contactLast4, status], map: "family_bookings_last4_active_idx")
+  @@index([otpProofAuditId], map: "family_bookings_otp_proof_idx")
+  @@map("family_bookings")
+}
+
+model FamilyBookingStudent {
+  id                      BigInt         @id @default(autoincrement())
+  publicId                String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  familyBookingId         BigInt         @map("family_booking_id")
+  sessionId               BigInt         @map("session_id")
+  participantType         String         @default("ENROLLED") @map("participant_type") @db.VarChar(16)
+  studentId               BigInt?        @map("student_id")
+  active                  Boolean        @default(true)
+  releasedAt              DateTime?      @map("released_at") @db.Timestamptz(6)
+  branchCodeAtBooking     String         @map("branch_code_at_booking") @db.VarChar(32)
+  sourceStudentNoSnapshot String         @map("source_student_no_snapshot") @db.VarChar(160)
+  studentNameSnapshot     String         @map("student_name_snapshot") @db.VarChar(300)
+  classNameSnapshot       String         @map("class_name_snapshot") @db.VarChar(300)
+  schoolNameSnapshot      String?        @map("school_name_snapshot") @db.VarChar(300)
+  gradeSnapshot           String?        @map("grade_snapshot") @db.VarChar(100)
+  unitNameSnapshot        String?        @map("unit_name_snapshot") @db.VarChar(160)
+  teacherNameSnapshot     String?        @map("teacher_name_snapshot") @db.VarChar(300)
+  createdAt               DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  familyBooking           FamilyBooking  @relation(fields: [familyBookingId, sessionId], references: [id, sessionId], onDelete: NoAction, onUpdate: NoAction, map: "family_booking_students_family_session_fk")
+  session                 SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student                 Student?       @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([familyBookingId, studentId], map: "family_booking_students_family_student_unique")
+  @@index([studentId], map: "family_booking_students_student_idx")
+  @@index([sessionId, active], map: "family_booking_students_session_active_idx")
+  @@map("family_booking_students")
+}
+
+model QrCredential {
+  id              BigInt         @id @default(autoincrement())
+  publicId        String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  familyBookingId BigInt         @map("family_booking_id")
+  tokenDigest     Bytes          @unique @map("token_digest") @db.ByteA
+  tokenCiphertext Bytes?         @map("token_ciphertext") @db.ByteA
+  version         Int
+  status          String         @db.VarChar(24)
+  issuedAt        DateTime       @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt       DateTime       @map("expires_at") @db.Timestamptz(6)
+  revokedAt       DateTime?      @map("revoked_at") @db.Timestamptz(6)
+  supersededById  BigInt?        @unique @map("superseded_by_id")
+  familyBooking   FamilyBooking  @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  predecessor     QrCredential?  @relation("credential_supersession", fields: [supersededById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  successor       QrCredential?  @relation("credential_supersession")
+  checkInEvents   CheckInEvent[]
+
+  @@unique([familyBookingId, version], map: "qr_credentials_booking_version_unique")
+  @@index([familyBookingId, status], map: "qr_credentials_family_status_idx")
+  @@map("qr_credentials")
+}
+
+model BookingAccessCredential {
+  id                 BigInt                     @id @default(autoincrement())
+  publicId           String                     @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  familyBookingId    BigInt                     @map("family_booking_id")
+  tokenDigest        Bytes                      @unique @map("token_digest") @db.ByteA
+  status             String                     @default("ACTIVE") @db.VarChar(24)
+  issuedAt           DateTime                   @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt          DateTime                   @map("expires_at") @db.Timestamptz(6)
+  revokedAt          DateTime?                  @map("revoked_at") @db.Timestamptz(6)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  familyBooking      FamilyBooking              @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  managementSessions BookingManagementSession[]
+
+  @@index([familyBookingId, status], map: "booking_access_credentials_family_status_idx")
+  @@index([status, expiresAt], map: "booking_access_credentials_status_expires_idx")
+  @@map("booking_access_credentials")
+}
+
+model BookingManagementSession {
+  id                        BigInt                  @id @default(autoincrement())
+  publicId                  String                  @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  bookingAccessCredentialId BigInt                  @map("booking_access_credential_id")
+  familyBookingId           BigInt                  @map("family_booking_id")
+  sessionDigest             Bytes                   @unique @map("session_digest") @db.ByteA
+  status                    String                  @default("ACTIVE") @db.VarChar(24)
+  expiresAt                 DateTime                @map("expires_at") @db.Timestamptz(6)
+  verifiedAt                DateTime                @default(now()) @map("verified_at") @db.Timestamptz(6)
+  revokedAt                 DateTime?               @map("revoked_at") @db.Timestamptz(6)
+  createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  accessCredential          BookingAccessCredential @relation(fields: [bookingAccessCredentialId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  familyBooking             FamilyBooking           @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([familyBookingId, status, expiresAt], map: "booking_management_sessions_family_status_expires_idx")
+  @@index([bookingAccessCredentialId], map: "booking_management_sessions_access_credential_idx")
+  @@map("booking_management_sessions")
+}
+
+model ScannerDevice {
+  id                BigInt                @id @default(autoincrement())
+  publicId          String                @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  branchId          BigInt                @map("branch_id")
+  name              String                @db.VarChar(120)
+  model             String?               @db.VarChar(120)
+  location          String?               @db.VarChar(160)
+  gateCode          String                @map("gate_code") @db.VarChar(100)
+  batteryPercent    Int?                  @map("battery_percent")
+  batteryIsCharging Boolean?              @map("battery_is_charging")
+  batteryReportedAt DateTime?             @map("battery_reported_at") @db.Timestamptz(6)
+  status            String                @default("ACTIVE") @db.VarChar(24)
+  pairedBy          String                @map("paired_by") @db.VarChar(160)
+  pairedAt          DateTime              @default(now()) @map("paired_at") @db.Timestamptz(6)
+  lastHeartbeatAt   DateTime?             @map("last_heartbeat_at") @db.Timestamptz(6)
+  revokedAt         DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  revokedBy         String?               @map("revoked_by") @db.VarChar(160)
+  selectedSessionId BigInt?               @map("selected_session_id")
+  scanModeLockedAt  DateTime?             @map("scan_mode_locked_at") @db.Timestamptz(6)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  checkInEvents     CheckInEvent[]
+  pairingAudits     ScannerPairingAudit[]
+  branch            Branch                @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  selectedSession   SeminarSession?       @relation(fields: [selectedSessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status, lastHeartbeatAt(sort: Desc)], map: "scanner_devices_status_heartbeat_idx")
+  @@index([branchId, status], map: "scanner_devices_branch_status_idx")
+  @@index([selectedSessionId], map: "scanner_devices_selected_session_idx")
+  @@map("scanner_devices")
+}
+
+model ScannerPairingAudit {
+  id              BigInt         @id @default(autoincrement())
+  eventId         String         @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  scannerDeviceId BigInt?        @map("scanner_device_id")
+  eventType       String         @map("event_type") @db.VarChar(32)
+  actorSubject    String?        @map("actor_subject") @db.VarChar(160)
+  resultCode      String         @map("result_code") @db.VarChar(80)
+  safeMetadata    Json           @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt      DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  scannerDevice   ScannerDevice? @relation(fields: [scannerDeviceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([scannerDeviceId, occurredAt(sort: Desc)], map: "scanner_pairing_audits_device_occurred_idx")
+  @@map("scanner_pairing_audits")
+}
+
+model BookingEvent {
+  id               BigInt        @id @default(autoincrement())
+  eventId          String        @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  familyBookingId  BigInt        @map("family_booking_id")
+  eventType        String        @map("event_type") @db.VarChar(32)
+  actorSubject     String?       @map("actor_subject") @db.VarChar(160)
+  cancellationType String?       @map("cancellation_type") @db.VarChar(24)
+  safeMetadata     Json          @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt       DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  familyBooking    FamilyBooking @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([familyBookingId, occurredAt, id], map: "booking_events_family_occurred_idx")
+  @@map("booking_events")
+}
+
+model CheckInEvent {
+  id                   BigInt         @id @default(autoincrement())
+  eventId              String         @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  familyBookingId      BigInt?        @map("family_booking_id")
+  qrCredentialId       BigInt?        @map("qr_credential_id")
+  sessionId            BigInt         @map("session_id")
+  source               String         @db.VarChar(16)
+  result               String         @db.VarChar(40)
+  seatCount            Int            @map("seat_count")
+  scannerDeviceId      BigInt?        @map("scanner_device_id")
+  gateCode             String?        @map("gate_code") @db.VarChar(100)
+  actorSubject         String?        @map("actor_subject") @db.VarChar(160)
+  idempotencyKeyDigest Bytes?         @map("idempotency_key_digest") @db.ByteA
+  safeMetadata         Json           @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt           DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  familyBooking        FamilyBooking? @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  qrCredential         QrCredential?  @relation(fields: [qrCredentialId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  session              SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  scannerDevice        ScannerDevice? @relation(fields: [scannerDeviceId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([familyBookingId, occurredAt, id], map: "check_in_events_family_occurred_idx")
+  @@index([sessionId, occurredAt(sort: Desc), id(sort: Desc)], map: "check_in_events_session_occurred_idx")
+  @@index([qrCredentialId], map: "check_in_events_credential_idx")
+  @@index([scannerDeviceId], map: "check_in_events_scanner_idx")
+  @@map("check_in_events")
+}
+
+model IdempotencyRecord {
+  id               BigInt   @id @default(autoincrement())
+  scope            String   @db.VarChar(80)
+  keyDigest        Bytes    @map("key_digest") @db.ByteA
+  requestDigest    Bytes    @map("request_digest") @db.ByteA
+  resourcePublicId String?  @map("resource_public_id") @db.Uuid
+  responseStatus   Int      @map("response_status")
+  responseBody     Json     @map("response_body") @db.JsonB
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([scope, keyDigest], map: "idempotency_records_scope_key_unique")
+  @@index([expiresAt], map: "idempotency_records_expires_idx")
+  @@map("idempotency_records")
+}
+
+model SmsTemplate {
+  id        BigInt   @id @default(autoincrement())
+  publicId  String   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  key       String   @unique @db.VarChar(80)
+  name      String   @db.VarChar(160)
+  purpose   String   @db.VarChar(40)
+  title     String?  @db.VarChar(200)
+  body      String   @db.Text
+  active    Boolean  @default(true)
+  version   BigInt   @default(1)
+  createdBy String   @map("created_by") @db.VarChar(160)
+  updatedBy String   @map("updated_by") @db.VarChar(160)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([purpose, active], map: "sms_templates_purpose_active_idx")
+  @@map("sms_templates")
+}
+
+model SmsOutbox {
+  id                     BigInt       @id @default(autoincrement())
+  publicId               String       @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  eventKeyDigest         Bytes        @unique @map("event_key_digest") @db.ByteA
+  source                 String       @db.VarChar(40)
+  branchCode             String       @map("branch_code") @db.VarChar(32)
+  seminarSessionPublicId String?      @map("seminar_session_public_id") @db.Uuid
+  familyBookingPublicId  String?      @map("family_booking_public_id") @db.Uuid
+  recipientCiphertext    Bytes        @map("recipient_ciphertext") @db.ByteA
+  recipientDigest        Bytes        @map("recipient_digest") @db.ByteA
+  recipientLast4         String       @map("recipient_last4") @db.Char(4)
+  messageCiphertext      Bytes        @map("message_ciphertext") @db.ByteA
+  titleCiphertext        Bytes?       @map("title_ciphertext") @db.ByteA
+  messageType            String       @map("message_type") @db.VarChar(8)
+  messageBytes           Int          @map("message_bytes")
+  titleBytes             Int?         @map("title_bytes")
+  status                 String       @default("PENDING") @db.VarChar(32)
+  attemptCount           Int          @default(0) @map("attempt_count")
+  nextAttemptAt          DateTime     @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken             String?      @map("lease_token") @db.Uuid
+  leaseExpiresAt         DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
+  providerMessageId      String?      @map("provider_message_id") @db.VarChar(80)
+  providerResultCode     Int?         @map("provider_result_code")
+  providerMessageType    String?      @map("provider_message_type") @db.VarChar(16)
+  lastErrorCode          String?      @map("last_error_code") @db.VarChar(80)
+  actorSubject           String?      @map("actor_subject") @db.VarChar(160)
+  safeMetadata           Json         @default("{}") @map("safe_metadata") @db.JsonB
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attempts               SmsAttempt[]
+
+  @@index([status, nextAttemptAt, id], map: "sms_outbox_worker_idx")
+  @@index([seminarSessionPublicId, createdAt(sort: Desc)], map: "sms_outbox_session_created_idx")
+  @@index([familyBookingPublicId, createdAt(sort: Desc)], map: "sms_outbox_family_created_idx")
+  @@index([recipientDigest, createdAt(sort: Desc)], map: "sms_outbox_recipient_created_idx")
+  @@map("sms_outbox")
+}
+
+model SmsAttempt {
+  id                 BigInt    @id @default(autoincrement())
+  eventId            String    @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  smsOutboxId        BigInt    @map("sms_outbox_id")
+  attemptNo          Int       @map("attempt_no")
+  result             String    @db.VarChar(32)
+  providerResultCode Int?      @map("provider_result_code")
+  providerMessageId  String?   @map("provider_message_id") @db.VarChar(80)
+  errorCode          String?   @map("error_code") @db.VarChar(80)
+  safeMetadata       Json      @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt         DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  outbox             SmsOutbox @relation(fields: [smsOutboxId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([smsOutboxId, attemptNo], map: "sms_attempts_outbox_attempt_unique")
+  @@index([smsOutboxId, occurredAt(sort: Desc)], map: "sms_attempts_outbox_occurred_idx")
+  @@map("sms_attempts")
+}
+
+model SheetMapping {
+  id                     BigInt        @id @default(autoincrement())
+  publicId               String        @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  seminarSessionPublicId String        @unique @map("seminar_session_public_id") @db.Uuid
+  spreadsheetId          String        @map("spreadsheet_id") @db.VarChar(160)
+  reservationSheetTitle  String        @default("예약명단") @map("reservation_sheet_title") @db.VarChar(100)
+  reservationSheetId     Int           @default(1777564107) @map("reservation_sheet_id")
+  logSheetTitle          String        @default("예약로그") @map("log_sheet_title") @db.VarChar(100)
+  logSheetId             Int           @default(1787194666) @map("log_sheet_id")
+  songpaSheetId          Int           @default(0) @map("songpa_sheet_id")
+  wiryeSheetId           Int           @default(470961226) @map("wirye_sheet_id")
+  gwangjinSheetId        Int           @default(1080132708) @map("gwangjin_sheet_id")
+  schemaFingerprint      String        @map("schema_fingerprint") @db.VarChar(100)
+  schemaVersion          Int           @default(4) @map("schema_version")
+  enabled                Boolean       @default(false)
+  circuitStatus          String        @default("BLOCKED") @map("circuit_status") @db.VarChar(24)
+  blockReasonCode        String?       @map("block_reason_code") @db.VarChar(80)
+  lastValidatedAt        DateTime?     @map("last_validated_at") @db.Timestamptz(6)
+  dispatchLeaseOwner     String?       @map("dispatch_lease_owner") @db.Uuid
+  dispatchLeaseExpiresAt DateTime?     @map("dispatch_lease_expires_at") @db.Timestamptz(6)
+  lastDispatchAt         DateTime?     @map("last_dispatch_at") @db.Timestamptz(6)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deliveries             SheetOutbox[]
+
+  @@index([enabled, circuitStatus], map: "sheet_mappings_enabled_circuit_idx")
+  @@map("sheet_mappings")
+}
+
+model SheetOutbox {
+  id                           BigInt         @id @default(autoincrement())
+  deliveryPublicId             String         @unique @default(dbgenerated("gen_random_uuid()")) @map("delivery_public_id") @db.Uuid
+  mappingId                    BigInt         @map("mapping_id")
+  eventId                      String         @map("event_id") @db.Uuid
+  eventType                    String         @map("event_type") @db.VarChar(32)
+  seminarSessionPublicId       String         @map("seminar_session_public_id") @db.Uuid
+  familyBookingPublicId        String         @map("family_booking_public_id") @db.Uuid
+  familyBookingStudentPublicId String         @map("family_booking_student_public_id") @db.Uuid
+  studentPublicId              String         @map("student_public_id") @db.Uuid
+  bookingVersion               BigInt         @map("booking_version")
+  snapshotCiphertext           Bytes          @map("snapshot_ciphertext") @db.ByteA
+  status                       String         @default("PENDING") @db.VarChar(24)
+  attemptCount                 Int            @default(0) @map("attempt_count")
+  nextAttemptAt                DateTime       @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseOwner                   String?        @map("lease_owner") @db.Uuid
+  leaseExpiresAt               DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
+  lastErrorCode                String?        @map("last_error_code") @db.VarChar(80)
+  completedAt                  DateTime?      @map("completed_at") @db.Timestamptz(6)
+  createdAt                    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  mapping                      SheetMapping   @relation(fields: [mappingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  attempts                     SheetAttempt[]
+
+  @@unique([mappingId, eventId, familyBookingStudentPublicId], map: "sheet_outbox_mapping_event_child_unique")
+  @@index([status, nextAttemptAt, id], map: "sheet_outbox_worker_idx")
+  @@index([familyBookingPublicId, bookingVersion], map: "sheet_outbox_booking_version_idx")
+  @@map("sheet_outbox")
+}
+
+model SheetAttempt {
+  id            BigInt      @id @default(autoincrement())
+  eventId       String      @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  sheetOutboxId BigInt      @map("sheet_outbox_id")
+  attemptNo     Int         @map("attempt_no")
+  result        String      @db.VarChar(24)
+  errorCode     String?     @map("error_code") @db.VarChar(80)
+  safeMetadata  Json        @default("{}") @map("safe_metadata") @db.JsonB
+  occurredAt    DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  outbox        SheetOutbox @relation(fields: [sheetOutboxId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([sheetOutboxId, attemptNo], map: "sheet_attempts_outbox_attempt_unique")
+  @@index([sheetOutboxId, occurredAt(sort: Desc)], map: "sheet_attempts_outbox_occurred_idx")
+  @@map("sheet_attempts")
+}
+
+model SurveyResponse {
+  id              BigInt         @id @default(autoincrement())
+  publicId        String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  familyBookingId BigInt         @unique @map("family_booking_id")
+  sessionId       BigInt         @map("session_id")
+  rating          Int            @db.SmallInt
+  comment         String?        @db.Text
+  photoAttached   Boolean        @default(false) @map("photo_attached")
+  photoName       String?        @map("photo_name") @db.VarChar(255)
+  submittedAt     DateTime       @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  familyBooking   FamilyBooking  @relation(fields: [familyBookingId, sessionId], references: [id, sessionId], onDelete: NoAction, onUpdate: NoAction, map: "survey_responses_family_session_fk")
+  session         SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([familyBookingId, sessionId], map: "survey_responses_family_session_unique")
+  @@index([sessionId, submittedAt(sort: Desc), id(sort: Desc)], map: "survey_responses_session_submitted_idx")
+  @@map("survey_responses")
+}

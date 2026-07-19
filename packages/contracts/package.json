@@ -1,0 +1,11 @@
+{
+  "name": "@npr-seminar/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authoritative OpenAPI 3.1 contract for the NPR Seminar NestJS backend",
+  "scripts": {
+    "lint": "python3 scripts/validate_openapi.py openapi.yaml",
+    "audit:controllers": "python3 scripts/audit_controller_routes.py",
+    "validate": "python3 scripts/validate_openapi.py openapi.yaml && python3 scripts/audit_controller_routes.py"
+  }
+}

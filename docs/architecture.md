@@ -1,9 +1,11 @@
-# npr-seminar 풀스택 아키텍처 설계서
+# npr-seminar 웹 레거시 아키텍처 설계서
 
-> **대상:** `npr-seminar` — Next.js **풀스택** 앱 (FE + 서버 계층 + DB를 한 repo에서)
+> **현재 상태(2026-07-17):** 저장소는 Next.js `apps/web` + NestJS `apps/api` 모노레포로 전환되었다. 이 문서는 전환 전 Next.js 풀스택 구현을 보존한 역사 문서이며, 현재 런타임이나 DB 소유권의 기준이 아니다. 현재 결정은 [monorepo.md](monorepo.md)와 [NestJS 인수인계서](specs/nestjs-backend-handoff.md)를 따른다.
+>
+> **대상:** `apps/web` — 기존 Next.js **풀스택** 구현 (FE + 임시 서버 계층 + DB)
 > **참고 구조:** `fe-architecture-v2` (NPR ERP FE 모노레포) — **설계 뼈대(레이어·규율)만 승계, 디자인 시스템 제외**
 > **핵심 제약:** DB는 초기 Vercel 플러그인(Neon)으로 시작하되 **이후 1회 변경될 수 있음.** 변경 후에도 구현된 기능이 그대로 동작해야 함 → §6 격리 설계가 이 문서의 중심.
-> **기능 근거:** `npr-seminar-feature-spec.md`(기능 명세 v2.0) · `npr-seminar-flows.json`(페르소나·플로우) — 본문의 "명세 §x"는 전자를, "flows XXX-Fn"은 후자를 가리킨다.
+> **기능 근거:** `specs/npr-seminar-feature-spec.md`(기능 명세 v2.0) · `specs/npr-seminar-flows.json`(페르소나·플로우) — 본문의 "명세 §x"는 전자를, "flows XXX-Fn"은 후자를 가리킨다.
 > **작성일:** 2026-07-16 · rev.2
 
 ---
@@ -16,13 +18,13 @@
 | S2 | 초기 DB | **Neon (Postgres)** — Vercel 마켓플레이스 연동 | `DATABASE_URL` 자동 주입 |
 | S3 | 데이터 접근 | **Drizzle ORM** | 서버리스 친화·경량, Postgres/MySQL/SQLite 지원 → 교체 부담 낮음 |
 | S4 | 서버 API 스타일 | **RSC + Server Actions 혼합** | 조회 = RSC(page)에서 서비스 호출, 변경 = Server Actions |
-| S5 | repo 형태 | **단일 Next 앱** (모노레포 아님) | 참고 구조 D1의 B안. 근거: 참고 구조가 워크스페이스를 쓴 이유는 `@npr/api-client` 패키지 경계였는데, 풀스택에선 그 경계가 `src/server` 존(ESLint + `server-only`)으로 대체됨. 앱이 하나뿐인데 워크스페이스는 오버스펙(참고 §0.4 원칙) |
+| S5 | repo 형태 (이전 결정) | **단일 Next 앱** | 2026-07-17 Spring Boot 분리 결정으로 폐기. 현재 구조는 `monorepo.md` 참조 |
 | S6 | 입력 검증 | **zod** (Server Action 입력) | Server Action은 사실상 공개 HTTP 엔드포인트 — 입력 검증은 "나중"이 아니라 필수 |
 | S7 | TanStack Query | **초기 미도입** | S4 결정의 귀결. 필요 시점의 삽입 자리는 §8 이음새로 예약 |
 
 ### 기능 명세 반영 (2026-07-16 추가 확정)
 
-근거: `npr-seminar-feature-spec.md`(§ 표기는 이 문서를 가리킴) · `npr-seminar-flows.json`
+근거: `specs/npr-seminar-feature-spec.md`(§ 표기는 이 문서를 가리킴) · `specs/npr-seminar-flows.json`
 
 | # | 항목 | 결정 | 비고 |
 |---|---|---|---|
@@ -345,4 +347,4 @@ pnpm typecheck && pnpm lint && pnpm build
 
 ---
 
-*— rev.2 (2026-07-16). 기능 명세(`npr-seminar-feature-spec.md`)·플로우(`npr-seminar-flows.json`) 반영. 결정 S8~S11 추가.*
+*— rev.2 (2026-07-16). 기능 명세(`specs/npr-seminar-feature-spec.md`)·플로우(`specs/npr-seminar-flows.json`) 반영. 결정 S8~S11 추가. 2026-07-17 모노레포 전환 상태 주석 추가.*

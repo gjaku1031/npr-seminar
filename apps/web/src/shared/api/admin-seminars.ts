@@ -1,0 +1,214 @@
+"use client";
+
+/**
+ * 관리자 설명회·회차 어댑터 (계약 tag: Admin seminars).
+ *
+ * ★ 회차만 평평하게 주는 목록 엔드포인트가 계약에 없다. 회차 선택지를 채우려면
+ *   설명회 목록을 먼저 읽고, 각 설명회의 회차를 이어서 읽어야 한다.
+ */
+
+import { apiRequest } from "./client";
+import type { DurableCallOptions } from "./scanner-admin";
+import type {
+  AdminSeminarSession,
+  AdminSeminarSessionPage,
+  AdminSurveyResponsePage,
+  SeminarPage,
+  SeminarSessionOperationsSummary,
+  SeminarStatus,
+} from "./contract";
+
+/**
+ * operations-summary 의 **서버 원시 필드명**(가족 예약 건수). 회차 목록 항목마다 함께 온다.
+ * 화면·계약 타입은 `activeCount…` 로 쓰므로 어댑터 경계에서 이 이름을 정규화한다.
+ */
+interface RawSessionOperationsSummary {
+  activeBookingCount: number;
+  checkedInBookingCount: number;
+  uncheckedBookingCount: number;
+  cancelledBookingCount: number;
+  noShowBookingCount: number;
+}
+
+/** 목록 엔드포인트 원시 회차 — operationsSummary 필드명이 서버 형태(…BookingCount) 그대로다. */
+type RawAdminSeminarSession = Omit<AdminSeminarSession, "operationsSummary"> & {
+  operationsSummary?: RawSessionOperationsSummary;
+};
+
+type RawAdminSeminarSessionPage = Omit<AdminSeminarSessionPage, "items"> & {
+  items: RawAdminSeminarSession[];
+};
+
+/**
+ * 서버 원시 집계(…BookingCount) → 화면 정규화(…Count). 목록은 항상 집계를 주지만, 없는
+ * 경로(방어)라면 0 으로 채운다 — active/미체크에 NO_SHOW 를 절대 섞지 않는 규칙은 서버가 지킨다.
+ */
+export function normalizeSessionOperationsSummary(
+  raw: RawSessionOperationsSummary | undefined,
+): SeminarSessionOperationsSummary {
+  return {
+    activeCount: raw?.activeBookingCount ?? 0,
+    checkedInCount: raw?.checkedInBookingCount ?? 0,
+    uncheckedCount: raw?.uncheckedBookingCount ?? 0,
+    cancelledCount: raw?.cancelledBookingCount ?? 0,
+    noShowCount: raw?.noShowBookingCount ?? 0,
+  };
+}
+
+/** 원시 회차 → 화면 회차. operationsSummary 만 정규화하고 나머지는 그대로 옮긴다. */
+export function normalizeAdminSeminarSession(raw: RawAdminSeminarSession): AdminSeminarSession {
+  const { operationsSummary, ...rest } = raw;
+  return { ...rest, operationsSummary: normalizeSessionOperationsSummary(operationsSummary) };
+}
+
+/**
+ * 계약 SeminarSessionUpdateRequest (PATCH /admin/seminar-sessions/{id}).
+ * minProperties:2 — expectedVersion 외 최소 한 필드가 필요하다. 여기서는 guestBookingEnabled 만 보낸다.
+ */
+export interface SeminarSessionUpdateRequest {
+  guestBookingEnabled?: boolean;
+  expectedVersion: number;
+}
+
+/**
+ * 회차 부분 변경 — 낙관적 동시성(expectedVersion)과 멱등 키를 지킨다.
+ * 응답 단건은 목록의 operationsSummary 를 주지 않을 수 있어 normalizeAdminSeminarSession 으로 0 폴백한다
+ * (그래서 화면은 실집계가 필요하면 목록을 reload 한다 — 이 응답의 0 을 실집계로 오해하지 않는다).
+ */
+export async function updateAdminSeminarSession(
+  sessionId: string,
+  body: SeminarSessionUpdateRequest,
+  options: DurableCallOptions,
+): Promise<AdminSeminarSession> {
+  const raw = await apiRequest<RawAdminSeminarSession>(
+    `/admin/seminar-sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      body,
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+    },
+  );
+  return normalizeAdminSeminarSession(raw);
+}
+
+export interface ListSeminarsParams {
+  status?: SeminarStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export async function listAdminSeminars(
+  params: ListSeminarsParams = {},
+  signal?: AbortSignal,
+): Promise<SeminarPage> {
+  return apiRequest<SeminarPage>("/admin/seminars", {
+    method: "GET",
+    query: { status: params.status, page: params.page, pageSize: params.pageSize },
+    signal,
+  });
+}
+
+export interface ListSeminarSessionsParams {
+  page?: number;
+  /** 계약 최대 200. */
+  pageSize?: number;
+}
+
+/**
+ * 한 설명회의 회차 한 페이지 — 계약대로 page/pageSize 를 보낸다. 각 항목의 operationsSummary 를
+ * 서버 원시 필드명에서 화면 이름으로 정규화해 돌려준다.
+ */
+export async function listSeminarSessions(
+  seminarId: string,
+  params: ListSeminarSessionsParams = {},
+  signal?: AbortSignal,
+): Promise<AdminSeminarSessionPage> {
+  const raw = await apiRequest<RawAdminSeminarSessionPage>(
+    `/admin/seminars/${encodeURIComponent(seminarId)}/sessions`,
+    { method: "GET", query: { page: params.page, pageSize: params.pageSize }, signal },
+  );
+  return { ...raw, items: raw.items.map(normalizeAdminSeminarSession) };
+}
+
+/** 한 설명회의 회차 전체 — `page.totalPages` 를 끝까지 따라간다. */
+async function listAllSeminarSessions(
+  seminarId: string,
+  signal?: AbortSignal,
+): Promise<AdminSeminarSession[]> {
+  const first = await listSeminarSessions(seminarId, { page: 1, pageSize: SEMINAR_PAGE_SIZE }, signal);
+  if (first.page.totalPages <= 1) return first.items;
+
+  const rest = await Promise.all(
+    Array.from({ length: first.page.totalPages - 1 }, (_, index) =>
+      listSeminarSessions(seminarId, { page: index + 2, pageSize: SEMINAR_PAGE_SIZE }, signal),
+    ),
+  );
+
+  return [first, ...rest].flatMap((page) => page.items);
+}
+
+export interface SeminarSessionOption {
+  session: AdminSeminarSession;
+  seminarTitle: string;
+}
+
+/** 계약 PageSize 최대 200. */
+const SEMINAR_PAGE_SIZE = 200;
+
+/**
+ * 게시된 설명회 전체 — `page.totalPages` 를 끝까지 따라간다.
+ *
+ * 첫 페이지만 읽고 "전체 설명회"라고 부르면 201번째부터가 조용히 사라진다. 실제로 그만큼
+ * 많을 일은 없지만, 완전하다고 말하는 쪽이 페이지를 세는 것보다 싸지도 않다.
+ */
+async function listAllPublishedSeminars(signal?: AbortSignal): Promise<SeminarPage["items"]> {
+  const first = await listAdminSeminars({ status: "PUBLISHED", pageSize: SEMINAR_PAGE_SIZE }, signal);
+  if (first.page.totalPages <= 1) return first.items;
+
+  const rest = await Promise.all(
+    Array.from({ length: first.page.totalPages - 1 }, (_, index) =>
+      listAdminSeminars({ status: "PUBLISHED", page: index + 2, pageSize: SEMINAR_PAGE_SIZE }, signal),
+    ),
+  );
+
+  return [first, ...rest].flatMap((page) => page.items);
+}
+
+/**
+ * 콘솔이 고를 수 있는 회차 — 게시된 설명회의 회차를 모아 시작 시각 순으로 준다.
+ *
+ * 설명회별 요청은 병렬로 낸다. 회차가 없는 설명회는 그냥 빈 배열로 합쳐진다.
+ */
+export async function listBookableSessions(signal?: AbortSignal): Promise<SeminarSessionOption[]> {
+  const seminars = await listAllPublishedSeminars(signal);
+
+  const perSeminar = await Promise.all(
+    seminars.map(async (seminar) => {
+      const sessions = await listAllSeminarSessions(seminar.seminarId, signal);
+      return sessions.map((session) => ({ session, seminarTitle: seminar.title }));
+    }),
+  );
+
+  return perSeminar
+    .flat()
+    .filter((option) => option.session.status !== "ARCHIVED")
+    .sort((a, b) => Date.parse(a.session.startsAt) - Date.parse(b.session.startsAt));
+}
+
+/**
+ * 한 회차의 설문 응답 + **서버 집계 요약**.
+ *
+ * `summary` 는 회차 전체 기준이라 페이지 크기와 무관하다 — 평균 별점은 여기서만 읽고
+ * items 로 다시 계산하지 않는다(한 페이지 평균은 회차 평균이 아니다).
+ */
+export async function listSessionSurveyResponses(
+  seminarSessionId: string,
+  params: { page?: number; pageSize?: number } = {},
+  signal?: AbortSignal,
+): Promise<AdminSurveyResponsePage> {
+  return apiRequest<AdminSurveyResponsePage>(
+    `/admin/seminar-sessions/${encodeURIComponent(seminarSessionId)}/survey-responses`,
+    { method: "GET", query: { page: params.page, pageSize: params.pageSize }, signal },
+  );
+}
