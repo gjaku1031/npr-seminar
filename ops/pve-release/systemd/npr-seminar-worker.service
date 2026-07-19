@@ -1,0 +1,52 @@
+[Unit]
+Description=NPR Seminar isolated SMS and Google Sheets worker
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=npr-worker
+Group=npr-worker
+WorkingDirectory=/srv/npr-seminar/current/apps/api
+EnvironmentFile=/etc/npr-seminar/worker.env
+Environment=NODE_ENV=production
+Environment=APP_ENV=production
+Environment=PROCESS_ROLE=worker
+UnsetEnvironment=DATABASE_URL MIGRATION_DATABASE_URL PORT SESSION_SECRET OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY REDIS_URL
+UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
+ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/api/dist/worker.js
+ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/api/dist/worker.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProtectSystem=strict
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+InaccessiblePaths=-/etc/npr-seminar/api.env -/etc/npr-seminar/web.env -/etc/npr-seminar/migration.env
+ReadOnlyPaths=-/etc/npr-seminar/google-service-account.json
+LimitNOFILE=65535
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

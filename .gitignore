@@ -1,13 +1,17 @@
 # deps
-/node_modules
+node_modules/
+/apps/api/src/generated/prisma/
 
 # next
-/.next/
-/out/
+.next/
+out/
 next-env.d.ts
 
 # build
-/build
+build/
+/apps/api/dist/
+target/
+.gradle/
 *.tsbuildinfo
 
 # env — 예시 파일만 커밋한다
@@ -20,5 +24,11 @@ next-env.d.ts
 npm-debug.log*
 
 # local tool config
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/commands/design.md
 .vercel
+.turbo/
+.idea/
+*.iml
