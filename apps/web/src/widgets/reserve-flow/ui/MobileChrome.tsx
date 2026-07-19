@@ -1,0 +1,139 @@
+"use client";
+
+/**
+ * 모바일 앱 크롬 — 기존 ReserveFlow 시각 언어를 그대로 유지한다.
+ *
+ * 뷰포트 제약(데스크톱 버그 수정): 고정 하단 바·토스트·모달 오버레이가 `position: fixed`
+ * 라 맥 데스크톱에서 화면 전체로 늘어났다. 앱 폭(480)에 맞춰 가운데로 묶는다.
+ * iPhone 처럼 좁은 화면에서는 min(100%, 480px) 이 100% 라 가장자리까지 그대로 간다.
+ */
+
+import type { CSSProperties, ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
+import { BrandMark } from "@/shared/ui";
+
+/** 앱 뷰포트 폭 — ReserveView 의 max-width 480 과 같은 값. */
+export const APP_MAX_WIDTH = 480;
+
+/** 고정 요소를 앱 폭 안에 가둔다 (데스크톱에서 화면 전체로 퍼지지 않게). */
+export const appViewportStyle: CSSProperties = {
+  width: `min(100%, ${APP_MAX_WIDTH}px)`,
+  left: "50%",
+  transform: "translateX(-50%)",
+};
+
+export function FlowHeader({ back, title }: { back?: () => void; title: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", position: "sticky", top: 0, background: "rgba(247,249,242,0.9)", backdropFilter: "var(--blur-veil)", zIndex: 5 }}>
+      {back ? (
+        <button
+          type="button"
+          onClick={back}
+          aria-label="뒤로"
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-strong)", display: "inline-flex", padding: 8, margin: -4 }}
+        >
+          <ArrowLeft size={19} aria-hidden="true" />
+        </button>
+      ) : (
+        <BrandMark size={26} radius={8} />
+      )}
+      <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--violet-900)" }}>
+        {title}
+      </span>
+    </div>
+  );
+}
+
+/** 하단 고정 액션 바 — 홈 인디케이터(safe-area)를 피해 여백을 준다. */
+export function BottomBar({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 0,
+        ...appViewportStyle,
+        padding: "12px 18px calc(20px + env(safe-area-inset-bottom))",
+        background: "rgba(247,249,242,0.92)",
+        backdropFilter: "var(--blur-veil)",
+        borderTop: "1px solid var(--border-hairline)",
+        zIndex: 6,
+        boxSizing: "border-box",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** 토스트 — 상태 변화를 낭독한다. */
+export function FlowToast({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        bottom: "calc(24px + env(safe-area-inset-bottom))",
+        ...appViewportStyle,
+        display: "flex",
+        justifyContent: "center",
+        zIndex: 30,
+        pointerEvents: "none",
+      }}
+    >
+      <span style={{ background: "var(--violet-900)", color: "#fff", padding: "11px 18px", borderRadius: "var(--radius-pill)", fontSize: 13, fontWeight: 600, boxShadow: "var(--shadow-raised)", textAlign: "center", animation: "ds-pop var(--dur-base) var(--ease-spring) both" }}>
+        {message}
+      </span>
+    </div>
+  );
+}
+
+/** 인라인 오류 — 비동기 실패는 즉시 낭독되어야 한다. */
+export function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      style={{ marginTop: 12, padding: "12px 14px", borderRadius: "var(--radius-md)", background: "var(--status-danger-soft)", color: "var(--status-danger)", fontSize: 13, lineHeight: 1.5 }}
+    >
+      {message}
+    </div>
+  );
+}
+
+/** 모달·시트 오버레이 — 앱 폭 안에서만 덮는다. */
+export function FlowOverlay({
+  onDismiss,
+  align = "center",
+  children,
+}: {
+  onDismiss: () => void;
+  align?: "center" | "bottom";
+  children: ReactNode;
+}) {
+  return (
+    <div
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onDismiss();
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        bottom: 0,
+        ...appViewportStyle,
+        background: "rgba(23,33,15,0.4)",
+        backdropFilter: "var(--blur-veil)",
+        zIndex: 40,
+        display: "flex",
+        alignItems: align === "bottom" ? "flex-end" : "center",
+        justifyContent: "center",
+        padding: align === "bottom" ? 0 : 24,
+        boxSizing: "border-box",
+        animation: "ds-fade-in var(--dur-fast) both",
+      }}
+    >
+      {children}
+    </div>
+  );
+}

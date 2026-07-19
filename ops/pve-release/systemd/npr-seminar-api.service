@@ -1,0 +1,53 @@
+[Unit]
+Description=NPR Seminar NestJS API
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=npr-api
+Group=npr-api
+WorkingDirectory=/srv/npr-seminar/current/apps/api
+EnvironmentFile=/etc/npr-seminar/api.env
+Environment=NODE_ENV=production
+Environment=APP_ENV=production
+Environment=PROCESS_ROLE=api
+Environment=PORT=4000
+UnsetEnvironment=GOOGLE_APPLICATION_CREDENTIALS WORKER_DATABASE_URL MIGRATION_DATABASE_URL
+UnsetEnvironment=ALIGO_IDENTIFIER ALIGO_KEY
+UnsetEnvironment=SMS_SENDER_CAMPUS_A SMS_SENDER_CAMPUS_B SMS_SENDER_CAMPUS_C
+ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/api/dist/main.js
+ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/api/dist/main.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0027
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProtectSystem=strict
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+InaccessiblePaths=/etc/npr-seminar
+LimitNOFILE=65535
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

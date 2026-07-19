@@ -1,6 +1,19 @@
+packages:
+  - apps/web
+  - apps/api
+  - packages/*
+
 # pnpm 11 빌드 스크립트 허용 목록.
-# esbuild: drizzle-kit / sharp: next 이미지 최적화 / unrs-resolver: eslint-config-next
+# esbuild: tooling / sharp: next 이미지 최적화 / unrs-resolver: eslint-config-next
+# argon2: 관리자 비밀번호 해시 native binding
 allowBuilds:
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  argon2: true
+  cpu-features: false
   esbuild: true
+  prisma: true
+  protobufjs: false
   sharp: true
+  ssh2: false
   unrs-resolver: true

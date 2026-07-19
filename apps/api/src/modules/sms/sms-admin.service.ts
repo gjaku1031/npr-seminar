@@ -1,0 +1,659 @@
+import { Inject, Injectable } from "@nestjs/common";
+import { createHash, randomUUID } from "node:crypto";
+import type { AppEnvironment } from "../../common/config/environment.js";
+import { DomainError } from "../../common/errors/domain-error.js";
+import { IdempotencyService } from "../../common/idempotency/idempotency.service.js";
+import { PrismaService } from "../../common/prisma/prisma.service.js";
+import type { Prisma } from "../../generated/prisma/client.js";
+import { SmsMessagePolicy, type SmsPayloadClassification } from "./sms-message-policy.service.js";
+import { SmsOutboxService, type SmsBranch, type SmsSource } from "./sms-outbox.service.js";
+import { SmsTemplateRenderer } from "./sms-template-renderer.service.js";
+
+export type SmsAudience =
+  | "BOOKED_FAMILIES"
+  | "RESERVED_FAMILIES"
+  | "CHECKED_IN_FAMILIES"
+  | "CANCELLED_FAMILIES";
+
+interface TargetRequest {
+  readonly branch: SmsBranch;
+  readonly seminarSessionId: string;
+  readonly audience: SmsAudience;
+  readonly templateId?: string;
+  readonly message?: string;
+  readonly title?: string;
+}
+
+interface ResolvedPayload {
+  readonly messageTemplate: string;
+  readonly titleTemplate: string | null;
+  readonly templateId: string | null;
+  readonly templateName: string;
+  readonly templateVersion: string | null;
+}
+
+interface PreparedTarget {
+  readonly publicId: string;
+  readonly version: bigint;
+  readonly contactCiphertext: Uint8Array;
+  readonly contactDigest: Uint8Array;
+  readonly contactLast4: string;
+  readonly studentName: string;
+  readonly message: string;
+  readonly title: string | null;
+  readonly classification: SmsPayloadClassification;
+}
+
+interface BatchAggregateRow {
+  readonly batch_id: string;
+  readonly source: string;
+  readonly template_id: string | null;
+  readonly template_name: string | null;
+  readonly audience: string | null;
+  readonly seminar_session_id: string | null;
+  readonly branch: string;
+  readonly actor_subject: string | null;
+  readonly recipient_count: number;
+  readonly success_count: number;
+  readonly failure_count: number;
+  readonly pending_count: number;
+  readonly processing_count: number;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+const TEMPLATE_LOCK_NAME = "npr:sms-templates";
+const INQUIRY_PHONE: Readonly<Record<SmsBranch, string>> = {
+  CAMPUS_A: "02-000-0001",
+  CAMPUS_B: "02-000-0002",
+  CAMPUS_C: "02-000-0003",
+};
+const TERMINAL_FAILURE_STATUSES = [
+  "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST", "FAILED_PERMANENT", "DELIVERY_UNKNOWN", "DEAD",
+] as const;
+
+@Injectable()
+export class SmsAdminService {
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly idempotency: IdempotencyService,
+    private readonly outbox: SmsOutboxService,
+    private readonly policy: SmsMessagePolicy,
+    private readonly renderer: SmsTemplateRenderer,
+    @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
+  ) {}
+
+  public readiness() {
+    const sendersConfigured = Object.values(this.environment.smsSenders).every((value) => value !== undefined);
+    return {
+      enabled: this.environment.smsEnabled,
+      configured: this.environment.aligoIdentifier !== undefined && this.environment.aligoKey !== undefined && sendersConfigured,
+      allowlistEnabled: this.environment.smsRecipientAllowlistEnabled,
+      testMode: this.environment.smsAligoTestMode,
+      adapterAvailable: false,
+      workerOnly: true,
+    };
+  }
+
+  public async listTemplates() {
+    const rows = await this.prisma.smsTemplate.findMany({ orderBy: [{ active: "desc" }, { key: "asc" }] });
+    return { items: rows.map((row) => this.mapTemplate(row)) };
+  }
+
+  public async getTemplate(templateId: string) {
+    const row = await this.prisma.smsTemplate.findUnique({ where: { publicId: templateId } });
+    if (row === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
+    return this.mapTemplate(row);
+  }
+
+  public createTemplate(
+    input: { key: string; name: string; purpose: SmsSource; title?: string; body: string },
+    actor: string,
+    key: string,
+  ) {
+    const classification = this.validateTemplatePayload(input.body, input.title ?? null);
+    return this.idempotency.execute("SMS_TEMPLATE_CREATE", key, input, async (transaction) => {
+      await this.lockTemplates(transaction);
+      const duplicate = await transaction.smsTemplate.findUnique({ where: { key: input.key }, select: { id: true } });
+      if (duplicate !== null) this.fail(409, "SMS_TEMPLATE_KEY_CONFLICT");
+      const row = await transaction.smsTemplate.create({ data: {
+        key: input.key,
+        name: input.name,
+        purpose: input.purpose,
+        title: input.title ?? null,
+        body: input.body,
+        createdBy: actor,
+        updatedBy: actor,
+      } });
+      return { ...this.mapTemplate(row), classification };
+    }, 201);
+  }
+
+  public updateTemplate(
+    templateId: string,
+    input: { name?: string; purpose?: SmsSource; title?: string | null; body?: string; active?: boolean; version: string },
+    actor: string,
+    key: string,
+  ) {
+    return this.idempotency.execute("SMS_TEMPLATE_UPDATE", key, { templateId, ...input }, async (transaction) => {
+      await this.lockTemplates(transaction);
+      const current = await transaction.smsTemplate.findUnique({ where: { publicId: templateId } });
+      if (current === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
+      if (current.version.toString() !== input.version) this.fail(409, "SMS_TEMPLATE_VERSION_CONFLICT");
+      const nextBody = input.body ?? current.body;
+      const nextTitle = input.title === undefined ? current.title : input.title;
+      this.validateTemplatePayload(nextBody, nextTitle);
+      if (current.active && input.active === false) {
+        const activeCount = await transaction.smsTemplate.count({ where: { active: true } });
+        if (activeCount <= 1) this.fail(409, "SMS_LAST_ACTIVE_TEMPLATE_REQUIRED");
+      }
+      const row = await transaction.smsTemplate.update({
+        where: { id: current.id },
+        data: {
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+          ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.body === undefined ? {} : { body: input.body }),
+          ...(input.active === undefined ? {} : { active: input.active }),
+          version: { increment: 1 },
+          updatedBy: actor,
+        },
+      });
+      return this.mapTemplate(row);
+    });
+  }
+
+  public archiveTemplate(templateId: string, version: string, actor: string, key: string) {
+    return this.updateTemplate(templateId, { active: false, version }, actor, key);
+  }
+
+  public async preview(input: TargetRequest) {
+    const prepared = await this.prepare(input);
+    const maximumMessageBytes = this.maximum(prepared.rows.map((row) => row.classification.messageBytes));
+    const maximumTitleBytes = this.maximum(prepared.rows
+      .map((row) => row.classification.titleBytes)
+      .filter((value): value is number => value !== null));
+    const samples = prepared.rows.slice(0, 10).map((row) => ({
+      familyBookingId: row.publicId,
+      maskedRecipient: this.mask(row.contactLast4),
+      message: row.message,
+      title: row.title,
+      messageType: row.classification.messageType,
+      messageBytes: row.classification.messageBytes,
+      titleBytes: row.classification.titleBytes,
+    }));
+    return {
+      branch: input.branch,
+      seminarSessionId: input.seminarSessionId,
+      audience: input.audience,
+      recipientCount: prepared.rows.length,
+      previewToken: prepared.previewToken,
+      maskedRecipients: samples.map((sample) => sample.maskedRecipient),
+      templateId: prepared.payload.templateId,
+      templateName: prepared.payload.templateName,
+      messageTemplate: prepared.payload.messageTemplate,
+      titleTemplate: prepared.payload.titleTemplate,
+      samples,
+      maximumMessageType: prepared.rows.length === 0
+        ? null
+        : prepared.rows.some((row) => row.classification.messageType === "LMS") ? "LMS" : "SMS",
+      maximumMessageBytes,
+      maximumTitleBytes,
+    };
+  }
+
+  public enqueue(
+    input: TargetRequest & { previewToken: string },
+    actor: string,
+    key: string,
+    source: "ADMIN_GROUP" | "SURVEY",
+  ) {
+    return this.idempotency.execute(`SMS_${source}_ENQUEUE`, key, input, async (transaction) => {
+      const prepared = await this.prepare(input, transaction);
+      if (prepared.previewToken !== input.previewToken) this.fail(409, "SMS_PREVIEW_TOKEN_CHANGED");
+      const batchId = randomUUID();
+      for (const row of prepared.rows) {
+        await this.outbox.enqueue(transaction, {
+          eventKey: `${source}:${batchId}:${row.publicId}`,
+          source,
+          branch: input.branch,
+          seminarSessionPublicId: input.seminarSessionId,
+          familyBookingPublicId: row.publicId,
+          recipientCiphertext: row.contactCiphertext,
+          recipientDigest: row.contactDigest,
+          recipientLast4: row.contactLast4,
+          message: row.message,
+          title: row.title,
+          actorSubject: actor,
+          safeMetadata: {
+            batchId,
+            templateId: prepared.payload.templateId,
+            templateName: prepared.payload.templateName,
+            audience: input.audience,
+            seminarSessionId: input.seminarSessionId,
+            branch: input.branch,
+          },
+        });
+      }
+      return {
+        batchId,
+        queuedCount: prepared.rows.length,
+        previewToken: prepared.previewToken,
+        status: "QUEUED",
+        source,
+        templateId: prepared.payload.templateId,
+        templateName: prepared.payload.templateName,
+      };
+    }, 202);
+  }
+
+  public async history(filters: {
+    status?: string;
+    source?: string;
+    branch?: string;
+    seminarSessionId?: string;
+    batchId?: string;
+    limit?: number;
+  }) {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+    const [rows, batches] = await Promise.all([
+      this.prisma.smsOutbox.findMany({
+        where: {
+          ...(filters.status === undefined ? {} : { status: filters.status }),
+          ...(filters.source === undefined ? {} : { source: filters.source }),
+          ...(filters.branch === undefined ? {} : { branchCode: filters.branch }),
+          ...(filters.seminarSessionId === undefined ? {} : { seminarSessionPublicId: filters.seminarSessionId }),
+          ...(filters.batchId === undefined ? {} : {
+            safeMetadata: { path: ["batchId"], equals: filters.batchId },
+          }),
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit,
+      }),
+      this.batchHistory(filters, limit),
+    ]);
+    return { batches, items: rows.map((row) => this.mapOutbox(row)) };
+  }
+
+  public async detail(messageId: string) {
+    const row = await this.prisma.smsOutbox.findUnique({
+      where: { publicId: messageId },
+      include: { attempts: { orderBy: { attemptNo: "asc" } } },
+    });
+    if (row === null) this.fail(404, "SMS_MESSAGE_NOT_FOUND");
+    return {
+      ...this.mapOutbox(row),
+      attempts: row.attempts.map((attempt) => ({
+        eventId: attempt.eventId,
+        attemptNo: attempt.attemptNo,
+        result: attempt.result,
+        providerResultCode: attempt.providerResultCode,
+        providerMessageId: attempt.providerMessageId,
+        errorCode: attempt.errorCode,
+        occurredAt: attempt.occurredAt,
+      })),
+    };
+  }
+
+  private async prepare(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const payload = await this.payload(input, transaction);
+    this.validateTemplatePayload(payload.messageTemplate, payload.titleTemplate);
+    const targetSet = await this.targets(input, transaction);
+    const rows: PreparedTarget[] = targetSet.rows.map((row) => {
+      const context = {
+        studentName: row.studentName,
+        seminarTitle: targetSet.session.seminarTitle,
+        sessionDateTime: this.formatSessionDateTime(targetSet.session.startsAt),
+        place: targetSet.session.place,
+        bookingUrl: this.bookingUrl(row.publicId),
+        inquiryPhone: INQUIRY_PHONE[input.branch],
+      };
+      const message = this.renderer.render(payload.messageTemplate, context, "message");
+      const title = payload.titleTemplate === null ? null : this.renderer.render(payload.titleTemplate, context, "title");
+      return { ...row, message, title, classification: this.policy.classify(message, title) };
+    });
+    const digest = createHash("sha256");
+    digest.update(JSON.stringify({
+      branch: input.branch,
+      seminarSessionId: input.seminarSessionId,
+      audience: input.audience,
+      sessionVersion: targetSet.session.version.toString(),
+      seminarTitle: targetSet.session.seminarTitle,
+      startsAt: targetSet.session.startsAt.toISOString(),
+      place: targetSet.session.place,
+      messageTemplate: payload.messageTemplate,
+      titleTemplate: payload.titleTemplate,
+      templateId: payload.templateId,
+      templateName: payload.templateName,
+      templateVersion: payload.templateVersion,
+    }));
+    for (const row of rows) {
+      digest.update("\n");
+      digest.update(JSON.stringify({
+        familyBookingId: row.publicId,
+        version: row.version.toString(),
+        contactDigest: Buffer.from(row.contactDigest).toString("base64url"),
+        studentName: row.studentName,
+        message: row.message,
+        title: row.title,
+        messageType: row.classification.messageType,
+        messageBytes: row.classification.messageBytes,
+        titleBytes: row.classification.titleBytes,
+      }));
+    }
+    return { payload, rows, previewToken: digest.digest("base64url") };
+  }
+
+  private async payload(
+    input: TargetRequest,
+    transaction: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<ResolvedPayload> {
+    if (input.templateId !== undefined) {
+      if (input.message !== undefined || input.title !== undefined) this.fail(400, "SMS_CONTENT_SOURCE_INVALID");
+      const template = await transaction.smsTemplate.findFirst({
+        where: { publicId: input.templateId, active: true },
+      });
+      if (template === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
+      return {
+        messageTemplate: template.body,
+        titleTemplate: template.title,
+        templateId: template.publicId,
+        templateName: template.name,
+        templateVersion: template.version.toString(),
+      };
+    }
+    if (input.message === undefined) this.fail(400, "SMS_CONTENT_SOURCE_INVALID");
+    return {
+      messageTemplate: input.message,
+      titleTemplate: input.title ?? null,
+      templateId: null,
+      templateName: "직접 입력",
+      templateVersion: null,
+    };
+  }
+
+  private async targets(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const session = await transaction.seminarSession.findUnique({
+      where: { publicId: input.seminarSessionId },
+      select: {
+        id: true,
+        version: true,
+        startsAt: true,
+        place: true,
+        seminar: { select: { title: true } },
+      },
+    });
+    if (session === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
+    const statuses = this.audienceStatuses(input.audience);
+    const bookings = await transaction.familyBooking.findMany({
+      where: {
+        sessionId: session.id,
+        status: { in: statuses },
+        students: { some: input.audience === "CANCELLED_FAMILIES"
+          ? { branchCodeAtBooking: input.branch, releasedAt: { not: null } }
+          : { branchCodeAtBooking: input.branch, active: true } },
+      },
+      select: {
+        publicId: true,
+        version: true,
+        contactCiphertext: true,
+        contactDigest: true,
+        contactLast4: true,
+        students: {
+          select: {
+            id: true,
+            active: true,
+            releasedAt: true,
+            branchCodeAtBooking: true,
+            studentNameSnapshot: true,
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+      orderBy: [{ publicId: "asc" }],
+    });
+    const rows = bookings.flatMap((booking) => {
+      const relevant = this.relevantStudents(input.audience, booking.students, input.branch);
+      if (relevant.length === 0) return [];
+      const studentName = [...new Set(relevant.map((student) => student.studentNameSnapshot.trim()).filter(Boolean))].join(", ");
+      if (studentName.length === 0) this.fail(409, "SMS_STUDENT_NAME_MISSING");
+      return [{
+        publicId: booking.publicId,
+        version: booking.version,
+        contactCiphertext: booking.contactCiphertext,
+        contactDigest: booking.contactDigest,
+        contactLast4: booking.contactLast4,
+        studentName,
+      }];
+    });
+    return {
+      rows,
+      session: {
+        version: session.version,
+        seminarTitle: session.seminar.title,
+        startsAt: session.startsAt,
+        place: session.place,
+      },
+    };
+  }
+
+  private relevantStudents(
+    audience: SmsAudience,
+    students: readonly {
+      id: bigint;
+      active: boolean;
+      releasedAt: Date | null;
+      branchCodeAtBooking: string;
+      studentNameSnapshot: string;
+    }[],
+    branch: SmsBranch,
+  ) {
+    if (audience !== "CANCELLED_FAMILIES") {
+      return students.filter((student) => student.active && student.branchCodeAtBooking === branch);
+    }
+    const latestReleasedAt = students.reduce<number | null>((latest, student) => {
+      const releasedAt = student.releasedAt?.getTime() ?? null;
+      return releasedAt === null ? latest : Math.max(latest ?? releasedAt, releasedAt);
+    }, null);
+    if (latestReleasedAt === null) return [];
+    return students.filter((student) => student.branchCodeAtBooking === branch
+      && student.releasedAt?.getTime() === latestReleasedAt);
+  }
+
+  private audienceStatuses(audience: SmsAudience): string[] {
+    switch (audience) {
+      case "BOOKED_FAMILIES": return ["RESERVED", "CHECKED_IN"];
+      case "RESERVED_FAMILIES": return ["RESERVED"];
+      case "CHECKED_IN_FAMILIES": return ["CHECKED_IN"];
+      case "CANCELLED_FAMILIES": return ["CANCELLED"];
+    }
+  }
+
+  private async batchHistory(
+    filters: { status?: string; source?: string; branch?: string; seminarSessionId?: string; batchId?: string },
+    limit: number,
+  ) {
+    const source = filters.source ?? null;
+    const branch = filters.branch ?? null;
+    const seminarSessionId = filters.seminarSessionId ?? null;
+    const batchId = filters.batchId ?? null;
+    const status = filters.status ?? null;
+    const rows = await this.prisma.$queryRaw<BatchAggregateRow[]>`
+      select
+        safe_metadata->>'batchId' as batch_id,
+        max(source) as source,
+        max(safe_metadata->>'templateId') as template_id,
+        max(safe_metadata->>'templateName') as template_name,
+        max(safe_metadata->>'audience') as audience,
+        max(seminar_session_public_id::text) as seminar_session_id,
+        max(branch_code) as branch,
+        max(actor_subject) as actor_subject,
+        count(*)::integer as recipient_count,
+        count(*) filter (where status='SENT')::integer as success_count,
+        count(*) filter (where status=any(${[...TERMINAL_FAILURE_STATUSES]}::text[]))::integer as failure_count,
+        count(*) filter (where status in ('PENDING','CLAIMED','SENDING'))::integer as pending_count,
+        count(*) filter (where status in ('CLAIMED','SENDING'))::integer as processing_count,
+        min(created_at) as created_at,
+        max(updated_at) as updated_at
+      from sms_outbox
+      where safe_metadata ? 'batchId'
+        and (${source}::text is null or source=${source})
+        and (${branch}::text is null or branch_code=${branch})
+        and (${seminarSessionId}::uuid is null or seminar_session_public_id=${seminarSessionId}::uuid)
+        and (${batchId}::uuid is null or safe_metadata->>'batchId'=${batchId})
+      group by safe_metadata->>'batchId'
+      having (${status}::text is null or bool_or(status=${status}))
+      order by min(created_at) desc, max(id) desc
+      limit ${limit}`;
+    return rows.map((row) => ({
+      batchId: row.batch_id,
+      source: row.source,
+      templateId: row.template_id,
+      templateName: row.template_name ?? "직접 입력",
+      audience: row.audience,
+      seminarSessionId: row.seminar_session_id,
+      branch: row.branch,
+      recipientCount: row.recipient_count,
+      successCount: row.success_count,
+      failureCount: row.failure_count,
+      pendingCount: row.pending_count,
+      status: this.batchStatus(row),
+      actorSubject: row.actor_subject,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  private batchStatus(row: BatchAggregateRow): "QUEUED" | "PROCESSING" | "COMPLETED" | "PARTIAL" | "FAILED" {
+    if (row.pending_count > 0) return row.processing_count > 0 ? "PROCESSING" : "QUEUED";
+    if (row.failure_count === 0) return "COMPLETED";
+    if (row.success_count === 0) return "FAILED";
+    return "PARTIAL";
+  }
+
+  private validateTemplatePayload(body: string, title: string | null): SmsPayloadClassification {
+    this.renderer.validate(body, "message");
+    if (title !== null) this.renderer.validate(title, "title");
+    const bodyClassification = this.policy.classify(body);
+    const titleBytes = title === null || title.length === 0
+      ? null
+      : this.policy.classify("가".repeat(46), title).titleBytes;
+    return { ...bodyClassification, titleBytes };
+  }
+
+  private bookingUrl(familyBookingId: string): string {
+    if (this.environment.publicBaseUrl === undefined) return "";
+    const base = new URL(this.environment.publicBaseUrl);
+    return new URL(`/booking/${encodeURIComponent(familyBookingId)}`, base.origin).toString();
+  }
+
+  private formatSessionDateTime(value: Date): string {
+    const parts = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(value);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value ?? "";
+    return `${part("year")}.${part("month")}.${part("day")}(${part("weekday")}) ${part("hour")}:${part("minute")}`;
+  }
+
+  private async lockTemplates(transaction: Prisma.TransactionClient): Promise<void> {
+    await transaction.$executeRaw`select pg_advisory_xact_lock(hashtextextended(${TEMPLATE_LOCK_NAME}::text, 0::bigint))`;
+  }
+
+  private maximum(values: readonly number[]): number | null {
+    return values.length === 0 ? null : Math.max(...values);
+  }
+
+  private mapTemplate(row: {
+    publicId: string;
+    key: string;
+    name: string;
+    purpose: string;
+    title: string | null;
+    body: string;
+    active: boolean;
+    version: bigint;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      templateId: row.publicId,
+      key: row.key,
+      name: row.name,
+      purpose: row.purpose,
+      title: row.title,
+      body: row.body,
+      active: row.active,
+      version: row.version.toString(),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapOutbox(row: {
+    publicId: string;
+    source: string;
+    branchCode: string;
+    seminarSessionPublicId: string | null;
+    familyBookingPublicId: string | null;
+    recipientLast4: string;
+    messageType: string;
+    messageBytes: number;
+    status: string;
+    attemptCount: number;
+    providerMessageId: string | null;
+    providerResultCode: number | null;
+    lastErrorCode: string | null;
+    actorSubject: string | null;
+    safeMetadata: Prisma.JsonValue;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    const metadata = this.safeMetadata(row.safeMetadata);
+    return {
+      messageId: row.publicId,
+      batchId: this.metadataString(metadata, "batchId"),
+      source: row.source,
+      branch: row.branchCode,
+      seminarSessionId: row.seminarSessionPublicId,
+      familyBookingId: row.familyBookingPublicId,
+      templateId: this.metadataString(metadata, "templateId"),
+      templateName: this.metadataString(metadata, "templateName"),
+      audience: this.metadataString(metadata, "audience"),
+      maskedRecipient: this.mask(row.recipientLast4),
+      messageType: row.messageType,
+      messageBytes: row.messageBytes,
+      status: row.status,
+      attemptCount: row.attemptCount,
+      providerMessageId: row.providerMessageId,
+      providerResultCode: row.providerResultCode,
+      lastErrorCode: row.lastErrorCode,
+      actorSubject: row.actorSubject,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private safeMetadata(value: Prisma.JsonValue): Readonly<Record<string, Prisma.JsonValue | undefined>> {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  private metadataString(metadata: Readonly<Record<string, Prisma.JsonValue | undefined>>, key: string): string | null {
+    const value = metadata[key];
+    return typeof value === "string" ? value : null;
+  }
+
+  private mask(last4: string): string {
+    return `***-****-${last4}`;
+  }
+
+  private fail(status: number, code: string): never {
+    throw new DomainError(status, code, "The SMS operation could not be completed.");
+  }
+}

@@ -1,0 +1,54 @@
+[Unit]
+Description=NPR Seminar Next.js web
+After=network-online.target npr-seminar-api.service
+Wants=network-online.target npr-seminar-api.service
+
+[Service]
+Type=simple
+User=npr-web
+Group=npr-web
+WorkingDirectory=/srv/npr-seminar/current/apps/web
+EnvironmentFile=/etc/npr-seminar/web.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+Environment=NEST_API_ORIGIN=http://127.0.0.1:4000
+UnsetEnvironment=DATABASE_URL WORKER_DATABASE_URL MIGRATION_DATABASE_URL REDIS_URL SESSION_SECRET PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY GOOGLE_APPLICATION_CREDENTIALS ALIGO_IDENTIFIER ALIGO_KEY
+UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
+ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/.next/BUILD_ID
+ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next
+ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0027
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProtectSystem=strict
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+InaccessiblePaths=/etc/npr-seminar
+ReadWritePaths=-/srv/npr-seminar/current/apps/web/.next/cache
+LimitNOFILE=65535
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target
