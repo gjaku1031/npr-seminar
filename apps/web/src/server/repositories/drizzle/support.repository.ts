@@ -42,8 +42,6 @@ function toSurvey(row: SurveyRow): SurveyResponse {
     phone: row.phone,
     rating: row.rating,
     comment: row.comment,
-    photo: row.photo,
-    photoName: row.photoName ?? undefined,
     createdAt: row.createdAt,
   };
 }

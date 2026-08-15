@@ -52,14 +52,12 @@ export async function submitSurveyAction(_prev: SurveyState, formData: FormData)
       sessionId: z.uuid(),
       rating: z.coerce.number().int().min(1, "별점을 선택해 주세요.").max(5),
       comment: z.string().trim().max(1000).default(""),
-      photo: z.coerce.boolean().default(false),
       reservationId: z.uuid().nullable().default(null),
     })
     .safeParse({
       sessionId: formData.get("sessionId"),
       rating: formData.get("rating"),
       comment: formData.get("comment") ?? "",
-      photo: formData.get("photo") === "on" || formData.get("photo") === "true",
       reservationId: formData.get("reservationId") || null,
     });
   if (!parsed.success) return errorState(parsed.error.issues[0]?.message ?? "입력값을 확인하세요.");

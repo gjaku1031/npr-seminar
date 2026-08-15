@@ -101,7 +101,7 @@ export function CheckInResultPanel({ panel }: { panel: CheckInPanel }) {
   }
 
   // 미확정 건이 가득 찬 상태 — 새 QR 은 보내지 않는다. 무엇을 해야 하는지 명시한다.
-  if (panel.kind === "capacity") {
+  if (panel.kind === "backlog") {
     return (
       <Frame tone="warning">
         <div role="alert">

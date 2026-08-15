@@ -67,7 +67,15 @@ import {
 import { fmtDateTimeShort, fmtSessionDate } from "@/shared/lib/format";
 import { fmtPhone } from "@/shared/lib/phone";
 import { Badge, Button, Card, Dialog, EmptyState, Icons, Input, Select, Tag, Toast } from "@/shared/ui";
+import {
+  ROSTER_FILTER_LABEL_STYLE,
+  ROSTER_FILTER_ROW_STYLE,
+  ROSTER_FILTER_SEARCH_WIDTH,
+  ROSTER_FILTER_SPACER_WIDTH,
+  ROSTER_FILTER_TAG_STYLE,
+} from "../lib/roster-filter-layout";
 import { BookingEventsDialog } from "./BookingEventsDialog";
+import { ParticipationMonitoringTag } from "./ParticipationMonitoringTag";
 
 const PARTY_OPTIONS: ReadonlyArray<{ value: AttendanceParty; label: string }> = [
   { value: "MOTHER", label: ATTENDANCE_PARTY_LABELS.MOTHER },
@@ -189,6 +197,8 @@ export function StudentsView() {
   const showBranchColumn = showsBranchColumn(roster.filters.branch);
 
   const rows = roster.page?.items ?? [];
+  /** 현재 캠퍼스·단위·담임·검색 조건의 학생/가족/실 참가자 집계 — 목록 페이지와 분리된 서버 값. */
+  const monitoring = roster.page?.monitoring;
   /** 담임 선택지는 서버 facets 그대로 — 화면이 목록에서 긁어 모으면 페이지마다 달라진다. */
   const teachers = roster.page?.facets.teachers ?? [];
   const unmatchedUnitCount = roster.page?.facets.unmatchedUnitCount ?? 0;
@@ -202,6 +212,10 @@ export function StudentsView() {
     roster.filters.teacherName !== undefined && !teachers.includes(roster.filters.teacherName)
       ? [roster.filters.teacherName, ...teachers]
       : teachers;
+
+  // 두 줄 필터의 라벨(캠퍼스·단위) — group 을 가리키는 접근성 연결. 조기 반환 전에 부른다.
+  const campusLabelId = useId();
+  const unitLabelId = useId();
 
   if (sessions.loading) return <EmptyState>설명회를 불러오는 중이에요…</EmptyState>;
 
@@ -220,94 +234,125 @@ export function StudentsView() {
 
   return (
     <div data-screen-label="예약 명단">
-      {/* 상단: 제목(좌) + 회차 선택·분원(우) */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, animation: "ds-fade-up var(--dur-slow) var(--ease-out) both" }}>
+      {/* 상단: 제목(좌) + 회차 선택·엑셀 다운로드(우) */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap", animation: "ds-fade-up var(--dur-slow) var(--ease-out) both" }}>
         <div>
           <div style={{ fontSize: 12, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)", marginBottom: 6 }}>
             RESERVATIONS
           </div>
           <h1 style={{ fontSize: "var(--text-h1)", fontWeight: 800, whiteSpace: "nowrap" }}>예약 명단</h1>
         </div>
-        <span style={{ flex: 1 }} />
+        <span style={{ flex: 1, minWidth: 8 }} />
+        {/* 엑셀 다운로드는 고른 회차·필터 기준 내보내기라 회차 선택 옆 header action 으로 둔다 —
+            아래 필터의 action 컬럼(수동 추가·담임)을 방해하지 않는다. */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, flexShrink: 0 }}>
           <Select
             options={sessions.options.map((o) => ({ label: sessionLabel(o), value: o.session.seminarSessionId }))}
             value={roster.filters.sessionId}
             onChange={(sessionId) => roster.setFilters({ sessionId })}
-            style={{ width: 380, whiteSpace: "nowrap" }}
+            style={{ width: 380, maxWidth: "min(380px, 82vw)", whiteSpace: "nowrap" }}
           />
-          <div role="group" aria-label="캠퍼스" style={{ display: "flex", gap: 6 }}>
-            <Tag selected={roster.filters.branch === undefined} onClick={() => roster.setFilters({ branch: undefined })} style={{ height: 34 }}>
-              전체
-            </Tag>
-            {BRANCH_OPTIONS.map((option) => (
-              <Tag
-                key={option.value}
-                selected={roster.filters.branch === option.value}
-                onClick={() => roster.setFilters({ branch: option.value })}
-                style={{ height: 34 }}
-              >
-                {option.label}
-              </Tag>
-            ))}
-          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Icons.download size={16} />}
+            disabled={xlsx.downloading}
+            onClick={() =>
+              xlsx.download({
+                branch: roster.filters.branch,
+                unitGroup: roster.filters.unitGroup,
+                teacherName: roster.filters.teacherName,
+                query: roster.filters.query.trim() === "" ? undefined : roster.filters.query.trim(),
+              })
+            }
+          >
+            {xlsx.downloading ? "내보내는 중…" : "엑셀 다운로드"}
+          </Button>
         </div>
       </div>
 
-      {/* 필터: 검색 + 단위 탭 + 담임 + 수동 추가 */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 18, flexWrap: "wrap" }}>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            roster.setFilters({ query: searchDraft });
-          }}
-        >
-          <Input
-            placeholder="이름·학교·학번·연락처 뒤 4자리"
-            value={searchDraft}
-            onChange={setSearchDraft}
-            icon={<Icons.search size={15} />}
-            style={{ width: 230 }}
-          />
-        </form>
-
-        <div role="group" aria-label="단위" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {ROSTER_UNIT_TABS.map((tab) => (
-            <Tag
-              key={tab.value}
-              selected={roster.filters.unitGroup === tab.value}
-              onClick={() => roster.setFilters({ unitGroup: tab.value })}
+      {/*
+        필터 — 학생 현황과 같은 두 줄 구조. 왼쪽 두 줄은 각자 nowrap + 가로 스크롤이라 페이지가
+        아니라 그 줄만 밀린다. 오른쪽 action 컬럼은 `수동 추가`(위)·담임(아래)을 수직 정렬한다.
+        1행 검색폭 = 2행 여백이라 `캠퍼스`·`단위` 라벨이 같은 x 에서 시작한다.
+      */}
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginTop: 18 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* 1행: 검색 → 캠퍼스 라벨 → 캠퍼스 버튼 */}
+          <div style={ROSTER_FILTER_ROW_STYLE}>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                roster.setFilters({ query: searchDraft });
+              }}
+              style={{ flexShrink: 0, width: ROSTER_FILTER_SEARCH_WIDTH }}
             >
-              {tab.label}
-            </Tag>
-          ))}
+              <Input
+                placeholder="이름·학교·학번·연락처 뒤 4자리"
+                value={searchDraft}
+                onChange={setSearchDraft}
+                icon={<Icons.search size={15} />}
+                style={{ width: "100%" }}
+              />
+              <button type="submit" style={{ display: "none" }} aria-hidden />
+            </form>
+
+            <span id={campusLabelId} style={ROSTER_FILTER_LABEL_STYLE}>
+              캠퍼스
+            </span>
+            <div role="group" aria-labelledby={campusLabelId} style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <ParticipationMonitoringTag
+                label="전체"
+                selected={roster.filters.branch === undefined}
+                monitoring={monitoring}
+                onSelect={() => roster.setFilters({ branch: undefined })}
+                style={ROSTER_FILTER_TAG_STYLE}
+              />
+              {BRANCH_OPTIONS.map((option) => (
+                <ParticipationMonitoringTag
+                  key={option.value}
+                  label={option.label}
+                  selected={roster.filters.branch === option.value}
+                  monitoring={monitoring}
+                  onSelect={() => roster.setFilters({ branch: option.value })}
+                  style={ROSTER_FILTER_TAG_STYLE}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* 2행: (검색폭만큼 왼쪽 여백) → 단위 라벨 → 단위 버튼 */}
+          <div style={ROSTER_FILTER_ROW_STYLE}>
+            <span aria-hidden style={{ width: ROSTER_FILTER_SPACER_WIDTH, flexShrink: 0 }} />
+            <span id={unitLabelId} style={ROSTER_FILTER_LABEL_STYLE}>
+              단위
+            </span>
+            <div role="group" aria-labelledby={unitLabelId} style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              {ROSTER_UNIT_TABS.map((tab) => (
+                <Tag
+                  key={tab.value}
+                  selected={roster.filters.unitGroup === tab.value}
+                  onClick={() => roster.setFilters({ unitGroup: tab.value })}
+                  style={ROSTER_FILTER_TAG_STYLE}
+                >
+                  {tab.label}
+                </Tag>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* 담임 선택지는 서버 facets 그대로다 — 목록에서 긁어 모으면 페이지마다 흔들린다. */}
-        <Select
-          options={[{ label: "담임 전체", value: "" }, ...teacherOptions.map((teacher) => ({ label: teacher, value: teacher }))]}
-          value={roster.filters.teacherName ?? ""}
-          onChange={(teacher) => roster.setFilters({ teacherName: teacher === "" ? undefined : teacher })}
-          style={{ width: 124 }}
-        />
-
-        <span style={{ flex: 1 }} />
-        <Button
-          variant="secondary"
-          icon={<Icons.download size={16} />}
-          disabled={xlsx.downloading}
-          onClick={() =>
-            xlsx.download({
-              branch: roster.filters.branch,
-              unitGroup: roster.filters.unitGroup,
-              teacherName: roster.filters.teacherName,
-              query: roster.filters.query.trim() === "" ? undefined : roster.filters.query.trim(),
-            })
-          }
-        >
-          {xlsx.downloading ? "내보내는 중…" : "엑셀 다운로드"}
-        </Button>
-        <AddMenu onAddEnrolled={() => setEnrolledSearchOpen(true)} onAddGuest={() => setGuestOpen(true)} />
+        {/* 오른쪽 action 컬럼 — `수동 추가`가 담임 드롭다운 바로 위에 수직 정렬된다. */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, flexShrink: 0 }}>
+          <AddMenu onAddEnrolled={() => setEnrolledSearchOpen(true)} onAddGuest={() => setGuestOpen(true)} />
+          {/* 담임 선택지는 서버 facets 그대로다 — 목록에서 긁어 모으면 페이지마다 흔들린다. */}
+          <Select
+            options={[{ label: "담임 전체", value: "" }, ...teacherOptions.map((teacher) => ({ label: teacher, value: teacher }))]}
+            value={roster.filters.teacherName ?? ""}
+            onChange={(teacher) => roster.setFilters({ teacherName: teacher === "" ? undefined : teacher })}
+            style={{ width: 124, flexShrink: 0 }}
+          />
+        </div>
       </div>
 
       {/*
@@ -903,7 +948,7 @@ function RosterRow({
         학번은 한 줄로 — body 전역 `overflow-wrap: anywhere` 가 좁은 학번 칸에서 숫자를 두 줄로
         쪼개므로 여기서 nowrap 으로 막는다. 7자리도 이 칸 폭(50·52px) 안에 들어가 잘리지 않는다.
       */}
-      <span style={{ fontFeatureSettings: '"tnum"', color: "var(--text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+      <span style={{ fontFeatureSettings: '"tnum"', color: "var(--text-muted)", fontSize: 12, width: "100%", minWidth: 0, whiteSpace: "nowrap" }}>
         {guest ? faint(null) : row.sourceStudentNo}
       </span>
 

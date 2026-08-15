@@ -8,6 +8,7 @@ import { IdempotencyService } from "../../common/idempotency/idempotency.service
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 import { RedisService } from "../../common/redis/redis.service.js";
 import { SmsOutboxService, type SmsBranch } from "../sms/sms-outbox.service.js";
+import { SmsTemplateCatalog } from "../sms/sms-template-catalog.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
 type OtpPurpose = "FAMILY_BOOKING" | "BOOKING_MANAGE";
@@ -20,6 +21,7 @@ export class OtpService {
     private readonly phoneProtector: PhoneProtector,
     private readonly idempotency: IdempotencyService,
     private readonly smsOutbox: SmsOutboxService,
+    private readonly smsTemplates: SmsTemplateCatalog,
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
@@ -87,6 +89,18 @@ export class OtpService {
           expiresAt,
         },
       });
+      const rendered = await this.smsTemplates.renderDefault(transaction, "OTP", {
+        verificationCode: code,
+        studentName: "",
+        seminarTitle: "",
+        sessionDateTime: "",
+        place: "",
+        bookingUrl: "",
+        inquiryPhone: "",
+      }, {
+        key: "SYSTEM_OTP",
+        body: "[예시학원] 인증번호는 {인증번호}입니다. 5분 이내 입력해주세요.",
+      });
       await this.smsOutbox.enqueue(transaction, {
         eventKey: `OTP:${challengeId}`,
         source: "OTP",
@@ -94,8 +108,9 @@ export class OtpService {
         recipientCiphertext: contact.ciphertext,
         recipientDigest: contact.digest,
         recipientLast4: contact.last4,
-        message: `[NPR] 인증번호는 ${code}입니다. 5분 이내 입력해주세요.`,
-        safeMetadata: { purpose },
+        message: rendered.message,
+        title: rendered.title,
+        safeMetadata: { purpose, ...rendered.snapshot },
       });
       return { challengeId, expiresAt, retryAfterSeconds: 60 };
     }, 201);

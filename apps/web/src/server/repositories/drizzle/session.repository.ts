@@ -20,7 +20,6 @@ function toSession(row: SessionRow): Session {
     round: row.round,
     time: row.time,
     place: row.place,
-    capacity: row.capacity,
     desc: row.desc,
     attendField: row.attendField,
     active: row.active,
@@ -54,7 +53,8 @@ export const drizzleSessionRepository: SessionRepository = {
   async create(draft) {
     const rows = await getDb()
       .insert(sessions)
-      .values({ ...draft, active: true, ended: false, surveySms: DEFAULT_SURVEY_SMS })
+      // Legacy storage keeps a non-semantic compatibility column. Product logic has no capacity.
+      .values({ ...draft, capacity: 0, active: true, ended: false, surveySms: DEFAULT_SURVEY_SMS })
       .returning();
     return toSession(rows[0]);
   },

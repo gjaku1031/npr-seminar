@@ -8,16 +8,13 @@ import {
   type ReservedBy,
   type RosterOption,
 } from "@/entities/reservation";
-import { isFull } from "@/entities/session";
 import type { CancelledBy } from "@/entities/reservation";
 import type { Student } from "@/entities/student";
 import type { Campus } from "@/shared/config/campus";
-import { fmtDateTime } from "@/shared/lib/format";
 import { reservationRepository, sessionRepository, smsRepository, studentRepository } from "../repositories";
-import { sendSms, sendSmsBatch } from "../sms/gateway";
-import { inquiryOf, renderSmsBody, reservationVars } from "../sms/template";
+import { sendSmsBatch } from "../sms/gateway";
+import { renderSmsBody, reservationVars } from "../sms/template";
 import {
-  CapacityExceededError,
   DuplicateReservationError,
   InvalidStateError,
   NotFoundError,
@@ -27,13 +24,13 @@ import {
  * 예약 유스케이스 — 시스템의 중심. 리포지토리 "계약"만 안다(drizzle 금지, ESLint R2).
  *
  * ★ 서버 불변식 (설계 §6.4 · 결정 S9) ★
- * 중복예약·정원초과를 **모든 경로에 일괄** 적용한다: 모바일(웹앱)·명단 드랍다운·
+ * 중복예약을 **모든 경로에 일괄** 적용한다: 모바일(웹앱)·명단 드랍다운·
  * 수동 추가·현장 즉석 예약 어느 진입점이든 생성은 assertCanReserve()를 반드시 통과한다.
  * (v4.0 와이어프레임은 화면 단 방지만 있다 — 기능리스트 '목업 경계'가 서버 차단을 요구)
  */
 
 /** 예약 생성 전 불변식 검사 — 생성 경로가 늘어나도 이 함수만 거치면 정책이 지켜진다 */
-async function assertCanReserve(draft: ReservationDraft, seats = 1): Promise<void> {
+async function assertCanReserve(draft: ReservationDraft): Promise<void> {
   const session = await sessionRepository.findById(draft.sessionId);
   if (!session) throw new NotFoundError("설명회를 찾을 수 없습니다.");
   if (session.ended || !session.active) {
@@ -48,14 +45,12 @@ async function assertCanReserve(draft: ReservationDraft, seats = 1): Promise<voi
   });
   if (duplicated) throw new DuplicateReservationError();
 
-  // ② 정원: reserved + entered 기준. 가족 예약은 인원 합계로 판정한다.
-  const active = await reservationRepository.countActive(draft.sessionId);
-  if (isFull(active + seats - 1, session.capacity)) throw new CapacityExceededError();
 }
 
 const CONFIRM_TEMPLATE_NAME = "예약 확정 + QR";
+// 발신 머리표는 브랜드명([예시학원]) — server 존은 @/shared/ui/brand 를 import 할 수 없어(§4.2 R5) 문구를 인라인한다.
 const CONFIRM_FALLBACK_BODY =
-  "[npr] {학생명} 학부모님, {설명회명} 예약이 확정되었습니다.\n일시: {일시}\n장소: {장소}\n입장 QR: {QR링크}";
+  "[예시학원] {학생명} 학부모님, {설명회명} 예약이 확정되었습니다.\n일시: {일시}\n장소: {장소}\n입장 QR: {QR링크}";
 
 /**
  * 예약 확정 + QR 문자 (명세 §10.7 · qr-poc 이식) — 자녀별 QR 링크를 학부모 연락처로 발송하고
@@ -85,24 +80,6 @@ async function notifyReservationConfirmed(rows: Reservation[]): Promise<void> {
     });
   } catch (error) {
     console.error("[sms] 예약 확정 문자 발송 실패:", error);
-  }
-}
-
-/** 입장 확인 문자 (명세 §9.2 "입장 완료 문자 발송됨" · qr-poc 이식) — 스캔·현장 입장 공통 */
-async function notifyEntryConfirmed(reservation: Reservation): Promise<void> {
-  if (!reservation.enteredAt) return;
-  try {
-    const session = await sessionRepository.findById(reservation.sessionId);
-    if (!session) return;
-    const body = [
-      "[npr 입장 확인]",
-      `${reservation.name} 학부모님, ${session.title} 입장이 확인되었습니다.`,
-      `입장 시간: ${fmtDateTime(reservation.enteredAt)}`,
-      `문의: ${inquiryOf(reservation.campus)}`,
-    ].join("\n");
-    await sendSms(reservation.phone, body);
-  } catch (error) {
-    console.error("[sms] 입장 확인 문자 발송 실패:", error);
   }
 }
 
@@ -169,7 +146,7 @@ export async function createReservation(draft: ReservationDraft): Promise<Reserv
 /**
  * 모바일 재원생 예약 — 가족(형제) 다중 선택 (명세 §10.3~10.5).
  * 학생 신원은 서버가 다시 읽고(클라이언트 입력 신뢰 금지), 모/부 매칭 번호를 phone으로 쓴다.
- * 자녀별로 중복을 검사하고, 정원은 인원 합계로 판정한다.
+ * 자녀별로 활성 중복 예약을 검사한다.
  */
 export async function createFamilyReservation(input: {
   sessionId: string;
@@ -195,7 +172,7 @@ export async function createFamilyReservation(input: {
       }),
     );
   }
-  for (const draft of drafts) await assertCanReserve(draft, drafts.length);
+  for (const draft of drafts) await assertCanReserve(draft);
   const created = await reservationRepository.createGroup(drafts);
   await notifyReservationConfirmed(created);
   return created;
@@ -318,14 +295,12 @@ export async function createGuestReservation(input: {
   return created;
 }
 
-/** 수동 체크인 / QR 스캔 입장 — 스캐너 번호 기록 + 입장 확인 문자 (명세 §9.2) */
+/** 수동 체크인 / QR 스캔 입장 — 스캐너 번호만 기록한다 (명세 §9.2). 입장 확인 문자는 발송하지 않는다. */
 export async function checkIn(id: string, scannerNo: number): Promise<Reservation> {
   const reservation = await reservationRepository.findById(id);
   if (!reservation) throw new NotFoundError("예약을 찾을 수 없습니다.");
   if (!canCheckIn(reservation.status)) throw new InvalidStateError("미체크 예약만 입장 처리할 수 있습니다.");
-  const entered = await reservationRepository.checkIn(id, scannerNo);
-  await notifyEntryConfirmed(entered);
-  return entered;
+  return reservationRepository.checkIn(id, scannerNo);
 }
 
 /** QR 코드로 입장 (명세 §9.2) */
@@ -389,7 +364,7 @@ export async function cancelReservation(id: string, by: CancelledBy): Promise<Re
 }
 
 /**
- * 회차 이동 (명세 §10.8) — 대상 세션에도 정원·중복 불변식을 적용한다.
+ * 회차 이동 (명세 §10.8) — 대상 세션에도 예약 가능 기간·중복 불변식을 적용한다.
  * 예약번호·QR은 유지되고 history만 누적된다.
  */
 export async function moveReservation(id: string, toSessionId: string): Promise<Reservation> {
@@ -426,7 +401,7 @@ export async function reissueReservationCode(id: string): Promise<Reservation> {
 
 /**
  * 현장 입장 (명세 §9.3): 기존 예약이 있으면 체크인, 없으면 즉석 예약(수동·현장 예약) 후 체크인.
- * 즉석 예약도 불변식(정원)을 통과해야 한다 — 현장이라고 예외를 두지 않는다.
+ * 즉석 예약도 예약 가능 기간·중복 불변식을 통과한다 — 현장이라고 예외를 두지 않는다.
  */
 export async function walkInCheckIn(
   studentId: string,

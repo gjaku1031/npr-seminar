@@ -16,6 +16,9 @@ grep -Fq 'managed_services+=("${web_service}")' "${reset}"
 grep -Fq 'reset_completed=true' "${reset}"
 grep -Fq 'database_mutation_committed=true' "${reset}"
 grep -Fq 'reset transaction committed but verification failed; application services remain stopped' "${reset}"
+! grep -Fq 'session_capacities' "${reset}"
+grep -Fq "'activeFamilyBookings'" "${reset}"
+grep -Fq "'checkedInAttendees'" "${reset}"
 for scope in QR_REVOKE QR_ROTATE SURVEY_RESPONSE_SUBMIT BOOKING_ACCESS_EXCHANGE; do
   grep -Fq "'${scope}'" "${reset}"
 done

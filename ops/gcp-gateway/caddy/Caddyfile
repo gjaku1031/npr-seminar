@@ -1,0 +1,4 @@
+survey.example.kr {
+	encode zstd gzip
+	reverse_proxy 10.10.10.165:3001
+}

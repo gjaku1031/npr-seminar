@@ -11,8 +11,7 @@ import {
 
 /**
  * 통계 대시보드 (명세 v4.0 §8) — 설명회 × 캠퍼스 필터.
- * 지표 5장(전체 인원·총 예약·입장·참석률·노쇼율) + 채널 도넛(모바일/수동) +
- * 단위별 예약률·참석률 + 평균 만족도.
+ * 정원·예약률 없이 학생·가족 예약·입장·노쇼의 절대 건수와 만족도만 집계한다.
  */
 
 export interface UnitStat {
@@ -21,10 +20,6 @@ export interface UnitStat {
   students: number;
   reserved: number;
   entered: number;
-  /** 예약률 % = 유효 예약 / 단위 인원 (명세 §8.4) */
-  reservationRate: number;
-  /** 참석률 % = 참석 / 유효 예약 (명세 §8.4) */
-  attendanceRate: number;
 }
 
 export interface StatsOverview {
@@ -33,20 +28,15 @@ export interface StatsOverview {
   /** 유효 예약 (reserved+entered) */
   totalReservations: number;
   entered: number;
-  /** 참석률 % — 입장 / 유효 예약 */
-  attendanceRate: number;
-  /** 노쇼율 % — 내부 no_show / (no_show + entered) (명세 §8.2) */
-  noShowRate: number;
+  /** 노쇼 가족 예약 절대 건수 */
+  noShowCount: number;
   /** 채널별 예약 수 (도넛 — 모바일/수동 2종, 명세 §8.3) */
   byChannel: Record<ReservationChannel, number>;
-  /** 단위별 예약률·참석률 — '전체' + 7단위 (명세 §8.4) */
+  /** 단위별 학생·활성 예약·입장 절대 건수 — '전체' + 7단위 */
   byUnit: UnitStat[];
   /** 평균 만족도 별점 (명세 §8.5) */
   averageRating: number;
 }
-
-const pct = (numerator: number, denominator: number) =>
-  denominator === 0 ? 0 : Math.round((numerator / denominator) * 100);
 
 export async function getStatsOverview(input?: {
   sessionId?: string;
@@ -86,8 +76,6 @@ export async function getStatsOverview(input?: {
       students: unitStudents.length,
       reserved: unitActive.length,
       entered: unitEntered,
-      reservationRate: pct(unitActive.length, unitStudents.length),
-      attendanceRate: pct(unitEntered, unitActive.length),
     };
   });
 
@@ -99,8 +87,7 @@ export async function getStatsOverview(input?: {
     totalStudents: students.length,
     totalReservations: active.length,
     entered,
-    attendanceRate: pct(entered, active.length),
-    noShowRate: pct(noShow, noShow + entered),
+    noShowCount: noShow,
     byChannel,
     byUnit,
     averageRating: summarize(campus ? surveys.filter((v) => v.campus === campus) : surveys).average,

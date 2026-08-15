@@ -18,6 +18,8 @@ import { SessionStatisticsService } from "./session-statistics.service.js";
 import { BookingAccessController } from "./booking-access.controller.js";
 import { BookingAccessService } from "./booking-access.service.js";
 import { QrTokenProtector } from "./qr-token-protector.service.js";
+import { FamilyBookingLookupService } from "./family-booking-lookup.service.js";
+import { BookingProofRequiredGuard } from "./booking-proof-required.guard.js";
 
 @Module({
   imports: [AdminAuthModule, SmsOutboxModule, GoogleSheetsOutboxModule],
@@ -35,6 +37,8 @@ import { QrTokenProtector } from "./qr-token-protector.service.js";
     SessionStatisticsService,
     BookingAccessService,
     QrTokenProtector,
+    FamilyBookingLookupService,
+    BookingProofRequiredGuard,
     { provide: OtpProofPort, useExisting: BookingProofService },
   ],
   exports: [

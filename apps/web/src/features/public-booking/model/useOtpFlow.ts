@@ -25,6 +25,7 @@ import {
   type OtpPurpose,
   type RequestOtpInput,
 } from "@/shared/api";
+import { formatContactInput, isCompleteContact, normalizeContactDigits } from "./contact";
 import type { BookingProof } from "./useBookingProof";
 
 const OTP_CODE_LENGTH = 6;
@@ -64,22 +65,17 @@ export interface UseOtpFlowOptions {
   onVerified: (proof: BookingProof) => void;
 }
 
-/** 계약 contact: 8~40자, 서버가 8~15자리로 정규화. 화면에서는 숫자만 남겨 보낸다. */
-function normalizeContact(raw: string): string {
-  return raw.replace(/\D/g, "");
-}
-
 function challengeErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
   switch (error.status) {
     case 400:
       return "연락처 형식을 다시 확인해 주세요.";
     case 409:
-      return "이미 진행 중인 인증이 있어요. 잠시 후 다시 시도해 주세요.";
+      return "이미 진행 중인 인증이 있습니다. 잠시 후 다시 시도해 주세요.";
     case 429:
-      return "인증 문자 요청이 너무 잦아요. 1분 뒤에 다시 시도해 주세요.";
+      return "인증 문자 요청이 너무 잦습니다. 1분 뒤에 다시 시도해 주세요.";
     case 503:
-      return "문자 발송이 일시적으로 불가해요. 잠시 후 다시 시도해 주세요.";
+      return "문자 발송이 일시적으로 어렵습니다. 잠시 후 다시 시도해 주세요.";
     default:
       return defaultErrorMessage(error);
   }
@@ -89,11 +85,11 @@ function verifyErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
   switch (error.status) {
     case 400:
-      return "인증번호가 올바르지 않아요. 6자리를 다시 확인해 주세요.";
+      return "인증번호가 올바르지 않습니다. 6자리를 다시 확인해 주세요.";
     case 409:
-      return "만료되었거나 이미 사용된 인증이에요. 인증번호를 다시 받아 주세요.";
+      return "만료되었거나 이미 사용된 인증입니다. 인증번호를 다시 받아 주세요.";
     case 429:
-      return "인증 시도가 너무 잦아요. 잠시 후 다시 시도해 주세요.";
+      return "인증 시도가 너무 잦습니다. 잠시 후 다시 시도해 주세요.";
     default:
       return defaultErrorMessage(error);
   }
@@ -112,7 +108,8 @@ export function useOtpFlow({ purpose, branch, onVerified }: UseOtpFlowOptions): 
 
   const setContact = useCallback(
     (value: string) => {
-      setContactState(value);
+      // 숫자만 받아 하이픈 표기로 보관·표시한다. 발송 시 normalizeContactDigits 로 다시 숫자만 남긴다.
+      setContactState(formatContactInput(value));
       setError(null);
       // 연락처를 바꾸는 건 새 조작 — 이전 시도의 키를 물려주지 않는다.
       challengeKey.reset();
@@ -134,8 +131,8 @@ export function useOtpFlow({ purpose, branch, onVerified }: UseOtpFlowOptions): 
     verifyKey.reset();
   }, [challengeKey, verifyKey]);
 
-  const digits = normalizeContact(contact);
-  const canSend = digits.length >= 8 && digits.length <= 15 && stage !== "sending";
+  const digits = normalizeContactDigits(contact);
+  const canSend = isCompleteContact(digits) && stage !== "sending";
   const canVerify = OTP_CODE_PATTERN.test(code) && stage !== "verifying";
 
   const sendChallenge = useCallback(async () => {
@@ -190,7 +187,7 @@ export function useOtpFlow({ purpose, branch, onVerified }: UseOtpFlowOptions): 
       if (!isFreshProof(result)) {
         // 리플레이 — 원문 proof 가 없다. 없는 시크릿을 만들어내지 않고 사실대로 재인증시킨다.
         restart();
-        setError("인증 응답을 받지 못해 다시 확인해야 해요. 인증번호를 다시 받아 주세요.");
+        setError("인증 응답을 받지 못해 다시 확인해야 합니다. 인증번호를 다시 받아 주세요.");
         return;
       }
 

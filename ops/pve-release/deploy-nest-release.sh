@@ -22,7 +22,11 @@ readonly worker_user=npr-worker
 readonly build_user=npr-build
 readonly migrate_user=npr-migrate
 readonly nest_origin=http://127.0.0.1:4000
-readonly default_public_base_url=https://npr-survey.example.ts.net
+readonly default_public_base_url=https://survey.example.kr
+readonly poster_storage_dir=/var/lib/npr-seminar/poster
+readonly caddy_upstream_listener=10.10.10.165:3001
+readonly caddy_upstream_socket=npr-seminar-caddy-upstream.socket
+readonly caddy_upstream_service=npr-seminar-caddy-upstream.service
 readonly corepack_version=0.34.7
 readonly corepack_tarball_url=https://registry.npmjs.org/corepack/-/corepack-0.34.7.tgz
 readonly corepack_sha512=d5OLuTNh4zeJK8+u+G10KScqrnHKNNm6NvR4XO28FZyBFMGE60SNCrBetJLyKR9H1xGCG6U2LyswsyPNdO6kxw==
@@ -30,11 +34,13 @@ readonly corepack_install_dir=${release_root}/.tooling/corepack-${corepack_versi
 readonly corepack_entry=${corepack_install_dir}/dist/corepack.js
 readonly corepack_home=${release_root}/.corepack-${corepack_version}-pnpm-11.10.0
 readonly expected_pnpm_version=11.10.0
-readonly sheets_v4_fingerprint=ffb044e3773f51b25797d9dd79fc507b42900f0d49a19f768daba1f86bc2e522
-readonly -a service_units=(
+readonly sheets_v4_fingerprint=a89087d355e8b9e1cd1039fabc1fa715d8473ebf08ed55f164a844f437b789be
+readonly -a deployment_units=(
   npr-seminar-api.service
   npr-seminar-web.service
   npr-seminar-worker.service
+  npr-seminar-caddy-upstream.socket
+  npr-seminar-caddy-upstream.service
 )
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -70,7 +76,7 @@ returns to the previous code release if readiness checks fail.
 --defer-web activates and verifies only the API and worker, leaves the web
 service stopped, and records the exact deferred release. After Sheets v4 is
 prepared, cleared, and enabled, activate-web revalidates every Sheet mapping
-through the current worker code before starting web and verifying Funnel.
+through the current worker code before starting web and verifying public HTTPS.
 
 Rollback switches code only. It never reverses a database migration.
 USAGE
@@ -104,12 +110,14 @@ require_root_and_target() {
 
 require_tools() {
   local command_name
-  for command_name in awk basename chmod chown cmp cp curl dirname flock getent \
+  for command_name in awk basename chmod chown cmp cp curl dirname flock getent grep \
       hostname id install ln mktemp mv node openssl psql readlink rm rmdir runuser sleep ss stat \
-      systemctl systemd-analyze tailscale tar timeout tr useradd; do
+      systemctl systemd-analyze tar timeout tr useradd; do
     require_command "${command_name}"
   done
   [[ -x /usr/bin/node ]] || die "/usr/bin/node is required by the systemd units"
+  [[ -x /usr/lib/systemd/systemd-socket-proxyd ]] \
+    || die "/usr/lib/systemd/systemd-socket-proxyd is required by the Caddy upstream unit"
   [[ $(node -p 'Number(process.versions.node.split(".")[0])') -ge 22 ]] \
     || die "Node.js 22 or newer is required"
 }
@@ -135,6 +143,7 @@ ensure_accounts_and_directories() {
   ensure_system_user "${build_user}" /var/lib/npr-build
 
   install -d -o root -g root -m 0755 "${release_root}" "${releases_dir}"
+  install -d -o "${api_user}" -g "${api_user}" -m 0750 "${poster_storage_dir}"
   # The worker needs traversal only to open its own mode-0600 Google credential.
   # It cannot list this directory or read the root-owned environment files.
   install -d -o root -g "${worker_user}" -m 0710 "${config_dir}"
@@ -499,6 +508,7 @@ migrate_runtime_environment() {
     'PORT=4000'
     'TRUST_PROXY=1'
     "PUBLIC_BASE_URL=${default_public_base_url}"
+    "POSTER_STORAGE_DIR=${poster_storage_dir}"
     'SMS_ENABLED=false'
     'SMS_RECIPIENT_ALLOWLIST_ENABLED=true'
     'SMS_ALIGO_TEST_MODE=true'
@@ -521,7 +531,7 @@ migrate_runtime_environment() {
 
   write_environment_exact "${api_env}" \
     DATABASE_URL REDIS_URL SESSION_SECRET PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY OTP_PEPPER \
-    SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY PUBLIC_BASE_URL TRUST_PROXY SMS_ENABLED \
+    SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY PUBLIC_BASE_URL POSTER_STORAGE_DIR TRUST_PROXY SMS_ENABLED \
     SMS_RECIPIENT_ALLOWLIST_ENABLED SMS_TEST_RECIPIENTS SMS_ALIGO_TEST_MODE GOOGLE_SHEETS_ENABLED \
     GOOGLE_SHEETS_SPREADSHEET_ID TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED
   install_tong_api_environment
@@ -545,7 +555,7 @@ validate_environment_boundaries() {
   done
 
   for key in DATABASE_URL REDIS_URL SESSION_SECRET PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY \
-      OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY PUBLIC_BASE_URL SMS_ENABLED \
+      OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY PUBLIC_BASE_URL POSTER_STORAGE_DIR SMS_ENABLED \
       SMS_RECIPIENT_ALLOWLIST_ENABLED SMS_ALIGO_TEST_MODE TONG_SYNC_ENABLED \
       TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
     require_env_key "${api_env}" "${key}"
@@ -575,7 +585,15 @@ validate_environment_boundaries() {
     && $(env_value "${api_env}" TONG_WIRE_CONTRACT_JSON) == "$(<"${tong_wire_contract}")" ]] \
     || die "API Tong origin or wire contract differs from the production capture contract"
   [[ $(env_value "${api_env}" TRUST_PROXY) == 1 ]] \
-    || die "${api_env} must set TRUST_PROXY=1 behind Tailscale Funnel and Next"
+    || die "${api_env} must set TRUST_PROXY=1 behind the GCP Caddy/WireGuard ingress and Next"
+  [[ $(env_value "${api_env}" POSTER_STORAGE_DIR) == "${poster_storage_dir}" ]] \
+    || die "${api_env} must use persistent poster storage at ${poster_storage_dir}"
+  [[ -d ${poster_storage_dir} && ! -L ${poster_storage_dir} ]] \
+    || die "poster storage must be a real directory outside the release symlink"
+  [[ $(readlink -f -- "${poster_storage_dir}") == "${poster_storage_dir}" ]] \
+    || die "poster storage path must not traverse a symlink"
+  [[ $(stat -c '%u:%g:%a' "${poster_storage_dir}") == "$(id -u "${api_user}"):$(id -g "${api_user}"):750" ]] \
+    || die "poster storage must be owned by ${api_user}:${api_user} with mode 0750"
   for key in GOOGLE_APPLICATION_CREDENTIALS WORKER_DATABASE_URL MIGRATION_DATABASE_URL \
       ALIGO_IDENTIFIER ALIGO_KEY SMS_SENDER_CAMPUS_A SMS_SENDER_CAMPUS_B \
       SMS_SENDER_CAMPUS_C GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT; do
@@ -588,7 +606,7 @@ validate_environment_boundaries() {
     require_env_key "${worker_env}" "${key}"
   done
   for key in DATABASE_URL MIGRATION_DATABASE_URL REDIS_URL SESSION_SECRET OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY \
-      TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
+      POSTER_STORAGE_DIR TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
     forbid_env_key "${worker_env}" "${key}"
   done
   [[ $(env_value "${api_env}" SMS_ENABLED) == "$(env_value "${worker_env}" SMS_ENABLED)" ]] \
@@ -603,12 +621,12 @@ validate_environment_boundaries() {
     || die "${web_env} must target ${nest_origin}"
   for key in DATABASE_URL WORKER_DATABASE_URL MIGRATION_DATABASE_URL REDIS_URL SESSION_SECRET \
       PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY \
-      GOOGLE_APPLICATION_CREDENTIALS ALIGO_IDENTIFIER ALIGO_KEY \
+      GOOGLE_APPLICATION_CREDENTIALS ALIGO_IDENTIFIER ALIGO_KEY POSTER_STORAGE_DIR \
       TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
     forbid_env_key "${web_env}" "${key}"
   done
   require_env_key "${migration_env}" MIGRATION_DATABASE_URL
-  for key in TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON \
+  for key in POSTER_STORAGE_DIR TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON \
       TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
     forbid_env_key "${migration_env}" "${key}"
   done
@@ -650,7 +668,7 @@ validate_source_tree() {
 validate_units() {
   local unit
   local -a unit_paths=()
-  for unit in "${service_units[@]}"; do
+  for unit in "${deployment_units[@]}"; do
     [[ -f ${unit_source_dir}/${unit} ]] || die "missing systemd unit: ${unit_source_dir}/${unit}"
     unit_paths+=("${unit_source_dir}/${unit}")
   done
@@ -659,11 +677,11 @@ validate_units() {
 
 install_units() {
   local unit
-  for unit in "${service_units[@]}"; do
+  for unit in "${deployment_units[@]}"; do
     install -o root -g root -m 0644 "${unit_source_dir}/${unit}" "/etc/systemd/system/${unit}"
   done
   systemctl daemon-reload
-  systemctl enable "${service_units[@]}" >/dev/null
+  systemctl enable "${deployment_units[@]}" >/dev/null
 }
 
 copy_source_tree() {
@@ -947,7 +965,9 @@ prepare_database_for_release() {
     log "applying forward-only Prisma migrations"
     (
       cd -- "${release}/apps/api"
-      runuser -u "${migrate_user}" -- env NODE_ENV=production \
+      runuser -u "${migrate_user}" -- env -i \
+        HOME=/nonexistent PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        NODE_ENV=production \
         MIGRATION_DATABASE_URL="${migration_url}" \
         "${release}/apps/api/node_modules/.bin/prisma" migrate deploy
     )
@@ -1040,64 +1060,56 @@ verify_loopback_ports() {
   done
 }
 
-verify_loopback_listeners() {
-  verify_loopback_ports 3000 4000 5432 6379
+verify_exact_listener() {
+  local expected=$1
+  local port=${expected##*:}
+  local listeners addresses address
+  listeners=$(ss -H -ltn)
+  addresses=$(awk -v suffix=":${port}" '$4 ~ suffix "$" { print $4 }' <<< "${listeners}")
+  [[ -n ${addresses} ]] || return 1
+  grep -Fxq -- "${expected}" <<< "${addresses}" || return 1
+  while IFS= read -r address; do
+    [[ ${address} == "${expected}" ]] || return 1
+  done <<< "${addresses}"
+}
+
+verify_listener_boundaries() {
+  verify_loopback_ports 3000 4000 5432 6379 \
+    && verify_exact_listener "${caddy_upstream_listener}"
 }
 
 verify_deferred_listener_boundaries() {
   local listeners
   listeners=$(ss -H -ltn)
-  if awk '$4 ~ /:3000$/ { found=1 } END { exit(found ? 0 : 1) }' <<< "${listeners}"; then
+  if awk '$4 ~ /:(3000|3001)$/ { found=1 } END { exit(found ? 0 : 1) }' <<< "${listeners}"; then
     return 1
   fi
   verify_loopback_ports 4000 5432 6379
 }
 
-tailscale_dns_name() {
-  tailscale status --json | node -e '
-    let data = "";
-    process.stdin.on("data", chunk => { data += chunk; });
-    process.stdin.on("end", () => {
-      const status = JSON.parse(data);
-      if (status.BackendState !== "Running") process.exit(2);
-      const name = String(status.Self?.DNSName ?? "").replace(/\.$/, "");
-      if (!name.endsWith(".ts.net")) process.exit(3);
-      process.stdout.write(name);
-    });
-  '
+validate_public_base_url() {
+  local file configured_url
+  for file in "${runtime_env}" "${api_env}" "${worker_env}"; do
+    configured_url=$(env_value "${file}" PUBLIC_BASE_URL)
+    [[ ${configured_url} == "${default_public_base_url}" ]] \
+      || die "${file} must set PUBLIC_BASE_URL exactly to ${default_public_base_url}"
+  done
 }
 
-validate_tailscale_public_base() {
-  local dns_name
-  dns_name=$(tailscale_dns_name) || die "Tailscale is not Running with a MagicDNS .ts.net name"
-  local expected_url=https://${dns_name}
-  local configured_url
-  configured_url=$(env_value "${api_env}" PUBLIC_BASE_URL)
-  [[ ${configured_url%/} == "${expected_url}" ]] \
-    || die "PUBLIC_BASE_URL must equal ${expected_url}"
+start_and_verify_caddy_upstream() {
+  # Stop the proxy before rebinding its socket so an old inherited listening
+  # descriptor cannot keep the address occupied across a unit update.
+  systemctl stop "${caddy_upstream_service}" || return 1
+  systemctl restart "${caddy_upstream_socket}" || return 1
+  systemctl start "${caddy_upstream_service}" || return 1
+  systemctl is-active --quiet "${caddy_upstream_socket}" \
+    && systemctl is-active --quiet "${caddy_upstream_service}"
 }
 
-configure_and_verify_tailscale_funnel() {
-  local dns_name
-  dns_name=$(tailscale_dns_name) || return 1
-  local expected_url=https://${dns_name}
-  local configured_url
-  configured_url=$(env_value "${api_env}" PUBLIC_BASE_URL)
-  [[ ${configured_url%/} == "${expected_url}" ]] || {
-    printf '[npr-deploy] PUBLIC_BASE_URL does not match Tailscale MagicDNS (%s)\n' "${expected_url}" >&2
-    return 1
-  }
-
-  # --bg persists the public Funnel configuration across tailscaled and host
-  # restarts. Keep the application listener on loopback; Funnel is the only
-  # public TLS ingress. Bound any tailnet-admin consent wait during recovery.
-  timeout 30s tailscale funnel --bg --yes --https=443 http://127.0.0.1:3000 >/dev/null || return 1
-  local funnel_status
-  funnel_status=$(tailscale funnel status 2>/dev/null) || return 1
-  grep -Fq 'Funnel on' <<<"${funnel_status}" || return 1
-  wait_http "${expected_url}/" 15 || return 1
-  wait_http "${expected_url}/api/v1/public/seminar-sessions" 15 || return 1
-  log "public Funnel URL is ${expected_url}"
+verify_public_https() {
+  wait_http "${default_public_base_url}/" 15 || return 1
+  wait_http "${default_public_base_url}/api/v1/public/seminar-sessions" 15 || return 1
+  log "public GCP Caddy URL is ${default_public_base_url}"
 }
 
 revalidate_sheets_v4_for_web() {
@@ -1166,13 +1178,17 @@ start_and_verify_services() {
     && systemctl is-active --quiet npr-seminar-api.service \
     && systemctl is-active --quiet npr-seminar-web.service \
     && systemctl is-active --quiet npr-seminar-worker.service \
-    && verify_loopback_listeners \
-    && configure_and_verify_tailscale_funnel
+    && start_and_verify_caddy_upstream \
+    && verify_listener_boundaries \
+    && verify_public_https
 }
 
 start_and_verify_deferred_services() {
-  systemctl stop npr-seminar-web.service || return 1
+  systemctl stop "${caddy_upstream_service}" "${caddy_upstream_socket}" \
+    npr-seminar-web.service || return 1
   systemctl is-active --quiet npr-seminar-web.service && return 1
+  systemctl is-active --quiet "${caddy_upstream_service}" && return 1
+  systemctl is-active --quiet "${caddy_upstream_socket}" && return 1
   start_and_verify_api_worker \
     && systemctl is-active --quiet npr-seminar-api.service \
     && systemctl is-active --quiet npr-seminar-worker.service \
@@ -1189,7 +1205,7 @@ recover_failed_activation() {
     fi
   else
     log "initial readiness failed; stopping services and removing the current link"
-    systemctl stop "${service_units[@]}" || true
+    systemctl stop "${deployment_units[@]}" || true
     if [[ -L ${current_link} ]]; then
       rm -f -- "${current_link}"
     fi
@@ -1199,7 +1215,7 @@ recover_failed_activation() {
 recover_failed_deferred_activation() {
   local old_target=$1
   log "deferred activation failed; leaving every application service stopped"
-  systemctl stop "${service_units[@]}" || true
+  systemctl stop "${deployment_units[@]}" || true
   rm -f -- "${web_deferred_marker}"
   if [[ -n ${old_target} ]]; then
     atomic_symlink "${old_target}" "${current_link}"
@@ -1217,7 +1233,7 @@ deploy_release() {
   bootstrap_corepack
   migrate_runtime_environment
   validate_environment_boundaries
-  validate_tailscale_public_base
+  validate_public_base_url
 
   local release=${releases_dir}/${stamp}
   local incoming=${releases_dir}/.incoming-${stamp}
@@ -1260,7 +1276,7 @@ deploy_release() {
 activate_deferred_web() {
   validate_units
   validate_environment_boundaries
-  validate_tailscale_public_base
+  validate_public_base_url
 
   local current deferred
   current=$(resolved_release_link "${current_link}")
@@ -1281,10 +1297,12 @@ activate_deferred_web() {
     || die "listener boundary changed during Sheets validation; web remains stopped"
 
   if ! start_and_verify_web \
-      || ! verify_loopback_listeners \
-      || ! configure_and_verify_tailscale_funnel; then
+      || ! start_and_verify_caddy_upstream \
+      || ! verify_listener_boundaries \
+      || ! verify_public_https; then
+    systemctl stop "${caddy_upstream_service}" "${caddy_upstream_socket}" || true
     systemctl stop npr-seminar-web.service || true
-    die "web activation or Funnel readiness failed; deferred marker was preserved"
+    die "web activation or public HTTPS readiness failed; deferred marker was preserved"
   fi
   rm -f -- "${web_deferred_marker}"
   log "web for $(basename "${current}") is active after fresh Sheets v4 validation"
@@ -1295,7 +1313,7 @@ rollback_release() {
   validate_units
   migrate_runtime_environment
   validate_environment_boundaries
-  validate_tailscale_public_base
+  validate_public_base_url
   install_units
   local target
   if [[ -n ${requested} ]]; then

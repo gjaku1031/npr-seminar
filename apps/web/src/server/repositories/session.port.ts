@@ -17,7 +17,7 @@ export interface SessionRepository {
   /** 만족도 설문 문자 본문 저장 (명세 §6.4) */
   updateSurveySms(id: string, surveySms: string): Promise<Session>;
 
-  /** 세션별 상태 집계 — 현황 카드·정원 판정의 기준 (명세 §6.3) */
+  /** 세션별 상태 집계 — 현황 카드의 기준. */
   stats(sessionId: string): Promise<SessionStats>;
 
   /**

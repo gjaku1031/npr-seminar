@@ -1,0 +1,12 @@
+[Unit]
+Description=NPR Seminar WireGuard Caddy upstream socket
+After=network-online.target
+Wants=network-online.target
+
+[Socket]
+ListenStream=10.10.10.165:3001
+Accept=no
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

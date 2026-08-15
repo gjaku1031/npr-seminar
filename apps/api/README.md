@@ -32,6 +32,19 @@ MIGRATION_DATABASE_URL='postgresql://...' \
 Runtime uses `DATABASE_URL`; the worker uses `WORKER_DATABASE_URL` in
 production. Do not use either runtime role to apply schema migrations.
 
+### Deferred contract migrations
+
+Deferred destructive SQL lives under `ops/pve-release/migrations` and is
+intentionally excluded from `prisma migrate deploy`. These contract changes
+require a separate CI phase after all API and worker instances have been
+upgraded and verified against the preceding schema-compatible release.
+
+`post-capacity-code-cutover.sql` removes the obsolete capacity/counter ledger.
+First deploy the runtime that serializes booking and check-in mutations on
+`seminar_sessions`; run the deferred SQL only after the new release is active
+and healthy. This keeps the old runtime from failing while a rolling or
+rollback window is still open.
+
 ## Processes
 
 - API: `pnpm --filter @npr-seminar/api start:prod`
@@ -47,6 +60,7 @@ API configuration includes:
 
 - `APP_ENV=production`, `PROCESS_ROLE=api`
 - `DATABASE_URL`, `REDIS_URL`, `PUBLIC_BASE_URL`
+- `POSTER_STORAGE_DIR` pointing to API-only persistent storage outside the release symlink
 - `SESSION_SECRET`, `PHONE_ENCRYPTION_KEY`, `PHONE_HMAC_KEY`, `OTP_PEPPER`
 - `SCANNER_PAIRING_HMAC_KEY`
 - `SMS_ENABLED=true` when public OTP issuance is enabled
@@ -79,17 +93,23 @@ values.
   replay snapshots.
 - Secret-bearing responses use `Cache-Control: private, no-store` and
   `Pragma: no-cache`.
-- Family capacity changes, session moves, participant snapshots, QR state,
+- Family attendance-party changes, session moves, participant snapshots, QR state,
   events, SMS, and Sheets outboxes commit atomically.
 - `family_booking_students_family_session_fk` is deferrable in SQL; a session
   move explicitly defers it inside the transaction before updating the parent
   and all participant rows.
 - Google Sheets is outbound-only. Raw QR bearer tokens never enter URLs, SMS,
   Sheets, logs, or durable response snapshots.
-- The Sheets v2 fingerprint describes only the exact `예약명단` projection:
-  sheet ID `1777564107`, title `예약명단`, A:K headers, blank L:AC, and the
-  protected AD marker. Unrelated tabs are allowed and are never value-read or
-  written; a missing target or any title/ID ambiguity remains fail-closed.
+- Seminar sessions have no seat limit. Roster/statistics monitoring reports
+  filtered student rows, distinct active family bookings, and actual parent
+  attendees as separate absolute counts; sibling rows never multiply attendee
+  counts.
+- The Sheets v4 fingerprint pins three exact projections: `예약명단` A:M
+  (including separate current `수학반` and `과학반` fields), `예약집계` A:M,
+  and append-only `로그` A:M. Their AD/Z technical markers are the sole row
+  identities and are hidden/protected. Unrelated tabs are allowed and are never
+  value-read or written; a missing target or any title/ID ambiguity remains
+  fail-closed.
 
 See [`docs/sync-runbook.md`](docs/sync-runbook.md), [`docs/worker-runbook.md`](docs/worker-runbook.md),
 and [`docs/erd.md`](docs/erd.md).

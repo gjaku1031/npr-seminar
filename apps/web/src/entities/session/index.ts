@@ -2,9 +2,6 @@
 export {
   bannerThemeLabel,
   DEFAULT_SURVEY_SMS,
-  reservationRate,
-  remainingSeats,
-  isFull,
   isVisibleAtCampus,
 } from "./model/session";
 export type { Session, SessionDraft, SessionStats, BannerTheme } from "./model/session";

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { PhoneProtector } from "../../common/crypto/phone-protector.service.js";
 import { DomainError } from "../../common/errors/domain-error.js";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service.js";
@@ -8,6 +8,7 @@ import { BookingCryptoService } from "./booking-crypto.service.js";
 import { seatCountFor, type AttendanceParty } from "./attendance.js";
 import type { BookingCancellationType } from "./booking-cancellation-type.js";
 import { SmsOutboxService, type SmsBranch } from "../sms/sms-outbox.service.js";
+import { SmsTemplateCatalog } from "../sms/sms-template-catalog.service.js";
 import { SheetOutboxService, type SheetBookingChildSnapshot } from "../google-sheets/sheet-outbox.service.js";
 import { BookingProofService } from "./otp-proof.port.js";
 import { createHash } from "node:crypto";
@@ -19,6 +20,12 @@ import {
 import type { Request } from "express";
 import { BookingAccessService } from "./booking-access.service.js";
 import { QrTokenProtector } from "./qr-token-protector.service.js";
+import type { AppEnvironment } from "../../common/config/environment.js";
+import {
+  mapMaskedFamilyBookingCore,
+  mapMaskedFamilyBookingRow,
+  type PublicMaskedFamilyBooking,
+} from "./public-masked-family-booking.js";
 
 interface UpdateInput { readonly seminarSessionId?: string; readonly attendanceParty?: AttendanceParty; readonly studentIds?: readonly string[]; readonly expectedVersion: number; readonly reason: string; }
 
@@ -29,11 +36,13 @@ export class FamilyBookingsManagementService {
     private readonly idempotency: IdempotencyService,
     private readonly crypto: BookingCryptoService,
     private readonly smsOutbox: SmsOutboxService,
+    private readonly smsTemplates: SmsTemplateCatalog,
     private readonly sheetOutbox: SheetOutboxService,
     private readonly bookingProof: BookingProofService,
     private readonly phoneProtector: PhoneProtector,
     private readonly bookingAccess: BookingAccessService,
     private readonly qrTokenProtector: QrTokenProtector,
+    @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
   public async list(filters: { sessionId?: string; branch?: string; status?: string; query?: string; page: number; pageSize: number }) {
@@ -73,7 +82,7 @@ export class FamilyBookingsManagementService {
       if (request === undefined) this.fail(401, "BOOKING_MANAGEMENT_SESSION_REQUIRED");
       await this.bookingAccess.authorize(request, id);
     }
-    return this.map(row);
+    return mapMaskedFamilyBookingRow(row, this.phoneProtector.reveal(row.contactCiphertext));
   }
 
   public async listAuthorized(proofValue: string) {
@@ -84,14 +93,25 @@ export class FamilyBookingsManagementService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
     });
-    return { items: rows.map((row) => this.map(row)) };
+    return {
+      items: rows.map((row) => mapMaskedFamilyBookingRow(
+        row,
+        this.phoneProtector.reveal(row.contactCiphertext),
+      )),
+    };
   }
 
-  public async update(id: string, input: UpdateInput, actorSubject: string | null, key: string, proofValue?: string, request?: Request) {
-    const hasLegacyProof = proofValue !== undefined && proofValue.trim().length > 0;
-    const proofDigest = !hasLegacyProof ? null : createHash("sha256").update(proofValue).digest("base64url");
+  public update(id: string, input: UpdateInput, actorSubject: null, key: string, proofValue: string, request?: Request): Promise<PublicMaskedFamilyBooking>;
+  public update(id: string, input: UpdateInput, actorSubject: string, key: string, proofValue?: string, request?: Request): Promise<any>;
+  public async update(id: string, input: UpdateInput, actorSubject: string | null, key: string, proofValue?: string, _request?: Request) {
+    if (actorSubject === null && (proofValue === undefined || proofValue.trim().length === 0)) {
+      this.fail(401, "BOOKING_PROOF_INVALID");
+    }
+    const proofDigest = actorSubject === null
+      ? createHash("sha256").update(proofValue!).digest("base64url")
+      : null;
     const response = await this.idempotency.execute("FAMILY_BOOKING_UPDATE", key, {
-      id, ...input, proofDigest, authorization: actorSubject === null && !hasLegacyProof ? "MANAGEMENT_SESSION" : null,
+      id, ...input, proofDigest,
     }, async (transaction) => {
       const snapshot = await transaction.familyBooking.findUnique({
         where: { publicId: id },
@@ -102,23 +122,23 @@ export class FamilyBookingsManagementService {
         ? { id: snapshot.sessionId }
         : await transaction.seminarSession.findUnique({ where: { publicId: input.seminarSessionId }, select: { id: true } });
       if (targetSession === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
-      const capacityIds = [...new Set([snapshot.sessionId, targetSession.id])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-      const capacityRows = await transaction.$queryRaw<Array<{
-        session_id: bigint; session_public_id: string; reserved_count: number; capacity: number;
+      const sessionIds = [...new Set([snapshot.sessionId, targetSession.id])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+      const sessionRows = await transaction.$queryRaw<Array<{
+        session_id: bigint; session_public_id: string;
         scope: string; branch_id: bigint | null; status: string; seminar_status: string;
         booking_opens_at: Date | null; booking_closes_at: Date | null;
         starts_at: Date; ends_at: Date; guest_booking_enabled: boolean;
-      }>>`select sc.session_id,ss.public_id session_public_id,sc.reserved_count,sc.capacity,
+        seminar_title: string; place: string;
+      }>>`select ss.id session_id,ss.public_id session_public_id,
                  ss.scope,ss.branch_id,ss.status,se.status seminar_status,ss.booking_opens_at,ss.booking_closes_at,
-                 ss.starts_at,ss.ends_at,ss.guest_booking_enabled
-            from session_capacities sc
-            join seminar_sessions ss on ss.id=sc.session_id
+                 ss.starts_at,ss.ends_at,ss.guest_booking_enabled,se.title seminar_title,ss.place
+            from seminar_sessions ss
             join seminars se on se.id=ss.seminar_id
-           where sc.session_id=any(${capacityIds}::bigint[])
-           order by sc.session_id for update of sc`;
-      const sourceCapacity = capacityRows.find((row) => row.session_id === snapshot.sessionId);
-      const targetCapacity = capacityRows.find((row) => row.session_id === targetSession.id);
-      if (sourceCapacity === undefined || targetCapacity === undefined) this.fail(409, "SESSION_CAPACITY_MISSING");
+           where ss.id=any(${sessionIds}::bigint[])
+           order by ss.id for update of ss`;
+      const sourceSession = sessionRows.find((row) => row.session_id === snapshot.sessionId);
+      const targetSessionState = sessionRows.find((row) => row.session_id === targetSession.id);
+      if (sourceSession === undefined || targetSessionState === undefined) this.fail(409, "SEMINAR_SESSION_NOT_FOUND");
       const lockedRows = await transaction.$queryRaw<Array<{
         id: bigint; session_id: bigint; status: string; version: bigint; attendance_party: string; seat_count: number;
         contact_digest: Uint8Array; contact_ciphertext: Uint8Array; contact_last4: string;
@@ -126,12 +146,9 @@ export class FamilyBookingsManagementService {
              from family_bookings where id=${snapshot.id} for update`;
       const booking = lockedRows[0]!;
       if (booking.session_id !== snapshot.sessionId) this.fail(409, "FAMILY_BOOKING_VERSION_CONFLICT");
-      if (hasLegacyProof) {
-        const proof = await this.bookingProof.consume(transaction, proofValue, "BOOKING_MANAGE");
+      if (actorSubject === null) {
+        const proof = await this.bookingProof.consume(transaction, proofValue!, "BOOKING_MANAGE");
         if (!Buffer.from(booking.contact_digest).equals(Buffer.from(proof.contactDigest))) this.fail(403, "BOOKING_PROOF_CONTACT_MISMATCH");
-      } else if (actorSubject === null) {
-        if (request === undefined) this.fail(401, "BOOKING_MANAGEMENT_SESSION_REQUIRED");
-        await this.bookingAccess.authorizeTransaction(transaction, request, id);
       }
       if (booking.version !== BigInt(input.expectedVersion)) this.fail(409, "FAMILY_BOOKING_VERSION_CONFLICT");
       if (booking.status !== "RESERVED") this.fail(409, "FAMILY_BOOKING_NOT_EDITABLE");
@@ -139,11 +156,9 @@ export class FamilyBookingsManagementService {
       const seats = seatCountFor(party);
       const moved = targetSession.id !== snapshot.sessionId;
       const now = new Date();
-      if (moved && (targetCapacity.status !== "OPEN" || targetCapacity.seminar_status !== "PUBLISHED")) this.fail(409, "SESSION_NOT_BOOKABLE");
-      if (moved && ((targetCapacity.booking_opens_at !== null && now < targetCapacity.booking_opens_at)
-        || (targetCapacity.booking_closes_at !== null && now > targetCapacity.booking_closes_at))) this.fail(409, "BOOKING_WINDOW_CLOSED");
-      const targetReserved = moved ? targetCapacity.reserved_count + seats : targetCapacity.reserved_count - booking.seat_count + seats;
-      if (targetReserved > targetCapacity.capacity) this.fail(409, "CAPACITY_EXCEEDED");
+      if (moved && (targetSessionState.status !== "OPEN" || targetSessionState.seminar_status !== "PUBLISHED")) this.fail(409, "SESSION_NOT_BOOKABLE");
+      if (moved && ((targetSessionState.booking_opens_at !== null && now < targetSessionState.booking_opens_at)
+        || (targetSessionState.booking_closes_at !== null && now > targetSessionState.booking_closes_at))) this.fail(409, "BOOKING_WINDOW_CLOSED");
       if (moved) {
         const submittedSurvey = await transaction.surveyResponse.findUnique({ where: { familyBookingId: booking.id }, select: { id: true } });
         if (submittedSurvey !== null) this.fail(409, "SURVEYED_BOOKING_CANNOT_MOVE");
@@ -162,7 +177,7 @@ export class FamilyBookingsManagementService {
           where: { familyBookingId: booking.id, active: true, participantType: "GUEST" }, select: { id: true },
         });
         if (guestParticipant !== null) this.fail(409, "GUEST_PARTICIPANT_IMMUTABLE");
-        await this.replaceStudents(transaction, booking.id, targetSession.id, input.studentIds, booking.contact_digest, targetCapacity.scope, targetCapacity.branch_id);
+        await this.replaceStudents(transaction, booking.id, targetSession.id, input.studentIds, booking.contact_digest, targetSessionState.scope, targetSessionState.branch_id);
       } else if (moved) {
         const participants = await transaction.$queryRaw<Array<{
           participant_type: string; branch_code_at_booking: string; source_active: boolean | null;
@@ -178,21 +193,17 @@ export class FamilyBookingsManagementService {
             || (participant.father_phone_digest !== null && Buffer.from(participant.father_phone_digest).equals(Buffer.from(booking.contact_digest)))
           )
         ))) this.fail(403, "STUDENT_CONTACT_OWNERSHIP_MISMATCH");
-        if (actorSubject === null && !targetCapacity.guest_booking_enabled
+        if (actorSubject === null && !targetSessionState.guest_booking_enabled
           && participants.some((participant) => participant.participant_type === "GUEST")) {
           this.fail(409, "GUEST_BOOKING_DISABLED");
         }
-        if (targetCapacity.scope === "BRANCH") {
-          const branch = await transaction.branch.findUnique({ where: { id: targetCapacity.branch_id ?? -1n }, select: { code: true } });
+        if (targetSessionState.scope === "BRANCH") {
+          const branch = await transaction.branch.findUnique({ where: { id: targetSessionState.branch_id ?? -1n }, select: { code: true } });
           if (branch === null || participants.some((participant) => participant.branch_code_at_booking !== branch.code)) this.fail(409, "SESSION_BRANCH_MISMATCH");
         }
       }
       if (moved) {
         await transaction.$executeRawUnsafe("set constraints family_booking_students_family_session_fk deferred");
-        await transaction.sessionCapacity.update({ where: { sessionId: snapshot.sessionId }, data: { reservedCount: { decrement: booking.seat_count }, version: { increment: 1 }, updatedAt: now } });
-        await transaction.sessionCapacity.update({ where: { sessionId: targetSession.id }, data: { reservedCount: { increment: seats }, version: { increment: 1 }, updatedAt: now } });
-      } else {
-        await transaction.sessionCapacity.update({ where: { sessionId: snapshot.sessionId }, data: { reservedCount: { increment: seats - booking.seat_count }, version: { increment: 1 }, updatedAt: now } });
       }
       const updatedBooking = await transaction.familyBooking.update({
         where: { id: booking.id }, data: { sessionId: targetSession.id, attendanceParty: party, seatCount: seats, version: { increment: 1 }, updatedAt: now },
@@ -200,8 +211,8 @@ export class FamilyBookingsManagementService {
       if (moved) {
         await transaction.familyBookingStudent.updateMany({ where: { familyBookingId: booking.id }, data: { sessionId: targetSession.id } });
         const targetQrExpiresAt = new Date(Math.max(
-          targetCapacity.starts_at.getTime() + 6 * 60 * 60 * 1_000,
-          targetCapacity.ends_at.getTime() + 60 * 60 * 1_000,
+          targetSessionState.starts_at.getTime() + 6 * 60 * 60 * 1_000,
+          targetSessionState.ends_at.getTime() + 60 * 60 * 1_000,
           now.getTime() + 60 * 60 * 1_000,
         ));
         await transaction.qrCredential.updateMany({
@@ -209,7 +220,7 @@ export class FamilyBookingsManagementService {
           data: { expiresAt: targetQrExpiresAt },
         });
         const targetAccessExpiresAt = new Date(Math.max(
-          targetCapacity.ends_at.getTime() + 30 * 24 * 60 * 60_000,
+          targetSessionState.ends_at.getTime() + 30 * 24 * 60 * 60_000,
           now.getTime() + 30 * 24 * 60 * 60_000,
         ));
         await transaction.bookingAccessCredential.updateMany({
@@ -219,7 +230,7 @@ export class FamilyBookingsManagementService {
       }
       const event = await transaction.bookingEvent.create({ data: {
         familyBookingId: booking.id, eventType: "UPDATED", actorSubject,
-        safeMetadata: { reason: input.reason, fromSessionId: snapshot.session.publicId, toSessionId: targetCapacity.session_public_id },
+        safeMetadata: { reason: input.reason, fromSessionId: snapshot.session.publicId, toSessionId: targetSessionState.session_public_id },
       } });
       const afterChildren = await this.sheetChildren(transaction, booking.id, true);
       const projection = {
@@ -233,7 +244,7 @@ export class FamilyBookingsManagementService {
           children: beforeChildren.map((child) => ({ ...child, active: false })),
         });
         await this.sheetOutbox.enqueueBookingEvent(transaction, {
-          ...projection, seminarSessionPublicId: targetCapacity.session_public_id, children: afterChildren,
+          ...projection, seminarSessionPublicId: targetSessionState.session_public_id, children: afterChildren,
         });
       } else {
         await this.sheetOutbox.enqueueBookingEvent(transaction, {
@@ -243,19 +254,44 @@ export class FamilyBookingsManagementService {
       }
       const branch = afterChildren[0]?.branch;
       if (branch === undefined) this.fail(409, "BOOKING_BRANCH_MISSING");
+      const bookingUrl = this.bookingUrl(snapshot.publicId);
+      const rendered = await this.smsTemplates.renderDefault(transaction, "BOOKING_UPDATED", {
+        studentName: afterChildren.map((child) => child.studentName).join(", "),
+        seminarTitle: targetSessionState.seminar_title,
+        sessionDateTime: this.formatSessionDateTime(targetSessionState.starts_at),
+        place: targetSessionState.place,
+        bookingUrl,
+        inquiryPhone: this.inquiryPhone(branch),
+      }, {
+        key: "SYSTEM_BOOKING_UPDATED",
+        body: "[예시학원] 설명회 예약 정보가 변경되었습니다. 예약 및 입장 QR 확인: {예약확인링크}",
+      });
       await this.smsOutbox.enqueue(transaction, {
-        eventKey: `BOOKING_CONFIRMED:${snapshot.publicId}:${updatedBooking.version.toString()}`,
-        source: "BOOKING_CONFIRMED", branch, seminarSessionPublicId: targetCapacity.session_public_id,
+        eventKey: `BOOKING_UPDATED:${snapshot.publicId}:${updatedBooking.version.toString()}`,
+        source: "BOOKING_UPDATED", branch, seminarSessionPublicId: targetSessionState.session_public_id,
         familyBookingPublicId: snapshot.publicId, recipientCiphertext: booking.contact_ciphertext,
         recipientDigest: booking.contact_digest, recipientLast4: booking.contact_last4,
-        message: "[NPR] 설명회 예약 정보가 변경되었습니다.", actorSubject,
-        safeMetadata: { bookingVersion: Number(updatedBooking.version), sessionChanged: moved },
+        message: rendered.message, title: rendered.title, actorSubject,
+        safeMetadata: { bookingVersion: Number(updatedBooking.version), sessionChanged: moved, ...rendered.snapshot },
       });
-      return this.load(transaction, booking.id);
+      const loaded = await this.load(transaction, booking.id);
+      return actorSubject === null
+        ? mapMaskedFamilyBookingCore(loaded, this.phoneProtector.reveal(booking.contact_ciphertext))
+        : loaded;
     });
-    return this.attachContact(id, response);
+    return actorSubject === null
+      ? response
+      : this.attachContact(id, response as ReturnType<FamilyBookingsManagementService["mapCore"]>);
   }
 
+  public cancel(
+    id: string, expectedVersion: number, cancellationType: BookingCancellationType,
+    actorSubject: null, key: string, proofValue: string, legacyPublicReason?: string, request?: Request,
+  ): Promise<PublicMaskedFamilyBooking>;
+  public cancel(
+    id: string, expectedVersion: number, cancellationType: BookingCancellationType,
+    actorSubject: string, key: string, proofValue?: string, legacyPublicReason?: string, request?: Request,
+  ): Promise<any>;
   public async cancel(
     id: string,
     expectedVersion: number,
@@ -264,13 +300,16 @@ export class FamilyBookingsManagementService {
     key: string,
     proofValue?: string,
     legacyPublicReason?: string,
-    request?: Request,
+    _request?: Request,
   ) {
-    const hasLegacyProof = proofValue !== undefined && proofValue.trim().length > 0;
-    const proofDigest = !hasLegacyProof ? null : createHash("sha256").update(proofValue).digest("base64url");
+    if (actorSubject === null && (proofValue === undefined || proofValue.trim().length === 0)) {
+      this.fail(401, "BOOKING_PROOF_INVALID");
+    }
+    const proofDigest = actorSubject === null
+      ? createHash("sha256").update(proofValue!).digest("base64url")
+      : null;
     const idempotencyRequest = cancellationType === "SELF_SERVICE"
-      ? { id, expectedVersion, reason: legacyPublicReason ?? "PUBLIC_SELF_SERVICE", proofDigest,
-          authorization: !hasLegacyProof ? "MANAGEMENT_SESSION" : null }
+      ? { id, expectedVersion, reason: legacyPublicReason ?? "PUBLIC_SELF_SERVICE", proofDigest }
       : { id, expectedVersion, cancellationType, proofDigest };
     const response = await this.idempotency.execute("FAMILY_BOOKING_CANCEL", key, idempotencyRequest, async (transaction) => {
       const snapshot = await transaction.familyBooking.findUnique({
@@ -278,23 +317,29 @@ export class FamilyBookingsManagementService {
         select: { id: true, publicId: true, sessionId: true, createdAt: true, bookingSource: true, attendanceParty: true, session: { select: { publicId: true } } },
       });
       if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
-      await transaction.$executeRaw`select session_id from session_capacities where session_id=${snapshot.sessionId} for update`;
-      const rows = await transaction.$queryRaw<Array<{ id: bigint; status: string; version: bigint; seat_count: number; contact_digest: Uint8Array }>>`
-        select id,status,version,seat_count,contact_digest from family_bookings where id=${snapshot.id} for update`;
+      await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
+      const rows = await transaction.$queryRaw<Array<{
+        id: bigint; session_id: bigint; status: string; version: bigint; seat_count: number;
+        contact_digest: Uint8Array; contact_ciphertext: Uint8Array;
+      }>>`
+        select id,session_id,status,version,seat_count,contact_digest,contact_ciphertext
+          from family_bookings where id=${snapshot.id} for update`;
       const booking = rows[0]!;
-      if (hasLegacyProof) {
-        const proof = await this.bookingProof.consume(transaction, proofValue, "BOOKING_MANAGE");
+      if (booking.session_id !== snapshot.sessionId) this.fail(409, "FAMILY_BOOKING_VERSION_CONFLICT");
+      if (actorSubject === null) {
+        const proof = await this.bookingProof.consume(transaction, proofValue!, "BOOKING_MANAGE");
         if (!Buffer.from(booking.contact_digest).equals(Buffer.from(proof.contactDigest))) this.fail(403, "BOOKING_PROOF_CONTACT_MISMATCH");
-      } else if (actorSubject === null) {
-        if (request === undefined) this.fail(401, "BOOKING_MANAGEMENT_SESSION_REQUIRED");
-        await this.bookingAccess.authorizeTransaction(transaction, request, id);
       }
-      if (booking.status === "CANCELLED") return this.load(transaction, booking.id);
+      if (booking.status === "CANCELLED") {
+        const loaded = await this.load(transaction, booking.id);
+        return actorSubject === null
+          ? mapMaskedFamilyBookingCore(loaded, this.phoneProtector.reveal(booking.contact_ciphertext))
+          : loaded;
+      }
       if (booking.version !== BigInt(expectedVersion)) this.fail(409, "FAMILY_BOOKING_VERSION_CONFLICT");
       if (booking.status !== "RESERVED") this.fail(409, "CHECKED_IN_BOOKING_CANNOT_CANCEL");
       const beforeChildren = await this.sheetChildren(transaction, booking.id, true);
       const updatedBooking = await transaction.familyBooking.update({ where: { id: booking.id }, data: { status: "CANCELLED", cancelledAt: new Date(), version: { increment: 1 }, updatedAt: new Date() } });
-      await transaction.sessionCapacity.update({ where: { sessionId: snapshot.sessionId }, data: { reservedCount: { decrement: booking.seat_count }, version: { increment: 1 }, updatedAt: new Date() } });
       await transaction.familyBookingStudent.updateMany({ where: { familyBookingId: booking.id, active: true }, data: { active: false, releasedAt: new Date() } });
       await transaction.qrCredential.updateMany({ where: { familyBookingId: booking.id, status: "ACTIVE" }, data: { status: "REVOKED", revokedAt: new Date() } });
       const event = await transaction.bookingEvent.create({ data: {
@@ -308,23 +353,35 @@ export class FamilyBookingsManagementService {
         where: { id: booking.id },
         select: {
           publicId: true, contactCiphertext: true, contactDigest: true, contactLast4: true,
-          session: { select: { publicId: true } },
-          students: { orderBy: { id: "asc" }, take: 1, select: { branchCodeAtBooking: true } },
+          session: { select: { publicId: true, startsAt: true, place: true, seminar: { select: { title: true } } } },
         },
       });
-      const branch = delivery.students[0]?.branchCodeAtBooking;
+      const branch = beforeChildren[0]?.branch;
       if (branch === undefined) this.fail(409, "BOOKING_BRANCH_MISSING");
+      const rendered = await this.smsTemplates.renderDefault(transaction, "BOOKING_CANCELLED", {
+        studentName: beforeChildren.map((child) => child.studentName).join(", "),
+        seminarTitle: delivery.session.seminar.title,
+        sessionDateTime: this.formatSessionDateTime(delivery.session.startsAt),
+        place: delivery.session.place,
+        bookingUrl: this.bookingUrl(delivery.publicId),
+        inquiryPhone: this.inquiryPhone(branch),
+      }, {
+        key: "SYSTEM_BOOKING_CANCELLED",
+        body: "[예시학원] 설명회 예약이 취소되었습니다.",
+      });
       await this.smsOutbox.enqueue(transaction, {
         eventKey: `BOOKING_CANCELLED:${delivery.publicId}`,
         source: "BOOKING_CANCELLED",
-        branch: branch as SmsBranch,
+        branch,
         seminarSessionPublicId: delivery.session.publicId,
         familyBookingPublicId: delivery.publicId,
         recipientCiphertext: delivery.contactCiphertext,
         recipientDigest: delivery.contactDigest,
         recipientLast4: delivery.contactLast4,
-        message: "[NPR] 설명회 예약이 취소되었습니다.",
+        message: rendered.message,
+        title: rendered.title,
         actorSubject,
+        safeMetadata: rendered.snapshot,
       });
       await this.sheetOutbox.enqueueBookingEvent(transaction, {
         eventId: event.eventId, eventType: "CANCELLED", occurredAt: event.occurredAt,
@@ -334,9 +391,14 @@ export class FamilyBookingsManagementService {
         bookingSource: snapshot.bookingSource as "WEB_APP" | "PHONE" | "TEACHER" | "ON_SITE",
         children: beforeChildren.map((child) => ({ ...child, active: false })),
       });
-      return this.load(transaction, booking.id);
+      const loaded = await this.load(transaction, booking.id);
+      return actorSubject === null
+        ? mapMaskedFamilyBookingCore(loaded, this.phoneProtector.reveal(booking.contact_ciphertext))
+        : loaded;
     });
-    return this.attachContact(id, response);
+    return actorSubject === null
+      ? response
+      : this.attachContact(id, response as ReturnType<FamilyBookingsManagementService["mapCore"]>);
   }
 
   public async bookingEvents(id: string, afterSequence?: string, requestedLimit?: number) {
@@ -348,11 +410,14 @@ export class FamilyBookingsManagementService {
       items: rows.slice(0, limit).map((row) => {
         const safeMetadata = this.safeMetadata(row.safeMetadata);
         const reason = typeof safeMetadata.reason === "string" ? safeMetadata.reason.slice(0, 500) : null;
+        const scannerDeviceName = this.metadataText(safeMetadata, "scannerDeviceName");
+        const scannerEntranceName = this.metadataText(safeMetadata, "scannerEntranceName");
+        const scannerGateCode = this.metadataText(safeMetadata, "scannerGateCode");
         const { reason: _reason, ...metadata } = safeMetadata;
         return {
           sequence: row.id.toString(), eventId: row.eventId, familyBookingId: id, type: row.eventType,
           actor: this.bookingEventActor(row.eventType, row.actorSubject), cancellationType: row.cancellationType,
-          reason, metadata, occurredAt: row.occurredAt,
+          reason, scannerDeviceName, scannerEntranceName, scannerGateCode, metadata, occurredAt: row.occurredAt,
         };
       }),
       page: { nextAfterSequence: rows.length > limit ? rows[limit - 1]!.id.toString() : null, hasMore: rows.length > limit },
@@ -379,8 +444,31 @@ export class FamilyBookingsManagementService {
     const booking = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, select: { id: true } });
     if (booking === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
     const after = afterSequence === undefined ? 0n : BigInt(afterSequence); const limit = Math.min(requestedLimit ?? 50, 200);
-    const rows = await this.prisma.checkInEvent.findMany({ where: { familyBookingId: booking.id, id: { gt: after } }, include: { session: true, scannerDevice: true }, orderBy: { id: "asc" }, take: limit + 1 });
-    return { items: rows.slice(0, limit).map((row) => ({ sequence: row.id.toString(), eventId: row.eventId, source: row.source, result: row.result, seminarSessionId: row.session.publicId, deviceId: row.scannerDevice?.publicId ?? null, seatCount: row.seatCount, gateCode: row.gateCode, occurredAt: row.occurredAt })), page: { nextAfterSequence: rows.length > limit ? rows[limit - 1]!.id.toString() : null, hasMore: rows.length > limit } };
+    const rows = await this.prisma.checkInEvent.findMany({
+      where: { familyBookingId: booking.id, id: { gt: after } },
+      select: {
+        id: true, eventId: true, source: true, result: true, seatCount: true, gateCode: true,
+        safeMetadata: true, occurredAt: true,
+        session: { select: { publicId: true } },
+        scannerDevice: { select: { publicId: true, name: true, location: true } },
+      },
+      orderBy: { id: "asc" },
+      take: limit + 1,
+    });
+    return {
+      items: rows.slice(0, limit).map((row) => {
+        const metadata = this.safeMetadata(row.safeMetadata);
+        return {
+          sequence: row.id.toString(), eventId: row.eventId, source: row.source, result: row.result,
+          seminarSessionId: row.session.publicId, deviceId: row.scannerDevice?.publicId ?? null,
+          scannerDeviceName: this.metadataText(metadata, "scannerDeviceName") ?? row.scannerDevice?.name ?? null,
+          scannerEntranceName: this.metadataText(metadata, "scannerEntranceName") ?? row.scannerDevice?.location ?? null,
+          scannerGateCode: this.metadataText(metadata, "scannerGateCode") ?? row.gateCode,
+          seatCount: row.seatCount, gateCode: row.gateCode, metadata, occurredAt: row.occurredAt,
+        };
+      }),
+      page: { nextAfterSequence: rows.length > limit ? rows[limit - 1]!.id.toString() : null, hasMore: rows.length > limit },
+    };
   }
 
   public async qrPass(rawToken: string) {
@@ -542,5 +630,22 @@ export class FamilyBookingsManagementService {
     return { ...response, contact: this.phoneProtector.reveal(booking.contactCiphertext) };
   }
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> { const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy; }
+  private bookingUrl(familyBookingId: string): string {
+    const base = this.environment.publicBaseUrl ?? "https://invalid.local";
+    return new URL(`/booking/${encodeURIComponent(familyBookingId)}`, base).toString();
+  }
+  private formatSessionDateTime(value: Date): string {
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+      weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).format(value);
+  }
+  private inquiryPhone(branch: SmsBranch): string {
+    return ({ CAMPUS_A: "02-000-0001", CAMPUS_B: "02-000-0002", CAMPUS_C: "02-000-0003" } as const)[branch];
+  }
+  private metadataText(metadata: Readonly<Record<string, string | number | boolean | null>>, key: string): string | null {
+    const value = metadata[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
   private fail(status: number, code: string): never { throw new DomainError(status, code, "The family booking operation could not be completed."); }
 }

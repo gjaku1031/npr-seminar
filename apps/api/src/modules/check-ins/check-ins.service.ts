@@ -16,10 +16,21 @@ type CheckInResult = "CHECKED_IN" | "ALREADY_CHECKED_IN" | "CANCELLED" | "SESSIO
 interface ScannerContext {
   readonly id: bigint;
   readonly publicId: string;
+  readonly name: string;
+  readonly location: string | null;
   readonly branchCode: string;
   readonly gateCode: string;
   readonly sessionId: bigint;
   readonly sessionPublicId: string;
+}
+
+export function scannerCheckInMetadata(scanner: Pick<ScannerContext, "name" | "location" | "gateCode" | "branchCode">) {
+  return {
+    scannerDeviceName: scanner.name,
+    scannerEntranceName: scanner.location,
+    scannerGateCode: scanner.gateCode,
+    scannerBranchCode: scanner.branchCode,
+  } as const;
 }
 
 export interface CheckInOutcome {
@@ -140,7 +151,6 @@ export class CheckInsService {
       select: {
         publicId: true, scope: true, startsAt: true, endsAt: true, place: true,
         branch: { select: { code: true } }, seminar: { select: { publicId: true, title: true } },
-        capacity: { select: { capacity: true, reservedCount: true } },
       },
       orderBy: [{ startsAt: "asc" }, { id: "asc" }],
     });
@@ -154,7 +164,6 @@ export class CheckInsService {
         startsAt: session.startsAt,
         endsAt: session.endsAt,
         location: session.place,
-        remainingCapacity: Math.max(0, (session.capacity?.capacity ?? 0) - (session.capacity?.reservedCount ?? 0)),
       })),
       currentSessionId: device.selectedSession?.publicId ?? null,
     };
@@ -226,18 +235,25 @@ export class CheckInsService {
         actorSubject: true, safeMetadata: true, occurredAt: true,
         familyBooking: { select: { publicId: true } },
         session: { select: { publicId: true } },
-        scannerDevice: { select: { publicId: true } },
+        scannerDevice: { select: { publicId: true, name: true, location: true } },
       },
       orderBy: { id: "asc" }, take: limit + 1,
     });
     const hasMore = rows.length > limit;
     return {
-      items: rows.slice(0, limit).map((row) => ({
-        sequence: row.id.toString(), eventId: row.eventId, source: row.source, result: row.result,
-        familyBookingId: row.familyBooking?.publicId ?? null, seminarSessionId: row.session.publicId,
-        deviceId: row.scannerDevice?.publicId ?? null, seatCount: row.seatCount, gateCode: row.gateCode,
-        actorSubject: row.actorSubject, safeMetadata: row.safeMetadata, occurredAt: row.occurredAt,
-      })),
+      items: rows.slice(0, limit).map((row) => {
+        const metadata = this.safeMetadata(row.safeMetadata);
+        return {
+          sequence: row.id.toString(), eventId: row.eventId, source: row.source, result: row.result,
+          familyBookingId: row.familyBooking?.publicId ?? null, seminarSessionId: row.session.publicId,
+          deviceId: row.scannerDevice?.publicId ?? null,
+          scannerDeviceName: this.metadataText(metadata, "scannerDeviceName") ?? row.scannerDevice?.name ?? null,
+          scannerEntranceName: this.metadataText(metadata, "scannerEntranceName") ?? row.scannerDevice?.location ?? null,
+          scannerGateCode: this.metadataText(metadata, "scannerGateCode") ?? row.gateCode,
+          seatCount: row.seatCount, gateCode: row.gateCode,
+          actorSubject: row.actorSubject, safeMetadata: row.safeMetadata, occurredAt: row.occurredAt,
+        };
+      }),
       page: { nextAfterSequence: hasMore ? rows[limit - 1]!.id.toString() : null, hasMore },
     };
   }
@@ -290,8 +306,18 @@ export class CheckInsService {
         if (match !== undefined) located = { bookingId: match.id, sessionId: match.session_id, credentialId: null };
       }
       if (located !== undefined) {
-        // Global domain lock order: scanner -> session capacity -> booking -> QR credential.
-        await transaction.$executeRaw`select session_id from session_capacities where session_id=${located.sessionId} for update`;
+        // Global domain lock order: scanner -> seminar session -> booking -> QR credential.
+        // Lock both the lookup snapshot and the scanner's selected session in
+        // deterministic order. A concurrent booking move must finish first;
+        // after the booking lock below, resultFor revalidates its actual
+        // session before any check-in mutation is allowed.
+        const sessionIds = [...new Set([located.sessionId, scanner.sessionId])]
+          .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+        const lockedSessions = await transaction.$queryRaw<Array<{ id: bigint }>>`
+          select id from seminar_sessions
+           where id=any(${sessionIds}::bigint[])
+           order by id for update`;
+        if (lockedSessions.length !== sessionIds.length) this.fail(409, "SEMINAR_SESSION_NOT_FOUND");
         const bookings = await transaction.$queryRaw<Array<{
           id: bigint; public_id: string; session_id: bigint; status: string; seat_count: number;
           attendance_party: AttendanceParty; checked_in_at: Date | null;
@@ -316,12 +342,16 @@ export class CheckInsService {
         });
         if (updated.count !== 1) result = "ALREADY_CHECKED_IN";
         else {
-          await transaction.sessionCapacity.update({
-            where: { sessionId: scanner.sessionId },
-            data: { checkedInCount: { increment: booking.seat_count }, version: { increment: 1 }, updatedAt: new Date() },
-          });
           const bookingEvent = await transaction.bookingEvent.create({
-            data: { familyBookingId: booking.id, eventType: "CHECKED_IN", actorSubject: actor.subject, safeMetadata: { source } },
+            data: {
+              familyBookingId: booking.id,
+              eventType: "CHECKED_IN",
+              actorSubject: actor.subject,
+              safeMetadata: {
+                source,
+                ...scannerCheckInMetadata(scanner),
+              },
+            },
           });
           const delivery = await transaction.familyBooking.findUniqueOrThrow({
             where: { id: booking.id },
@@ -371,7 +401,7 @@ export class CheckInsService {
           gateCode: scanner.gateCode,
           actorSubject: actor.subject,
           idempotencyKeyDigest: this.bytes(keyDigest),
-          safeMetadata: {},
+          safeMetadata: scannerCheckInMetadata(scanner),
         },
       });
       const representativeStudent = booking === undefined
@@ -442,6 +472,8 @@ export class CheckInsService {
     return {
       id: device.id,
       publicId: device.publicId,
+      name: device.name,
+      location: device.location,
       branchCode: device.branch.code,
       gateCode: device.gateCode,
       sessionId: device.selectedSession.id,
@@ -452,9 +484,10 @@ export class CheckInsService {
   private async contextForUpdate(transaction: Prisma.TransactionClient, actor: AuthenticatedActor): Promise<ScannerContext> {
     if (actor.role !== "SCANNER" || actor.scannerDeviceId === undefined) this.fail(403, "SCANNER_ROLE_REQUIRED");
     const rows = await transaction.$queryRaw<Array<{
-      id: bigint; public_id: string; branch_code: string; gate_code: string;
+      id: bigint; public_id: string; device_name: string; location: string | null;
+      branch_code: string; gate_code: string;
       selected_session_id: bigint | null; session_public_id: string | null;
-    }>>`select d.id,d.public_id,b.code branch_code,d.gate_code,d.selected_session_id,
+    }>>`select d.id,d.public_id,d.name device_name,d.location,b.code branch_code,d.gate_code,d.selected_session_id,
                ss.public_id session_public_id
           from scanner_devices d join branches b on b.id=d.branch_id
           left join seminar_sessions ss on ss.id=d.selected_session_id
@@ -466,6 +499,8 @@ export class CheckInsService {
     return {
       id: device.id,
       publicId: device.public_id,
+      name: device.device_name,
+      location: device.location,
       branchCode: device.branch_code,
       gateCode: device.gate_code,
       sessionId: device.selected_session_id,
@@ -478,7 +513,7 @@ export class CheckInsService {
     const device = await this.prisma.scannerDevice.findFirst({
       where: { publicId: actor.scannerDeviceId, status: "ACTIVE" },
       select: {
-        id: true, publicId: true, branchId: true, gateCode: true,
+        id: true, publicId: true, name: true, location: true, branchId: true, gateCode: true,
         branch: { select: { code: true } },
         selectedSession: { select: { id: true, publicId: true } },
       },
@@ -494,6 +529,16 @@ export class CheckInsService {
 
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
     const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
+  }
+
+  private safeMetadata(value: Prisma.JsonValue): Readonly<Record<string, Prisma.JsonValue | undefined>> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+    return value as Readonly<Record<string, Prisma.JsonValue | undefined>>;
+  }
+
+  private metadataText(metadata: Readonly<Record<string, Prisma.JsonValue | undefined>>, key: string): string | null {
+    const value = metadata[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
   }
 
   private fail(status: number, code: string): never {

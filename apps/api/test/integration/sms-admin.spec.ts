@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -166,6 +167,47 @@ describe("SMS administration", () => {
     })).rejects.toMatchObject({ code: "SMS_TEMPLATE_VARIABLE_UNKNOWN" });
   });
 
+  it("refreshes only untouched legacy seed copy and preserves operator edits", async () => {
+    const migration = readFileSync(resolve(
+      apiDirectory,
+      "prisma/migrations/20260719012000_refresh_legacy_sms_brand_copy/migration.sql",
+    ), "utf8");
+    const legacySurvey = "[npr] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기·사진 남기기: {설문링크}";
+    const refreshedSurvey = "[예시학원] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기 남기기: {설문링크}";
+    await prisma.smsTemplate.update({
+      where: { key: "SURVEY_REQUEST_DEFAULT" },
+      data: { body: legacySurvey },
+    });
+    await prisma.$executeRawUnsafe(migration);
+    expect(await prisma.smsTemplate.findUniqueOrThrow({ where: { key: "SURVEY_REQUEST_DEFAULT" } }))
+      .toMatchObject({ body: refreshedSurvey, updatedBy: "system:brand-copy-migration" });
+
+    const operatorCopy = "운영자가 직접 수정한 리마인드 문구";
+    await prisma.smsTemplate.update({
+      where: { key: "DAY_BEFORE_REMINDER" },
+      data: { body: operatorCopy, updatedBy: "integration:operator" },
+    });
+    await prisma.$executeRawUnsafe(migration);
+    expect(await prisma.smsTemplate.findUniqueOrThrow({ where: { key: "DAY_BEFORE_REMINDER" } }))
+      .toMatchObject({ body: operatorCopy, updatedBy: "integration:operator" });
+
+    await prisma.smsTemplate.update({
+      where: { key: "DAY_BEFORE_REMINDER" },
+      data: {
+        body: "[예시학원] 내일 {일시} {설명회명}이 진행됩니다. 예약 및 입장 QR을 확인해 주세요. {예약확인링크}",
+        updatedBy: "system:brand-copy-migration",
+      },
+    });
+    const knownSeeds = await prisma.smsTemplate.findMany({
+      where: { key: { in: [
+        "BOOKING_CONFIRMED_DEFAULT", "DAY_BEFORE_REMINDER",
+        "SURVEY_REQUEST_DEFAULT", "BOOKING_CANCELLED_DEFAULT",
+      ] } },
+    });
+    expect(knownSeeds.every((template) => !template.body.includes("[npr]"))).toBe(true);
+    expect(knownSeeds.every((template) => !template.body.includes("사진"))).toBe(true);
+  });
+
   it("binds enqueue to the exact preview, renders each row, and exposes aggregate batch history", async () => {
     const request = {
       branch: "CAMPUS_A" as const,
@@ -240,7 +282,7 @@ describe("SMS administration", () => {
     })]);
   });
 
-  it("rejects duplicate keys and protects the final active template under optimistic locking", async () => {
+  it("rejects duplicate keys and protects the active default under optimistic locking", async () => {
     await expect(service.createTemplate({
       key: "BOOKING_CONFIRMED_DEFAULT",
       name: "중복",
@@ -249,16 +291,62 @@ describe("SMS administration", () => {
     }, "integration:admin", randomUUID())).rejects.toMatchObject({ code: "SMS_TEMPLATE_KEY_CONFLICT" });
 
     const keep = await prisma.smsTemplate.findFirstOrThrow({ where: { key: "BOOKING_CONFIRMED_DEFAULT" } });
-    await prisma.smsTemplate.updateMany({
-      where: { publicId: { not: keep.publicId } },
-      data: { active: false },
-    });
-    await expect(service.archiveTemplate(
+    await expect(service.removeTemplate(
       keep.publicId,
       keep.version.toString(),
       "integration:admin",
       randomUUID(),
-    )).rejects.toMatchObject({ code: "SMS_LAST_ACTIVE_TEMPLATE_REQUIRED" });
-    expect(await prisma.smsTemplate.count({ where: { active: true } })).toBe(1);
+    )).rejects.toMatchObject({ code: "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED" });
+    expect(await prisma.smsTemplate.findUnique({ where: { id: keep.id } })).not.toBeNull();
+  });
+
+  it("deletes unused templates, archives used templates, and replays both outcomes", async () => {
+    const unused = await service.createTemplate({
+      key: `UNUSED_${randomUUID().replaceAll("-", "").toUpperCase()}`,
+      name: "미사용 삭제",
+      purpose: "ADMIN_GROUP",
+      body: "미사용 템플릿",
+    }, "integration:admin", randomUUID());
+    const unusedKey = randomUUID();
+    const deleted = await service.removeTemplate(
+      unused.templateId, unused.version, "integration:admin", unusedKey,
+    );
+    expect(deleted).toEqual({
+      templateId: unused.templateId,
+      disposition: "DELETED",
+      usageCount: 0,
+      archivedTemplate: null,
+    });
+    expect(await service.removeTemplate(
+      unused.templateId, unused.version, "integration:admin", unusedKey,
+    )).toEqual(deleted);
+    expect(await prisma.smsTemplate.findUnique({ where: { publicId: unused.templateId } })).toBeNull();
+
+    const used = await service.createTemplate({
+      key: `USED_${randomUUID().replaceAll("-", "").toUpperCase()}`,
+      name: "사용 이력 보관",
+      purpose: "ADMIN_GROUP",
+      body: "[예시학원] {학생명} 안내",
+    }, "integration:admin", randomUUID());
+    const target = {
+      branch: "CAMPUS_A" as const,
+      seminarSessionId: sessionPublicId,
+      audience: "BOOKED_FAMILIES" as const,
+      templateId: used.templateId,
+    };
+    const preview = await service.preview(target);
+    await service.enqueue({ ...target, previewToken: preview.previewToken }, "integration:admin", randomUUID(), "ADMIN_GROUP");
+    const usedKey = randomUUID();
+    const archived = await service.removeTemplate(used.templateId, used.version, "integration:admin", usedKey);
+    expect(archived).toMatchObject({
+      templateId: used.templateId,
+      disposition: "ARCHIVED",
+      usageCount: 2,
+      archivedTemplate: { active: false, isDefault: false, version: "2" },
+    });
+    const archivedReplay = await service.removeTemplate(used.templateId, used.version, "integration:admin", usedKey);
+    expect(JSON.parse(JSON.stringify(archivedReplay))).toEqual(JSON.parse(JSON.stringify(archived)));
+    expect(await prisma.smsTemplate.findUniqueOrThrow({ where: { publicId: used.templateId } }))
+      .toMatchObject({ active: false, version: 2n });
   });
 });

@@ -19,15 +19,20 @@ interface OperationsSummaryRow {
   readonly unchecked_booking_count: bigint;
   readonly cancelled_booking_count: bigint;
   readonly no_show_booking_count: bigint;
+  readonly attendee_count: bigint;
 }
 
 interface StatisticsRow {
   readonly unit_group: StatisticsUnitGroup;
-  readonly eligible_student_count: bigint;
   readonly reserved_booking_count: bigint;
   readonly checked_in_booking_count: bigint;
   readonly active_booking_count: bigint;
-  readonly summary_eligible_student_count: bigint;
+  readonly linked_student_count: bigint;
+  readonly family_booking_count: bigint;
+  readonly attendee_count: bigint;
+  readonly summary_linked_student_count: bigint;
+  readonly summary_family_booking_count: bigint;
+  readonly summary_attendee_count: bigint;
   readonly summary_reserved_booking_count: bigint;
   readonly summary_checked_in_booking_count: bigint;
   readonly summary_active_booking_count: bigint;
@@ -38,11 +43,17 @@ interface StatisticsRow {
   readonly mobile_active_booking_count: bigint;
   readonly mobile_cancelled_booking_count: bigint;
   readonly mobile_no_show_booking_count: bigint;
+  readonly mobile_linked_student_count: bigint;
+  readonly mobile_family_booking_count: bigint;
+  readonly mobile_attendee_count: bigint;
   readonly manual_reserved_booking_count: bigint;
   readonly manual_checked_in_booking_count: bigint;
   readonly manual_active_booking_count: bigint;
   readonly manual_cancelled_booking_count: bigint;
   readonly manual_no_show_booking_count: bigint;
+  readonly manual_linked_student_count: bigint;
+  readonly manual_family_booking_count: bigint;
+  readonly manual_attendee_count: bigint;
   readonly survey_average_rating: number | null;
   readonly survey_response_count: bigint;
 }
@@ -53,6 +64,7 @@ const EMPTY_OPERATIONS_SUMMARY: OperationsSummaryRow = {
   unchecked_booking_count: 0n,
   cancelled_booking_count: 0n,
   no_show_booking_count: 0n,
+  attendee_count: 0n,
 };
 
 @Injectable()
@@ -66,7 +78,9 @@ export class SessionStatisticsService {
              count(*) filter (where status='CHECKED_IN')::bigint checked_in_booking_count,
              count(*) filter (where status='RESERVED')::bigint unchecked_booking_count,
              count(*) filter (where status='CANCELLED')::bigint cancelled_booking_count,
-             count(*) filter (where status='NO_SHOW')::bigint no_show_booking_count
+             count(*) filter (where status='NO_SHOW')::bigint no_show_booking_count,
+             coalesce(sum(case when status in ('RESERVED','CHECKED_IN')
+               then case attendance_party when 'BOTH' then 2 else 1 end else 0 end),0)::bigint attendee_count
         from family_bookings
        where session_id=${session.id}`);
     const row = rows[0] ?? EMPTY_OPERATIONS_SUMMARY;
@@ -76,6 +90,7 @@ export class SessionStatisticsService {
       uncheckedBookingCount: Number(row.unchecked_booking_count),
       cancelledBookingCount: Number(row.cancelled_booking_count),
       noShowBookingCount: Number(row.no_show_booking_count),
+      attendeeCount: Number(row.attendee_count),
     };
   }
 
@@ -132,30 +147,9 @@ export class SessionStatisticsService {
            and (${branch}::text is null or b.code=${branch})
            and cardinality(classes.math_class_names)+cardinality(classes.science_class_names)>0
       ),
-      eligible_unit_membership as (
-        select id,'ALL'::text unit_group from eligible_students
-        union all
-        select id,
-               case
-                 when unit_name='초등' then 'ELEMENTARY'
-                 when unit_name='중등1' then 'MIDDLE_1'
-                 when unit_name='중등2' then 'MIDDLE_2'
-                 when unit_name='중등3' then 'MIDDLE_3'
-                 when unit_name in ('특목','예중1','예고1') then 'SPECIAL_PURPOSE'
-                 when unit_name='고등' then 'HIGH'
-                 when unit_name='과학' then 'SCIENCE'
-                 else null
-               end unit_group
-          from eligible_students
-      ),
-      population as (
-        select unit_group,count(distinct id)::bigint eligible_student_count
-          from eligible_unit_membership
-         where unit_group is not null
-         group by unit_group
-      ),
       scoped_bookings as (
-        select fb.id,fb.status,fb.booking_source
+        select fb.id,fb.status,fb.booking_source,fb.attendance_party,
+               fb.contact_digest,fb.created_at
           from family_bookings fb
          where fb.session_id=${session.id}
            and ${scopeMatches}
@@ -167,10 +161,10 @@ export class SessionStatisticsService {
            ))
       ),
       booking_units as (
-        select booking.id,booking.status,'ALL'::text unit_group
+        select booking.id,booking.status,booking.attendance_party,'ALL'::text unit_group
           from scoped_bookings booking
         union all
-        select distinct booking.id,booking.status,
+        select distinct booking.id,booking.status,booking.attendance_party,
                case
                  when student.unit_name='초등' then 'ELEMENTARY'
                  when student.unit_name='중등1' then 'MIDDLE_1'
@@ -186,6 +180,77 @@ export class SessionStatisticsService {
             on child.family_booking_id=booking.id and child.session_id=${session.id}
           join eligible_students student on student.id=child.student_id
          where child.participant_type='ENROLLED'
+      ),
+      monitoring_candidates as (
+        select 'E:'||child.student_id::text identity_key,booking.id family_booking_id,
+               booking.status,booking.attendance_party,booking.booking_source,
+               case
+                 when npr_canonical_unit_name(student.class_name)='초등' then 'ELEMENTARY'
+                 when npr_canonical_unit_name(student.class_name)='중등1' then 'MIDDLE_1'
+                 when npr_canonical_unit_name(student.class_name)='중등2' then 'MIDDLE_2'
+                 when npr_canonical_unit_name(student.class_name)='중등3' then 'MIDDLE_3'
+                 when npr_canonical_unit_name(student.class_name) in ('특목','예중1','예고1') then 'SPECIAL_PURPOSE'
+                 when npr_canonical_unit_name(student.class_name)='고등' then 'HIGH'
+                 when npr_canonical_unit_name(student.class_name)='과학' then 'SCIENCE'
+                 else null
+               end unit_group,
+               row_number() over (
+                 partition by child.student_id
+                 order by case when booking.status in ('RESERVED','CHECKED_IN') then 0 else 1 end,
+                          booking.created_at desc,child.id desc
+               ) selection_rank
+          from scoped_bookings booking
+          join family_booking_students child
+            on child.family_booking_id=booking.id and child.session_id=${session.id}
+          join students student on student.id=child.student_id
+         where child.participant_type='ENROLLED'
+           and (${branch}::text is null or child.branch_code_at_booking=${branch})
+        union all
+        select 'G:'||encode(booking.contact_digest,'hex')||':'||
+               lower(btrim(normalize(child.student_name_snapshot,NFKC)))||':'||
+               child.branch_code_at_booking identity_key,
+               booking.id family_booking_id,booking.status,booking.attendance_party,
+               booking.booking_source,null::text unit_group,
+               row_number() over (
+                 partition by booking.contact_digest,
+                              lower(btrim(normalize(child.student_name_snapshot,NFKC))),
+                              child.branch_code_at_booking
+                 order by case when booking.status in ('RESERVED','CHECKED_IN') then 0 else 1 end,
+                          booking.created_at desc,child.id desc
+               ) selection_rank
+          from scoped_bookings booking
+          join family_booking_students child
+            on child.family_booking_id=booking.id and child.session_id=${session.id}
+         where child.participant_type='GUEST'
+           and (${branch}::text is null or child.branch_code_at_booking=${branch})
+      ),
+      monitoring_roster as (
+        select identity_key,family_booking_id,status,attendance_party,booking_source,unit_group
+          from monitoring_candidates
+         where selection_rank=1 and status in ('RESERVED','CHECKED_IN')
+      ),
+      monitoring_unit_rows as (
+        select identity_key,family_booking_id,status,attendance_party,'ALL'::text unit_group
+          from monitoring_roster
+        union all
+        select identity_key,family_booking_id,status,attendance_party,unit_group
+          from monitoring_roster
+         where unit_group is not null
+      ),
+      monitoring_unit_students as (
+        select unit_group,count(distinct identity_key)::bigint linked_student_count
+          from monitoring_unit_rows
+         group by unit_group
+      ),
+      monitoring_unit_families as (
+        select unit_group,count(*)::bigint family_booking_count,
+               coalesce(sum(case when status in ('RESERVED','CHECKED_IN')
+                 then case attendance_party when 'BOTH' then 2 else 1 end else 0 end),0)::bigint attendee_count
+          from (
+            select distinct unit_group,family_booking_id,status,attendance_party
+              from monitoring_unit_rows
+          ) families
+         group by unit_group
       ),
       unit_statistics as (
         select unit_group,
@@ -217,6 +282,23 @@ export class SessionStatisticsService {
                count(*) filter (where booking_source in ('PHONE','TEACHER','ON_SITE') and status='NO_SHOW')::bigint manual_no_show_booking_count
           from scoped_bookings
       ),
+      monitoring_channel_statistics as (
+        select count(distinct identity_key) filter (where booking_source='WEB_APP')::bigint mobile_linked_student_count,
+               count(distinct identity_key) filter (where booking_source in ('PHONE','TEACHER','ON_SITE'))::bigint manual_linked_student_count
+          from monitoring_roster
+      ),
+      monitoring_channel_families as (
+        select count(*) filter (where booking_source='WEB_APP')::bigint mobile_family_booking_count,
+               coalesce(sum(case when booking_source='WEB_APP' and status in ('RESERVED','CHECKED_IN')
+                 then case attendance_party when 'BOTH' then 2 else 1 end else 0 end),0)::bigint mobile_attendee_count,
+               count(*) filter (where booking_source in ('PHONE','TEACHER','ON_SITE'))::bigint manual_family_booking_count,
+               coalesce(sum(case when booking_source in ('PHONE','TEACHER','ON_SITE') and status in ('RESERVED','CHECKED_IN')
+                 then case attendance_party when 'BOTH' then 2 else 1 end else 0 end),0)::bigint manual_attendee_count
+          from (
+            select distinct family_booking_id,status,attendance_party,booking_source
+              from monitoring_roster
+          ) families
+      ),
       survey_statistics as (
         select avg(rating)::double precision survey_average_rating,
                count(*)::bigint survey_response_count
@@ -224,23 +306,34 @@ export class SessionStatisticsService {
          where session_id=${session.id}
       )
       select groups.unit_group,
-             coalesce(population.eligible_student_count,0)::bigint eligible_student_count,
              coalesce(units.reserved_booking_count,0)::bigint reserved_booking_count,
              coalesce(units.checked_in_booking_count,0)::bigint checked_in_booking_count,
              coalesce(units.active_booking_count,0)::bigint active_booking_count,
-             (select count(*)::bigint from eligible_students) summary_eligible_student_count,
+             coalesce(monitoring_students.linked_student_count,0)::bigint linked_student_count,
+             coalesce(monitoring_families.family_booking_count,0)::bigint family_booking_count,
+             coalesce(monitoring_families.attendee_count,0)::bigint attendee_count,
+             coalesce(all_monitoring_students.linked_student_count,0)::bigint summary_linked_student_count,
+             coalesce(all_monitoring_families.family_booking_count,0)::bigint summary_family_booking_count,
+             coalesce(all_monitoring_families.attendee_count,0)::bigint summary_attendee_count,
              summary.reserved_booking_count summary_reserved_booking_count,
              summary.checked_in_booking_count summary_checked_in_booking_count,
              summary.active_booking_count summary_active_booking_count,
              summary.cancelled_booking_count summary_cancelled_booking_count,
              summary.no_show_booking_count summary_no_show_booking_count,
              channels.*,
+             monitoring_channels.*,
+             monitoring_channel_families.*,
              survey.survey_average_rating,survey.survey_response_count
         from unit_groups groups
-        left join population on population.unit_group=groups.unit_group
         left join unit_statistics units on units.unit_group=groups.unit_group
+        left join monitoring_unit_students monitoring_students on monitoring_students.unit_group=groups.unit_group
+        left join monitoring_unit_families monitoring_families on monitoring_families.unit_group=groups.unit_group
+        left join monitoring_unit_students all_monitoring_students on all_monitoring_students.unit_group='ALL'
+        left join monitoring_unit_families all_monitoring_families on all_monitoring_families.unit_group='ALL'
         cross join booking_summary summary
         cross join channel_statistics channels
+        cross join monitoring_channel_statistics monitoring_channels
+        cross join monitoring_channel_families
         cross join survey_statistics survey
        order by groups.sort_order`);
 
@@ -249,19 +342,27 @@ export class SessionStatisticsService {
     return {
       branch,
       summary: {
-        eligibleCurrentStudentCount: Number(first.summary_eligible_student_count),
         activeBookingCount: Number(first.summary_active_booking_count),
         reservedBookingCount: Number(first.summary_reserved_booking_count),
         checkedInBookingCount: Number(first.summary_checked_in_booking_count),
         cancelledBookingCount: Number(first.summary_cancelled_booking_count),
         noShowBookingCount: Number(first.summary_no_show_booking_count),
+        monitoring: {
+          studentCount: Number(first.summary_linked_student_count),
+          familyBookingCount: Number(first.summary_family_booking_count),
+          attendeeCount: Number(first.summary_attendee_count),
+        },
       },
       units: rows.map((row) => ({
         unitGroup: row.unit_group,
-        eligibleStudentCount: Number(row.eligible_student_count),
         activeBookingCount: Number(row.active_booking_count),
         reservedBookingCount: Number(row.reserved_booking_count),
         checkedInBookingCount: Number(row.checked_in_booking_count),
+        monitoring: {
+          studentCount: Number(row.linked_student_count),
+          familyBookingCount: Number(row.family_booking_count),
+          attendeeCount: Number(row.attendee_count),
+        },
       })),
       channels: [
         {
@@ -272,6 +373,11 @@ export class SessionStatisticsService {
           checkedInBookingCount: Number(first.mobile_checked_in_booking_count),
           cancelledBookingCount: Number(first.mobile_cancelled_booking_count),
           noShowBookingCount: Number(first.mobile_no_show_booking_count),
+          monitoring: {
+            studentCount: Number(first.mobile_linked_student_count),
+            familyBookingCount: Number(first.mobile_family_booking_count),
+            attendeeCount: Number(first.mobile_attendee_count),
+          },
         },
         {
           channel: "MANUAL" as const,
@@ -281,6 +387,11 @@ export class SessionStatisticsService {
           checkedInBookingCount: Number(first.manual_checked_in_booking_count),
           cancelledBookingCount: Number(first.manual_cancelled_booking_count),
           noShowBookingCount: Number(first.manual_no_show_booking_count),
+          monitoring: {
+            studentCount: Number(first.manual_linked_student_count),
+            familyBookingCount: Number(first.manual_family_booking_count),
+            attendeeCount: Number(first.manual_attendee_count),
+          },
         },
       ],
       survey: {

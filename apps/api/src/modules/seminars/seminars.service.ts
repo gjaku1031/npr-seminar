@@ -13,7 +13,6 @@ interface SessionInput {
   readonly location: string;
   readonly bookingOpensAt: string;
   readonly bookingClosesAt: string;
-  readonly capacity: number;
   readonly guestBookingEnabled?: boolean;
 }
 
@@ -23,6 +22,7 @@ export interface SessionOperationsSummary {
   uncheckedBookingCount: number;
   cancelledBookingCount: number;
   noShowBookingCount: number;
+  attendeeCount: number;
 }
 
 @Injectable()
@@ -39,20 +39,18 @@ export class SeminarsService {
         seminar: { status: "PUBLISHED" }, status: "OPEN",
         ...(branch === undefined ? {} : { OR: [{ scope: "ALL" }, { scope: "BRANCH", branch: { code: branch } }] }),
       },
-      include: { seminar: true, branch: true, capacity: true },
+      include: { seminar: true, branch: true },
       orderBy: [{ startsAt: "asc" }, { id: "asc" }],
     });
     return {
       items: rows.map((row) => {
-        const remaining = Math.max(0, (row.capacity?.capacity ?? 0) - (row.capacity?.reservedCount ?? 0));
         const availability = now < (row.bookingOpensAt ?? row.startsAt) ? "NOT_OPEN"
-          : now > (row.bookingClosesAt ?? row.startsAt) ? "CLOSED"
-            : remaining === 0 ? "FULL" : "AVAILABLE";
+          : now > (row.bookingClosesAt ?? row.startsAt) ? "CLOSED" : "AVAILABLE";
         return {
           seminarId: row.seminar.publicId, seminarSessionId: row.publicId, seminarTitle: row.seminar.title,
           scope: row.scope, branch: row.branch?.code ?? null, startsAt: row.startsAt, endsAt: row.endsAt,
           location: row.place, bookingOpensAt: row.bookingOpensAt, bookingClosesAt: row.bookingClosesAt,
-          guestBookingEnabled: row.guestBookingEnabled, availability, remainingCapacity: remaining,
+          guestBookingEnabled: row.guestBookingEnabled, availability,
         };
       }),
       page: this.page(rows.length),
@@ -108,10 +106,10 @@ export class SeminarsService {
     const exists = await this.prisma.seminar.count({ where: { publicId: seminarId } });
     if (exists !== 1) this.fail(404, "SEMINAR_NOT_FOUND");
     const rows = await this.prisma.seminarSession.findMany({
-      where: { seminar: { publicId: seminarId } }, include: { seminar: true, branch: true, capacity: true }, orderBy: { startsAt: "asc" },
+      where: { seminar: { publicId: seminarId } }, include: { seminar: true, branch: true }, orderBy: { startsAt: "asc" },
     });
     const statusCounts = rows.length === 0 ? [] : await this.prisma.familyBooking.groupBy({
-      by: ["sessionId", "status"],
+      by: ["sessionId", "status", "attendanceParty"],
       where: { sessionId: { in: rows.map((row) => row.id) } },
       _count: { _all: true },
     });
@@ -124,10 +122,12 @@ export class SeminarsService {
         case "RESERVED":
           summary.activeBookingCount += count;
           summary.uncheckedBookingCount += count;
+          summary.attendeeCount += statusCount.attendanceParty === "BOTH" ? count * 2 : count;
           break;
         case "CHECKED_IN":
           summary.activeBookingCount += count;
           summary.checkedInBookingCount += count;
+          summary.attendeeCount += statusCount.attendanceParty === "BOTH" ? count * 2 : count;
           break;
         case "CANCELLED":
           summary.cancelledBookingCount += count;
@@ -147,7 +147,7 @@ export class SeminarsService {
   }
 
   public async getSession(sessionId: string) {
-    const row = await this.prisma.seminarSession.findUnique({ where: { publicId: sessionId }, include: { seminar: true, branch: true, capacity: true } });
+    const row = await this.prisma.seminarSession.findUnique({ where: { publicId: sessionId }, include: { seminar: true, branch: true } });
     if (row === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
     return this.session(row);
   }
@@ -164,9 +164,9 @@ export class SeminarsService {
           startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt),
           bookingOpensAt: new Date(input.bookingOpensAt), bookingClosesAt: new Date(input.bookingClosesAt),
           guestBookingEnabled: input.guestBookingEnabled ?? false,
-          status: "DRAFT", capacity: { create: { capacity: input.capacity } },
+          status: "DRAFT",
         },
-        include: { seminar: true, branch: true, capacity: true },
+        include: { seminar: true, branch: true },
       });
       if (actorSubject !== null) await transaction.authAudit.create({ data: {
         actorSubject,
@@ -187,11 +187,6 @@ export class SeminarsService {
       if (current.version !== BigInt(input.expectedVersion)) this.fail(409, "SEMINAR_SESSION_VERSION_CONFLICT");
       if ((input.scope === undefined) !== (input.branch === undefined)) this.fail(400, "SESSION_SCOPE_BRANCH_REQUIRED_TOGETHER");
       const branchId = input.scope === undefined ? current.branch_id : await this.branchId(transaction, input.scope, input.branch ?? null);
-      const capacity = await transaction.sessionCapacity.findUniqueOrThrow({ where: { sessionId: current.id } });
-      if (input.capacity !== undefined && input.capacity < capacity.reservedCount) this.fail(409, "CAPACITY_BELOW_RESERVED");
-      if (input.capacity !== undefined) await transaction.sessionCapacity.update({
-        where: { sessionId: current.id }, data: { capacity: input.capacity, version: { increment: 1 }, updatedAt: new Date() },
-      });
       await transaction.seminarSession.update({
         where: { id: current.id },
         data: {
@@ -218,20 +213,20 @@ export class SeminarsService {
           },
         } });
       }
-      const row = await transaction.seminarSession.findUniqueOrThrow({ where: { id: current.id }, include: { seminar: true, branch: true, capacity: true } });
+      const row = await transaction.seminarSession.findUniqueOrThrow({ where: { id: current.id }, include: { seminar: true, branch: true } });
       return this.session(row);
     });
   }
 
   public archiveSession(sessionId: string, expectedVersion: number, reason: string, key: string) {
     return this.idempotency.execute("SESSION_ARCHIVE", key, { sessionId, expectedVersion, reason }, async (transaction) => {
-      const row = await transaction.seminarSession.findUnique({ where: { publicId: sessionId }, include: { capacity: true } });
+      const row = await transaction.seminarSession.findUnique({ where: { publicId: sessionId } });
       if (row === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
       if (row.version !== BigInt(expectedVersion)) this.fail(409, "SEMINAR_SESSION_VERSION_CONFLICT");
-      if ((row.capacity?.reservedCount ?? 0) > 0) this.fail(409, "SESSION_HAS_BOOKINGS");
+      if (await transaction.familyBooking.count({ where: { sessionId: row.id } }) > 0) this.fail(409, "SESSION_HAS_BOOKINGS");
       const updated = await transaction.seminarSession.update({
         where: { id: row.id }, data: { status: "ARCHIVED", version: { increment: 1 }, updatedAt: new Date() },
-        include: { seminar: true, branch: true, capacity: true },
+        include: { seminar: true, branch: true },
       });
       return this.session(updated);
     });
@@ -261,16 +256,12 @@ export class SeminarsService {
     publicId: string; seminar: { publicId: string }; scope: string; startsAt: Date; endsAt: Date; place: string;
     bookingOpensAt: Date | null; bookingClosesAt: Date | null; guestBookingEnabled: boolean; status: string; version: bigint;
     createdAt: Date; updatedAt: Date; branch: { code: string } | null;
-    capacity: { capacity: number; reservedCount: number; checkedInCount: number; version: bigint } | null;
   }) {
-    const capacity = row.capacity!;
     return {
       seminarSessionId: row.publicId, seminarId: row.seminar.publicId, scope: row.scope, branch: row.branch?.code ?? null,
       startsAt: row.startsAt, endsAt: row.endsAt, location: row.place,
       bookingOpensAt: row.bookingOpensAt, bookingClosesAt: row.bookingClosesAt,
       guestBookingEnabled: row.guestBookingEnabled, status: row.status,
-      capacity: { capacity: capacity.capacity, reservedCount: capacity.reservedCount, checkedInCount: capacity.checkedInCount,
-        remainingCount: Math.max(0, capacity.capacity - capacity.reservedCount), version: Number(capacity.version) },
       version: Number(row.version), createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
   }
@@ -282,6 +273,7 @@ export class SeminarsService {
       uncheckedBookingCount: 0,
       cancelledBookingCount: 0,
       noShowBookingCount: 0,
+      attendeeCount: 0,
     };
   }
 

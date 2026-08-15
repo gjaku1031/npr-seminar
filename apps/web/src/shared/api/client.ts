@@ -90,13 +90,13 @@ async function runFetch(url: string, init: RequestInit): Promise<Response> {
     return await fetch(url, { credentials: "include", ...init });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError({ kind: "aborted", status: 0, code: "ABORTED", message: "요청이 취소됐어요." });
+      throw new ApiError({ kind: "aborted", status: 0, code: "ABORTED", message: "요청이 취소되었습니다." });
     }
     throw new ApiError({
       kind: "network",
       status: 0,
       code: "NETWORK_ERROR",
-      message: "네트워크에 연결할 수 없어요.",
+      message: "네트워크에 연결할 수 없습니다.",
     });
   }
 }
@@ -105,7 +105,20 @@ export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface ApiRequestOptions {
   method?: ApiMethod;
-  /** JSON 직렬화할 본문. GET/DELETE 는 보통 생략한다. */
+  /**
+   * 계약이 상태 변경이 아닌 POST로 명시한 공개 조회에만 사용한다.
+   *
+   * 이 경계는 CSRF 부트스트랩과 세션 쿠키 전송을 모두 생략한다. 일반 POST/PUT/PATCH/DELETE의
+   * 기본 CSRF·credentials 정책은 그대로 유지되며, 현재 허용 대상은 예약 연락처 조회뿐이다.
+   */
+  readOnlyPost?: true;
+  /**
+   * 요청 본문. GET/DELETE 는 보통 생략한다.
+   * - 기본은 JSON 직렬화한다(`Content-Type: application/json`).
+   * - **`FormData`** 를 그대로 넘기면(포스터 업로드 등) Content-Type 을 코드가 정하지 않고
+   *   브라우저가 `multipart/form-data; boundary=…` 를 직접 만들게 둔다 — 필드 경계가 손상되지
+   *   않게 하려면 이 헤더를 사람이 손대면 안 된다.
+   */
   body?: unknown;
   query?: Record<string, string | number | boolean | null | undefined>;
   signal?: AbortSignal;
@@ -124,6 +137,14 @@ export interface ApiRequestOptions {
    * 곧바로 넘어와야 하며, 저장·로깅·URL 노출이 금지된다. 여기서도 값을 로그에 남기지 않는다.
    */
   bookingProof?: string;
+  /**
+   * 계약이 `If-Match` 로 낙관적 잠금 version 을 요구하는 엔드포인트에서만 넘긴다
+   * (현재는 DELETE /admin/sms/templates/{templateId}). 값을 그대로 `If-Match` 헤더에 싣는다.
+   *
+   * 임의 헤더를 열어주지 않고 **이 한 자리만** 받는다. Idempotency-Key 처럼 CSRF 재시도에서도
+   * 같은 값이 다시 나가야 서버가 리플레이로 인식한다 — send 클로저가 매번 options 에서 다시 읽는다.
+   */
+  ifMatchVersion?: string;
 }
 
 function buildUrl(path: string, query: ApiRequestOptions["query"]): string {
@@ -152,6 +173,13 @@ async function parseOk<T>(response: Response): Promise<T> {
 const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
+ * `readOnlyPost` 경계의 **유일한** 허용 경로 — 계약이 상태 변경이 아닌 POST 로 명시한 공개
+ * 연락처 조회(POST /public/family-bookings/lookup)뿐이다. 다른 어떤 경로도(쿼리/경로 변형 포함)
+ * 이 무세션·무CSRF 경계를 탈 수 없다: apiRequest 가 fetch·CSRF 이전에 동기적으로 거절한다.
+ */
+const READ_ONLY_POST_PATH = "/public/family-bookings/lookup";
+
+/**
  * 계약을 따르는 단일 호출 지점.
  *
  * 상태 변경 요청에는 X-CSRF-Token 을 붙이고, CSRF 가 만료돼 403 이 오면
@@ -161,23 +189,57 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const method = options.method ?? "GET";
   const url = buildUrl(path, options.query);
-  const needsCsrf = MUTATING_METHODS.has(method);
+  const readOnlyPost = options.readOnlyPost === true;
+  if (readOnlyPost && method !== "POST") {
+    throw new TypeError("readOnlyPost is only valid for POST requests.");
+  }
+  // 무세션·무CSRF 경계는 딱 하나의 경로에만 열어 둔다. 정확히 일치하지 않으면(다른 POST 경로,
+  // 쿼리 문자열이 붙은 경로, 경로 조작 등) fetch·CSRF 이전에 프로그래머 오류로 거절한다.
+  if (
+    readOnlyPost &&
+    (path !== READ_ONLY_POST_PATH || url !== `${API_BASE}${READ_ONLY_POST_PATH}`)
+  ) {
+    throw new TypeError("readOnlyPost is only valid for the family-booking lookup path.");
+  }
+  if (
+    readOnlyPost &&
+    (options.idempotencyKey !== undefined ||
+      options.bookingProof !== undefined ||
+      options.ifMatchVersion !== undefined)
+  ) {
+    throw new TypeError("readOnlyPost cannot carry mutation credentials.");
+  }
+  const needsCsrf = MUTATING_METHODS.has(method) && !readOnlyPost;
   // 아래 CSRF 재시도를 포함해 모든 재시도가 이 키를 그대로 다시 보낸다.
   const idempotencyKey = options.idempotencyKey;
+  // FormData 본문(포스터 업로드)은 브라우저가 multipart 경계를 채우도록 Content-Type 을 코드가
+  // 설정하지 않는다. 본문은 매 시도 동일하므로 한 번만 판정한다 — CSRF 재시도도 같은 body 를
+  // 그대로 다시 싣는다(FormData 는 fetch 가 시도마다 새로 직렬화하므로 재전송이 안전하다).
+  const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const send = async (csrfToken: string | null): Promise<Response> => {
     const headers = new Headers({ Accept: "application/json" });
-    if (options.body !== undefined) headers.set("Content-Type", "application/json");
+    // JSON 본문에만 Content-Type 을 붙인다. FormData 는 브라우저가 boundary 까지 채운다.
+    if (options.body !== undefined && !isFormDataBody) headers.set("Content-Type", "application/json");
     if (csrfToken) headers.set("X-CSRF-Token", csrfToken);
     if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+    // If-Match(낙관적 잠금 version) — CSRF 재시도에서도 같은 값이 다시 나가도록 여기서 붙인다.
+    if (options.ifMatchVersion) headers.set("If-Match", options.ifMatchVersion);
     // 시크릿 — 요청 헤더에만 싣고 어디에도 남기지 않는다.
     if (options.bookingProof) headers.set("X-Booking-Proof", options.bookingProof);
 
     return runFetch(url, {
       method,
       headers,
+      // 공개 read-only POST는 관리자·예약 링크 세션 쿠키에 기대지 않고 보내지 않는다.
+      ...(readOnlyPost ? { credentials: "omit" as const } : {}),
       signal: options.signal,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined
+          ? undefined
+          : isFormDataBody
+            ? (options.body as FormData)
+            : JSON.stringify(options.body),
     });
   };
 

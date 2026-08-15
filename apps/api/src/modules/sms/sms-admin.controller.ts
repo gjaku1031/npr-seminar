@@ -11,7 +11,7 @@ import { SmsAdminService } from "./sms-admin.service.js";
 import type { SmsSource } from "./sms-outbox.service.js";
 
 const branches = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const;
-const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP", "SURVEY"] as const;
+const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP", "SURVEY"] as const;
 const audiences = ["BOOKED_FAMILIES", "RESERVED_FAMILIES", "CHECKED_IN_FAMILIES", "CANCELLED_FAMILIES"] as const;
 const messageStatuses = [
   "PENDING", "CLAIMED", "SENDING", "SENT", "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST",
@@ -24,6 +24,7 @@ class CreateTemplateDto {
   @IsIn(purposes) public purpose!: SmsSource;
   @IsOptional() @IsString() @Length(1, 200) public title?: string;
   @IsString() @Length(1, 2000) public body!: string;
+  @IsOptional() @IsBoolean() public isDefault?: boolean;
 }
 
 class UpdateTemplateDto {
@@ -32,6 +33,7 @@ class UpdateTemplateDto {
   @IsOptional() @ValidateIf((_object, value) => value !== null) @IsString() @Length(1, 200) public title?: string | null;
   @IsOptional() @IsString() @Length(1, 2000) public body?: string;
   @IsOptional() @IsBoolean() public active?: boolean;
+  @IsOptional() @IsBoolean() public isDefault?: boolean;
   @IsString() @Matches(/^\d+$/) public version!: string;
 }
 
@@ -88,8 +90,8 @@ export class SmsAdminController {
 
   @Delete("templates/:templateId")
   @UseGuards(CsrfGuard)
-  public archiveTemplate(@Param("templateId", new ParseUUIDPipe({ version: "4" })) templateId: string, @Headers("if-match") version = "", @CurrentActor() actor: AuthenticatedActor, @Headers("idempotency-key") key = "") {
-    return this.service.archiveTemplate(templateId, version, actor.subject, key);
+  public removeTemplate(@Param("templateId", new ParseUUIDPipe({ version: "4" })) templateId: string, @Headers("if-match") version = "", @CurrentActor() actor: AuthenticatedActor, @Headers("idempotency-key") key = "") {
+    return this.service.removeTemplate(templateId, version, actor.subject, key);
   }
 
   @Post("targets/preview")

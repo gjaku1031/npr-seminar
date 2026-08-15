@@ -11,7 +11,7 @@
  * - 연락처는 어떤 경로로도 평문으로 보이지 않는다 (서버가 마스킹해서만 준다).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   SendConfirmDialog,
   useSmsGateway,
@@ -20,7 +20,15 @@ import {
   useSmsTemplates,
 } from "@/features/send-sms";
 import { useSeminarSessions } from "@/features/admin-overview";
-import { SMS_VARIABLES, SURVEY_SMS_VARIABLES, smsByteLength } from "@/entities/sms";
+import {
+  asEditablePurpose,
+  DEFAULT_EDITABLE_PURPOSE,
+  EDITABLE_PURPOSE_OPTIONS,
+  SMS_PURPOSE_LABELS,
+  smsByteLength,
+  variablesForPurpose,
+  type EditableSmsPurpose,
+} from "@/entities/sms";
 import {
   BRANCH_LABELS,
   primarySample,
@@ -33,7 +41,8 @@ import {
 } from "@/shared/api";
 import { CAMPUS_INFO, type Campus } from "@/shared/config/campus";
 import { fmtDateTimeShort, fmtSessionDate } from "@/shared/lib/format";
-import { Badge, BrandMark, Button, Card, Icons, Select, Tag, Toast } from "@/shared/ui";
+import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
+import { Badge, BRAND_SMS_TAG, BrandMark, brandSeminarTitle, Button, Card, Icons, Select, Tag, Toast } from "@/shared/ui";
 
 /**
  * 데스크톱 230 / 유동 / 300 은 스크린샷 그대로 두고, 좁아지면 계단식으로 접는다.
@@ -72,8 +81,8 @@ const BRANCH_CAMPUS: Record<Branch, Campus> = {
 
 const BRANCHES: Branch[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
 
-/** 명세 §5.1 의 6종 + 설문 링크 — 서버가 수신자별로 치환한다. */
-const VARIABLES = [...SMS_VARIABLES, ...SURVEY_SMS_VARIABLES.filter((v) => v === "{설문링크}")];
+/** 관리자 그룹 발송 용도만 실제로 발송된다 — 나머지 용도는 이 화면에서 편집만 한다. */
+const GROUP_PURPOSE: EditableSmsPurpose = "ADMIN_GROUP";
 
 /** 발송 큐에 들어간 상태 — 로그에서 "성공/실패"로 세지 않는 중간 상태다. */
 const PENDING_LABEL = "대기";
@@ -101,10 +110,17 @@ export function SmsView() {
   const templates = useSmsTemplates();
 
   /**
-   * 편집 중인 초안. null 이면 "아직 아무것도 고치지 않았다"는 뜻이고, 그때 화면은 목록의 첫
+   * 편집 중인 초안. null 이면 "아직 아무것도 고치지 않았다"는 뜻이고, 그때 화면은 선택한 용도의 첫
    * 템플릿을 그대로 보여 준다 — effect 로 첫 항목을 밀어 넣지 않고 파생시킨다.
+   *
+   * `purpose` 는 이 초안이 (저장되면) 갖게 될 용도다. 에디터의 용도 Select 로 바뀌며, 저장된
+   * 용도와 달라지면 dirty 가 된다.
    */
-  const [draft, setDraft] = useState<{ templateId: string | null; name: string; body: string } | null>(null);
+  const [draft, setDraft] = useState<
+    { templateId: string | null; name: string; body: string; purpose: EditableSmsPurpose } | null
+  >(null);
+  /** 왼쪽 카드의 용도 필터 — 기본은 그룹 발송(이 화면의 주 용도). */
+  const [purposeView, setPurposeView] = useState<EditableSmsPurpose>(DEFAULT_EDITABLE_PURPOSE);
   const [sessionChoice, setSessionChoice] = useState<string | null>(null);
   const [audience, setAudience] = useState<SmsAudience>("BOOKED_FAMILIES");
   const [branch, setBranch] = useState<Branch>("CAMPUS_A");
@@ -119,23 +135,33 @@ export function SmsView() {
   };
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
+  // 편집 가능한 용도(FIRST_CHECK_IN 제외)만 다룬다 — 자동 체크인 템플릿은 이 화면에 나타나지 않는다.
+  const editableTemplates = templates.active.filter((template) => asEditablePurpose(template.purpose) === template.purpose);
+  // 왼쪽 목록에는 선택한 용도의 활성 템플릿만 보인다.
+  const viewTemplates = editableTemplates.filter((template) => template.purpose === purposeView);
   // 첫 템플릿·첫 회차는 파생 기본값이다. 사용자가 한 번 고르면 그 선택이 목록보다 우선한다.
-  const activeTemplates = templates.active;
-  const fallbackTemplate = activeTemplates[0] ?? null;
+  const fallbackTemplate = viewTemplates[0] ?? null;
   const current = draft ?? {
     templateId: fallbackTemplate?.templateId ?? null,
     name: fallbackTemplate?.name ?? "",
     body: fallbackTemplate?.body ?? "",
+    purpose: fallbackTemplate ? asEditablePurpose(fallbackTemplate.purpose) : purposeView,
   };
-  const { templateId, name, body } = current;
+  const { templateId, name, body, purpose } = current;
 
   const sessionId = sessionChoice ?? sessions.options[0]?.session.seminarSessionId ?? "";
   const session = sessions.options.find((option) => option.session.seminarSessionId === sessionId);
   const campus = BRANCH_CAMPUS[branch];
   const campusInfo = CAMPUS_INFO[campus];
 
-  const selected = activeTemplates.find((template) => template.templateId === templateId) ?? null;
-  const dirty = selected !== null && (selected.body !== body || selected.name !== name);
+  // 선택 대상은 전체 목록에서 찾는다 — 초안이 용도를 바꿔 두면 그 행은 아직 옛 용도 뷰에 남아 있다.
+  const selected = editableTemplates.find((template) => template.templateId === templateId) ?? null;
+  const dirty =
+    selected !== null && (selected.body !== body || selected.name !== name || asEditablePurpose(selected.purpose) !== purpose);
+  /** 이 초안은 실제 그룹 발송 대상인가 — 그룹 용도가 아니면 프리뷰·발송을 만들지 않는다. */
+  const isGroup = purpose === GROUP_PURPOSE;
+  /** 화면 변수 칩은 초안의 현재 용도가 허용하는 것만 (백엔드 PURPOSE_VARIABLES 미러). */
+  const variables = variablesForPurpose(purpose);
 
   /**
    * 발송 요청 (계약 oneOf: templateId **또는** message — 둘 다 보내면 400).
@@ -145,12 +171,21 @@ export function SmsView() {
    * 본문이나 이름을 고친 뒤에는 편집 중인 내용이 곧 발송 내용이므로 `message` 로 보낸다 —
    * 저장하지 않은 수정이 조용히 빠지면 안 된다.
    */
-  const request = useMemo<SmsTargetRequest | null>(() => {
-    if (sessionId === "" || body.trim() === "") return null;
+  // 발송 요청은 값싼 동기 계산이라 메모이제이션이 필요 없다 — 매 렌더에서 바로 만든다.
+  const selectedTemplateId = selected?.templateId ?? null;
+  const selectedIsGroup = selected !== null && asEditablePurpose(selected.purpose) === GROUP_PURPOSE;
+  // 그룹 발송 용도만 실제로 나간다. 자동 발송 용도(OTP·예약·설문)는 여기서 편집만 하고
+  // templateId·message 어느 쪽으로도 발송 요청을 만들지 않는다. 초안이 용도를 그룹에서
+  // 다른 값으로 바꿔 둔 경우도 isGroup 이 false 라 여기서 걸린다.
+  let request: SmsTargetRequest | null = null;
+  if (isGroup && sessionId !== "" && body.trim() !== "") {
     const target = { branch, seminarSessionId: sessionId, audience };
-    if (selected !== null && !dirty) return { ...target, templateId: selected.templateId };
-    return { ...target, message: body };
-  }, [branch, sessionId, audience, body, selected, dirty]);
+    // 저장된 그룹 템플릿을 그대로 쓰는 중이면 templateId 를, 고쳤으면 편집 본문을 message 로.
+    request =
+      selectedTemplateId !== null && selectedIsGroup && !dirty
+        ? { ...target, templateId: selectedTemplateId }
+        : { ...target, message: body };
+  }
 
   const logs = useSmsLogs({ branch, seminarSessionId: sessionId === "" ? undefined : sessionId });
   // 발송이 접수되면 로그를 다시 읽는다 — 화면이 지어낸 행이 아니라 서버가 준 행을 보여 준다.
@@ -165,10 +200,27 @@ export function SmsView() {
   const setBody = (next: string) => setDraft({ ...current, body: next });
 
   const pickTemplate = (id: string) => {
-    const template = activeTemplates.find((item) => item.templateId === id);
+    const template = editableTemplates.find((item) => item.templateId === id);
     if (template === undefined) return;
-    setDraft({ templateId: template.templateId, name: template.name, body: template.body });
+    setDraft({
+      templateId: template.templateId,
+      name: template.name,
+      body: template.body,
+      purpose: asEditablePurpose(template.purpose),
+    });
     templates.clearMutationError();
+  };
+
+  // 용도 필터를 바꾸면 초안을 버려 새 용도의 첫 템플릿을 파생시킨다(effect 없이).
+  const changePurposeView = (next: EditableSmsPurpose) => {
+    setPurposeView(next);
+    setDraft(null);
+    templates.clearMutationError();
+  };
+
+  // 에디터의 용도 Select — 저장 전까지는 초안에만 반영된다(용도를 바꾸면 dirty 가 된다).
+  const changeDraftPurpose = (next: EditableSmsPurpose) => {
+    setDraft({ ...current, purpose: next });
   };
 
   const insertVariable = (variable: string) => {
@@ -188,19 +240,36 @@ export function SmsView() {
   };
 
   const doCreate = async () => {
+    // 지금 보고 있는 용도로 만든다. 본문 기본값은 변수가 없어 어떤 용도에서도 유효하다.
     const created = await templates.create({
-      name: `새 템플릿 ${activeTemplates.length + 1}`,
-      body: body.trim() === "" ? "[npr] " : body,
+      name: `새 ${SMS_PURPOSE_LABELS[purposeView]} 템플릿 ${viewTemplates.length + 1}`,
+      body: `${BRAND_SMS_TAG} `,
+      purpose: purposeView,
     });
     if (created === null) return;
-    setDraft({ templateId: created.templateId, name: created.name, body: created.body });
+    setDraft({
+      templateId: created.templateId,
+      name: created.name,
+      body: created.body,
+      purpose: asEditablePurpose(created.purpose),
+    });
     flash("새 템플릿을 만들었어요.");
   };
 
   const doSave = async () => {
     if (templateId === null) return;
-    const saved = await templates.save(templateId, { name, body });
-    if (saved !== null) flash("템플릿을 저장했어요.");
+    const saved = await templates.save(templateId, { name, body, purpose });
+    if (saved === null) return;
+    flash("템플릿을 저장했어요.");
+    // 저장된 용도로 카테고리 뷰를 옮기되 선택은 유지한다 — 서버가 준 행이 진실이다.
+    const savedPurpose = asEditablePurpose(saved.purpose);
+    setPurposeView(savedPurpose);
+    setDraft({ templateId: saved.templateId, name: saved.name, body: saved.body, purpose: savedPurpose });
+  };
+
+  const doSetDefault = async (id: string) => {
+    const ok = await templates.setDefault(id);
+    if (ok) flash("기본 템플릿으로 지정했어요.");
   };
 
   const doArchive = async (id: string) => {
@@ -208,12 +277,12 @@ export function SmsView() {
     if (!ok) return;
     flash("템플릿을 삭제했어요.");
     if (templateId !== id) return;
-    // 지운 템플릿이 열려 있었으면 남은 것 중 하나로 옮긴다.
-    const next = activeTemplates.find((template) => template.templateId !== id) ?? null;
+    // 지운 템플릿이 열려 있었으면 같은 용도에 남은 것 중 하나로 옮긴다.
+    const next = viewTemplates.find((template) => template.templateId !== id) ?? null;
     setDraft(
       next === null
-        ? { templateId: null, name: "", body: "" }
-        : { templateId: next.templateId, name: next.name, body: next.body },
+        ? { templateId: null, name: "", body: "", purpose: purposeView }
+        : { templateId: next.templateId, name: next.name, body: next.body, purpose: asEditablePurpose(next.purpose) },
     );
   };
 
@@ -226,17 +295,20 @@ export function SmsView() {
    * 어느 쪽인지 캡션이 분명히 말한다.
    */
   const serverSample = flow.preview === null ? null : primarySample(flow.preview);
+  // 로컬 예시 치환 — 지금 용도가 허용하는 변수를 모두 덮되 실제 데이터는 새지 않게 임의 예시값만 쓴다.
   const exampleRendered = body
+    .replaceAll("{인증번호}", "123456")
     .replaceAll("{학생명}", "김수민")
     .replaceAll("{설명회명}", session?.seminarTitle ?? "")
     .replaceAll(
       "{일시}",
       session ? `${fmtSessionDate(new Date(session.session.startsAt))} ${new Date(session.session.startsAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}` : "",
     )
-    .replaceAll("{장소}", session?.session.location ?? "")
-    .replaceAll("{QR링크}", "npr.kr/q/(예시)")
+    .replaceAll("{장소}", session === undefined ? "" : SEMINAR_LOCATION)
+    .replaceAll("{예약확인링크}", "academy.kr/b/(예시)")
+    .replaceAll("{QR링크}", "academy.kr/q/(예시)")
     .replaceAll("{문의전화}", campusInfo.inquiry)
-    .replaceAll("{설문링크}", "npr.kr/s/(예시)");
+    .replaceAll("{설문링크}", "academy.kr/s/(예시)");
   const phoneBody = serverSample?.message ?? exampleRendered;
   const phoneCaption = serverSample !== null
     ? `서버가 만든 실제 발송 본문 — ${serverSample.maskedRecipient} 기준`
@@ -292,6 +364,22 @@ export function SmsView() {
             </button>
           </div>
 
+          {/* 용도 필터 — 선택한 용도의 템플릿만 아래에 보인다. 생성도 이 용도로 만든다. */}
+          <div style={{ padding: "0 4px 10px" }}>
+            <Select
+              portal
+              label="용도"
+              options={[...EDITABLE_PURPOSE_OPTIONS]}
+              value={purposeView}
+              onChange={(next) => changePurposeView(next as EditableSmsPurpose)}
+            />
+            <p style={{ margin: "6px 2px 0", fontSize: 11, color: "var(--text-faint)", lineHeight: 1.5 }}>
+              {purposeView === GROUP_PURPOSE
+                ? "그룹 발송용 템플릿이에요. 아래에서 골라 발송할 수 있어요."
+                : `${SMS_PURPOSE_LABELS[purposeView]} 자동 발송용 템플릿이에요. 여기서 편집만 하고 그룹으로는 발송하지 않아요.`}
+            </p>
+          </div>
+
           {templates.loading && (
             <div style={{ padding: "18px 6px", fontSize: 12.5, color: "var(--text-faint)" }}>불러오는 중…</div>
           )}
@@ -305,14 +393,14 @@ export function SmsView() {
             </div>
           )}
 
-          {!templates.loading && templates.error === null && activeTemplates.length === 0 && (
+          {!templates.loading && templates.error === null && viewTemplates.length === 0 && (
             <div style={{ padding: "18px 6px", fontSize: 12.5, color: "var(--text-faint)", lineHeight: 1.6 }}>
-              아직 템플릿이 없어요. <b>생성</b>으로 첫 템플릿을 만들어 주세요.
+              이 용도에는 아직 템플릿이 없어요. <b>생성</b>으로 {SMS_PURPOSE_LABELS[purposeView]} 템플릿을 만들어 주세요.
             </div>
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {activeTemplates.map((template) => {
+            {viewTemplates.map((template) => {
               const current = template.templateId === templateId;
               return (
                 <div
@@ -339,8 +427,11 @@ export function SmsView() {
                       borderRadius: "var(--radius-sm)",
                     }}
                   >
-                    <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--text-strong)" }}>
-                      {template.name}
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-strong)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {template.name}
+                      </span>
+                      {template.isDefault && <Badge tone="brand" size="sm">기본</Badge>}
                     </span>
                     <span style={{ display: "block", fontSize: 11.5, color: "var(--text-faint)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {template.body.split("\n")[0]}
@@ -348,14 +439,27 @@ export function SmsView() {
                   </button>
                   <button
                     type="button"
-                    title={`${template.name} 템플릿 삭제`}
-                    aria-label={`${template.name} 템플릿 삭제`}
+                    // 현재 기본은 다른 템플릿을 기본으로 지정하기 전엔 보관할 수 없다 (서버도 거절한다).
+                    title={template.isDefault ? `${template.name} 은 기본 템플릿이라 다른 템플릿을 기본으로 지정한 뒤에 삭제할 수 있어요` : `${template.name} 템플릿 삭제`}
+                    aria-label={template.isDefault ? `${template.name} 템플릿 삭제 — 기본 템플릿이라 먼저 다른 템플릿을 기본으로 지정해야 해요` : `${template.name} 템플릿 삭제`}
                     onClick={() => void doArchive(template.templateId)}
-                    disabled={templates.busy}
-                    style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-faint)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: templates.busy ? "default" : "pointer" }}
+                    disabled={templates.busy || template.isDefault}
+                    style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-faint)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: templates.busy || template.isDefault ? "default" : "pointer", opacity: template.isDefault ? 0.4 : 1 }}
                   >
                     <Icons.x size={12} />
                   </button>
+                  {!template.isDefault && (
+                    <div style={{ padding: "0 10px 9px 12px" }}>
+                      <button
+                        type="button"
+                        onClick={() => void doSetDefault(template.templateId)}
+                        disabled={templates.busy}
+                        style={{ background: "none", border: "none", padding: 0, color: "var(--violet-800)", fontSize: 11.5, fontWeight: 700, cursor: templates.busy ? "default" : "pointer", opacity: templates.busy ? 0.5 : 1, fontFamily: "var(--font-body)" }}
+                      >
+                        이 목적의 기본으로 지정
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -459,6 +563,24 @@ export function SmsView() {
             />
           </div>
 
+          {/* 이 초안의 용도 — 저장하면 이 용도로 나간다(그룹만 실제 발송). 바꾸면 dirty 가 된다. */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>용도</span>
+            <Select
+              portal
+              options={[...EDITABLE_PURPOSE_OPTIONS]}
+              value={purpose}
+              onChange={(next) => changeDraftPurpose(next as EditableSmsPurpose)}
+              disabled={templateId === null || templates.busy}
+              style={{ minWidth: 200 }}
+            />
+            {!isGroup && (
+              <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                자동 발송용 — 여기서 편집만 하고 발송하지 않아요.
+              </span>
+            )}
+          </div>
+
           <label htmlFor="npr-sms-body" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>
             문자 본문
           </label>
@@ -474,7 +596,7 @@ export function SmsView() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: "var(--text-faint)", marginRight: 2 }}>변수</span>
-            {VARIABLES.map((variable) => (
+            {variables.map((variable) => (
               <button
                 key={variable}
                 type="button"
@@ -495,7 +617,11 @@ export function SmsView() {
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-hairline)", flexWrap: "wrap" }}>
             <span style={{ fontSize: 13, color: "var(--text-muted)" }} aria-live="polite">
-              {flow.preview !== null ? (
+              {!isGroup ? (
+                <>
+                  이 용도는 <b style={{ color: "var(--text-strong)" }}>편집 전용</b>이에요 · 자동 발송 템플릿이라 이 화면에서 발송하지 않아요
+                </>
+              ) : flow.preview !== null ? (
                 <>
                   수신 대상{" "}
                   <b style={{ color: "var(--text-strong)", fontFeatureSettings: '"tnum"' }}>
@@ -536,7 +662,7 @@ export function SmsView() {
               </div>
               <div style={{ padding: "8px 14px 6px", textAlign: "center", borderBottom: "1px solid var(--border-hairline)" }}>
                 <BrandMark size={34} radius="50%" style={{ margin: "0 auto" }} />
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-strong)", marginTop: 4 }}>npr 입시설명회</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-strong)", marginTop: 4 }}>{brandSeminarTitle()}</div>
               </div>
               <div style={{ padding: "14px 12px 18px", minHeight: 260 }}>
                 <div style={{ fontSize: 10, color: "var(--text-faint)", textAlign: "center", marginBottom: 10 }}>

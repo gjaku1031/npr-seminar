@@ -1,5 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, Res, UseGuards } from "@nestjs/common";
-import type { Response } from "express";
+import { Controller, Get, Param, ParseUUIDPipe, Query, StreamableFile, UseGuards } from "@nestjs/common";
 import { Type } from "class-transformer";
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { Roles } from "../../common/auth/roles.decorator.js";
@@ -46,7 +45,6 @@ export class SessionRosterController {
   public async exportXlsx(
     @Param("sessionId", new ParseUUIDPipe({ version: "4" })) sessionId: string,
     @Query() query: SessionRosterQuery,
-    @Res({ passthrough: true }) response: Response,
   ) {
     const file = await this.service.exportXlsx(sessionId, {
       ...(query.branch === undefined ? {} : { branch: query.branch }),
@@ -54,13 +52,12 @@ export class SessionRosterController {
       ...(query.teacherName === undefined ? {} : { teacherName: query.teacherName }),
       ...(query.query === undefined ? {} : { query: query.query }),
     });
-    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    response.setHeader(
-      "Content-Disposition",
-      `attachment; filename="seminar-roster-${sessionId}.xlsx"; filename*=UTF-8''seminar-roster-${sessionId}.xlsx`,
-    );
-    response.setHeader("Content-Length", file.byteLength.toString());
-    return file;
+    const filename = `seminar-roster-${sessionId}.xlsx`;
+    return new StreamableFile(file, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      disposition: `attachment; filename="${filename}"; filename*=UTF-8''${filename}`,
+      length: file.byteLength,
+    });
   }
 
   @Get("operations-summary")

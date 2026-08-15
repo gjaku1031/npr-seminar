@@ -21,6 +21,7 @@ export type { SessionStatisticsState } from "./model/useSessionStatistics";
 export type {
   AggregateSource,
   ChannelBreakdown,
+  ChannelStat,
   SessionOperationsSummary,
   SessionStatistics,
   UnitStat,

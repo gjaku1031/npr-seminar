@@ -18,7 +18,16 @@ export { TopNav } from "./TopNav";
 export type { TopNavItem } from "./TopNav";
 export { LauncherCard } from "./LauncherCard";
 export { BrandMark } from "./BrandMark";
-export { BRAND_NAME, BRAND_SEMINAR, BRAND_LOGO_SRC, brandHomeLabel } from "./brand";
+export {
+  BRAND_NAME,
+  BRAND_SEMINAR,
+  BRAND_NAME_ROMAN,
+  BRAND_SMS_TAG,
+  BRAND_QR_DOWNLOAD_BASENAME,
+  BRAND_LOGO_SRC,
+  brandSeminarTitle,
+  brandHomeLabel,
+} from "./brand";
 export { Icons } from "./icons";
 export type { IconProps } from "./icons";
 export { QrBox, ResStatusBadge, StatCard, EmptyState, KV, nprQrCells } from "./pieces";

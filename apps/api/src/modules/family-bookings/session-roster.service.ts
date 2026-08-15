@@ -46,8 +46,13 @@ interface RosterDatabaseRow {
   readonly guest_contact_ciphertext: Uint8Array | null;
 }
 
-interface RosterCountRow { readonly count: bigint; }
 interface RosterFacetRow { readonly teachers: string[]; readonly unmatched_unit_count: number; }
+interface RosterMonitoringRow {
+  readonly roster_row_count: bigint;
+  readonly student_count: bigint;
+  readonly family_booking_count: bigint;
+  readonly attendee_count: bigint;
+}
 
 const CURRENT_BOOKING_STATUSES = new Set(["RESERVED", "CHECKED_IN"]);
 
@@ -81,11 +86,9 @@ export class SessionRosterService {
     const base = this.rosterBase(session.id, effectiveBranch);
     const filtered = this.filteredRoster(base, filters.unitGroup, teacherName, query, contactLast4);
     const offset = (filters.page - 1) * filters.pageSize;
-    const [rows, countRows, facetRows] = await Promise.all([
+    const [rows, monitoringRows, facetRows] = await Promise.all([
       this.rosterRows(filtered, { offset, limit: filters.pageSize }),
-      this.prisma.$queryRaw<RosterCountRow[]>(Prisma.sql`
-        ${filtered}
-        select count(*)::bigint count from roster_filtered`),
+      this.rosterMonitoring(session.id, filtered),
       this.prisma.$queryRaw<RosterFacetRow[]>(Prisma.sql`
         ${base},
         enrolled as (
@@ -99,7 +102,13 @@ export class SessionRosterService {
           from enrolled`),
     ]);
     const items = await this.mapRows(session.id, rows);
-    const totalItems = Number(countRows[0]?.count ?? 0n);
+    const monitoring = monitoringRows[0] ?? {
+      roster_row_count: 0n,
+      student_count: 0n,
+      family_booking_count: 0n,
+      attendee_count: 0n,
+    };
+    const totalItems = Number(monitoring.roster_row_count);
     const facets = facetRows[0] ?? { teachers: [], unmatched_unit_count: 0 };
     return {
       items,
@@ -113,6 +122,11 @@ export class SessionRosterService {
         teachers: [...new Set(facets.teachers.map(primaryTeacher).filter((value): value is string => value !== null))]
           .sort((left, right) => left.localeCompare(right, "ko")),
         unmatchedUnitCount: facets.unmatched_unit_count,
+      },
+      monitoring: {
+        studentCount: Number(monitoring.student_count),
+        familyBookingCount: Number(monitoring.family_booking_count),
+        attendeeCount: Number(monitoring.attendee_count),
       },
     };
   }
@@ -401,6 +415,43 @@ export class SessionRosterService {
        ${page}`);
   }
 
+  private rosterMonitoring(sessionInternalId: bigint, filtered: Prisma.Sql) {
+    return this.prisma.$queryRaw<RosterMonitoringRow[]>(Prisma.sql`
+      ${filtered},
+      roster_booking_candidates as (
+        select roster.roster_entry_id,booking.id family_booking_id,booking.status,
+               booking.attendance_party,booking.created_at,child.id child_id,
+               row_number() over (
+                 partition by roster.roster_entry_id
+                 order by case when booking.status in ('RESERVED','CHECKED_IN') then 0 else 1 end,
+                          booking.created_at desc,child.id desc
+               ) selection_rank
+          from roster_filtered roster
+          join family_booking_students child
+            on child.session_id=${sessionInternalId}
+           and (
+             (roster.participant_type='ENROLLED' and child.student_id=roster.student_internal_id)
+             or (roster.participant_type='GUEST' and child.id=any(roster.guest_child_internal_ids))
+           )
+          join family_bookings booking
+            on booking.id=child.family_booking_id and booking.session_id=child.session_id
+      ),
+      selected_roster_bookings as (
+        select family_booking_id,status,attendance_party
+          from roster_booking_candidates
+         where selection_rank=1 and status in ('RESERVED','CHECKED_IN')
+      ),
+      selected_families as (
+        select distinct family_booking_id,status,attendance_party
+          from selected_roster_bookings
+      )
+      select (select count(*)::bigint from roster_filtered) roster_row_count,
+             (select count(*)::bigint from selected_roster_bookings) student_count,
+             count(*)::bigint family_booking_count,
+             coalesce(sum(case attendance_party when 'BOTH' then 2 else 1 end),0)::bigint attendee_count
+        from selected_families`);
+  }
+
   private async bookingLinks(sessionInternalId: bigint, rows: readonly RosterDatabaseRow[]) {
     const studentIds = rows.flatMap((row) => row.student_internal_id === null ? [] : [row.student_internal_id]);
     const guestIds = rows.flatMap((row) => row.guest_child_internal_ids);
@@ -581,6 +632,7 @@ export class SessionRosterService {
       items: [],
       page: { page, pageSize, totalItems: 0, totalPages: 0 },
       facets: { teachers: [], unmatchedUnitCount: 0 },
+      monitoring: { studentCount: 0, familyBookingCount: 0, attendeeCount: 0 },
     };
   }
 

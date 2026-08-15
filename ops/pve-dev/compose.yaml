@@ -1,0 +1,64 @@
+name: npr-seminar-qa
+
+services:
+  postgres:
+    image: postgres:18-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
+    environment:
+      POSTGRES_DB: npr_seminar_qa
+      POSTGRES_USER: npr_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TZ: UTC
+      PGTZ: UTC
+    command: ["postgres", "-c", "config_file=/etc/postgresql/qa.conf"]
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - npr_qa_postgres_data:/var/lib/postgresql
+      - ./postgresql/qa.conf:/etc/postgresql/qa.conf:ro
+    shm_size: 1gb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U npr_migrator -d npr_seminar_qa -h 127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    entrypoint: ["/bin/sh", "/opt/npr/redis-entrypoint.sh"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - npr_qa_redis_data:/data
+      - ./redis/qa.conf:/usr/local/etc/redis/qa.conf:ro
+      - ./redis/docker-entrypoint.sh:/opt/npr/redis-entrypoint.sh:ro
+    tmpfs:
+      - /run/redis:mode=0700,size=1m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning --user npr_qa -a \"$${REDIS_PASSWORD}\" ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  npr_qa_postgres_data:
+    name: npr_qa_postgres_data
+  npr_qa_redis_data:
+    name: npr_qa_redis_data

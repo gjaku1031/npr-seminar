@@ -96,7 +96,7 @@ export interface Reservation {
 /**
  * 예약 생성 입력 — code·status·logs 등 서버가 정하는 값은 제외.
  * 모든 경로(모바일·콘솔 드랍다운·수동 추가·현장)가 이 입력으로 수렴하며,
- * 서버 불변식(중복·정원)이 일괄 적용된다 (설계 §6.4).
+ * 서버 불변식(중복·예약 가능 기간)이 일괄 적용된다 (설계 §6.4).
  */
 export interface ReservationDraft {
   sessionId: string;
@@ -153,7 +153,7 @@ export function cancelledLogLabel(by: CancelledBy): string {
   return by === "parent" ? "웹앱 예약 취소" : "수동 예약 취소";
 }
 
-/** 정원·중복 판정에 포함되는 "유효 예약" — 취소·노쇼는 좌석을 점유하지 않는다 */
+/** 운영 집계에 포함되는 "유효 예약" — 취소·노쇼는 활성 예약에서 제외한다. */
 export function isActiveReservation(status: ReservationStatus): boolean {
   return status === "reserved" || status === "entered";
 }

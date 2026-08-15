@@ -18,7 +18,7 @@
 import { useCallback, useState } from "react";
 import { Delete, Search } from "lucide-react";
 import {
-  ATTENDANCE_PARTY_LABELS,
+  attendancePartySummary,
   checkInFamilyManually,
   defaultErrorMessage,
   FAMILY_BOOKING_STATUS_LABELS,
@@ -37,7 +37,7 @@ export interface ScannerManualPanelProps {
   enabled: boolean;
   onOutcome: (outcome: CheckInOutcome) => void;
   /**
-   * 수동 조회·검증·정원·처리 실패마다 정확히 한 번 호출 — 공용 결과음(오류)을 울린다.
+   * 수동 조회·검증·처리 실패마다 정확히 한 번 호출 — 공용 결과음(오류)을 울린다.
    * 성공·중복 결과는 onOutcome(공용 패널)로만 가므로 오류음과 겹치지 않는다.
    * 인자를 받지 않는다: 연락처·예약 id 등 민감 값을 콜백으로 흘리지 않기 위함이다.
    */
@@ -53,14 +53,15 @@ const ink = {
 };
 
 const keyStyle: React.CSSProperties = {
-  height: 56,
+  // 카메라 공간을 우선하도록 compact 하게 — 터치 타깃 최소 44px 는 유지한다.
+  height: 44,
   borderRadius: "var(--radius-md)",
   border: `1px solid ${ink.border}`,
   background: ink.card,
   color: ink.strong,
   fontFamily: "var(--font-display)",
   fontWeight: 800,
-  fontSize: 20,
+  fontSize: 18,
   cursor: "pointer",
 };
 
@@ -169,7 +170,7 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
         borderRadius: "var(--radius-lg)",
         border: `1px solid ${ink.border}`,
         background: ink.card,
-        padding: 18,
+        padding: 14,
       }}
     >
       <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: ink.strong }}>
@@ -181,13 +182,13 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
       <div
         aria-live="polite"
         aria-label="입력된 연락처 뒷자리"
-        style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "14px 0" }}
+        style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, margin: "12px 0" }}
       >
         {Array.from({ length: PHONE_LAST4_LENGTH }).map((_, index) => (
           <span
             key={index}
             style={{
-              height: 56,
+              height: 44,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -196,7 +197,7 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
               background: last4[index] ? "rgba(0,171,219,0.12)" : "transparent",
               fontFamily: "var(--font-display)",
               fontWeight: 800,
-              fontSize: 22,
+              fontSize: 20,
               color: last4[index] ? "var(--mint-400)" : ink.faint,
             }}
           >
@@ -205,7 +206,7 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
         {DIGIT_KEYS.map((digit) => (
           <button
             key={digit}
@@ -302,8 +303,7 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
 
               <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 3 }}>
                 {/* 스캐너 경로는 의도적으로 마스킹 유지 — 공용 태블릿에 전체 번호를 띄우지 않는다 */}
-                {candidate.maskedContact} · {ATTENDANCE_PARTY_LABELS[candidate.attendanceParty]} ·{" "}
-                {candidate.seatCount}석
+                {candidate.maskedContact} · {attendancePartySummary(candidate.attendanceParty)}
               </div>
 
               <button

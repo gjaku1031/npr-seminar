@@ -14,6 +14,7 @@ Environment=APP_ENV=production
 Environment=PROCESS_ROLE=worker
 UnsetEnvironment=DATABASE_URL MIGRATION_DATABASE_URL PORT SESSION_SECRET OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY REDIS_URL
 UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
+UnsetEnvironment=POSTER_STORAGE_DIR
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/api/dist/worker.js
 ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/api/dist/worker.js
 Restart=on-failure

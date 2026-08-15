@@ -18,7 +18,7 @@ const baseEnvironment: AppEnvironment = {
 
 function service(environment: AppEnvironment): OtpService {
   return new OtpService(
-    {} as never, {} as never, new PhoneProtector(environment), {} as never, {} as never, environment,
+    {} as never, {} as never, new PhoneProtector(environment), {} as never, {} as never, {} as never, environment,
   );
 }
 

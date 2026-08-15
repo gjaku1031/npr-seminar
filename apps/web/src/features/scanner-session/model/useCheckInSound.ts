@@ -6,9 +6,11 @@
  * iPad/Safari 자동재생 정책:
  * - AudioContext 는 **실제 사용자 제스처** 안에서 resume 해야 소리가 난다. 그래서 `unlock()` 을
  *   제공하고, `ctx.state === "running"` 이 된 뒤에만 `ready` 를 true 로 둔다 — 잠금 해제 전에
- *   준비됐다고 말하지 않는다.
- * - 음소거는 사용자 설정이라 localStorage 에 남긴다(민감 정보 아님). 잠금 상태는 페이지마다
- *   제스처로 다시 풀어야 하므로 저장하지 않는다.
+ *   준비됐다고 말하지 않는다. `unlock()` 은 '이 회차로 스캔 시작' 같은 실제 클릭 제스처의
+ *   콜스택 안에서 호출돼야 한다(ScannerShiftPanel.onBeforeLock → 여기).
+ * - 음소거는 **이 세션 한정** 설정이다. 화면에 들어올 때마다 결과음은 기본 ON 이고, 과거의
+ *   localStorage 음소거 값이 기본을 꺼 버리지 않도록 저장하지 않는다. 볼륨은 기기 하드웨어를
+ *   따르며 별도 슬라이더를 두지 않는다.
  *
  * 정리:
  * - 언마운트 시 AudioContext 를 닫는다. 오실레이터는 stop 이후 스스로 정리되고, DOM 리스너·타이머를
@@ -18,32 +20,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CheckInSoundKind } from "../lib/check-in-sound";
+import { CHECK_IN_SOUND_PATTERNS, type Tone } from "../lib/check-in-sound-pattern";
 
-/** 음소거 사용자 설정 저장 키. 값은 "1"(음소거)/"0"(해제)만 담는다. */
-const MUTE_STORAGE_KEY = "npr.scanner.checkin-sound.muted";
-
-interface Tone {
-  freq: number;
-  /** 패턴 시작 기준 오프셋(초). */
-  offset: number;
-  duration: number;
-}
-
-/** 결과별 톤 패턴 — 자산 없이 사인파로만. 성공은 상승 2음, 경고는 반복 2음, 오류는 하강 저음. */
-const PATTERNS: Record<CheckInSoundKind, Tone[]> = {
-  success: [
-    { freq: 880, offset: 0, duration: 0.12 },
-    { freq: 1318.5, offset: 0.1, duration: 0.18 },
-  ],
-  warning: [
-    { freq: 620, offset: 0, duration: 0.13 },
-    { freq: 620, offset: 0.18, duration: 0.15 },
-  ],
-  error: [
-    { freq: 320, offset: 0, duration: 0.18 },
-    { freq: 190, offset: 0.16, duration: 0.26 },
-  ],
-};
+/** 결과별 톤 패턴 — 순수 모듈에서 가져온다(길이·구분은 거기서 테스트한다). */
+const PATTERNS = CHECK_IN_SOUND_PATTERNS;
 
 const PEAK_GAIN = 0.16;
 
@@ -53,24 +33,6 @@ function resolveAudioContextCtor(): AudioContextCtor | null {
   if (typeof window === "undefined") return null;
   const legacy = (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
   return window.AudioContext ?? legacy ?? null;
-}
-
-function readMuted(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(MUTE_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeMuted(muted: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(MUTE_STORAGE_KEY, muted ? "1" : "0");
-  } catch {
-    /* 저장 실패는 무시 — 소리 동작에는 영향 없다. */
-  }
 }
 
 function playPattern(ctx: AudioContext, tones: Tone[]): void {
@@ -118,9 +80,8 @@ export interface CheckInSound {
 export function useCheckInSound(): CheckInSound {
   const ctxRef = useRef<AudioContext | null>(null);
   const [ready, setReady] = useState(false);
-  // 서버·클라이언트 첫 렌더 모두 false 로 시작해 하이드레이션이 어긋나지 않는다.
-  // 저장된 음소거 설정은 잠금 해제(unlock) 제스처에서 처음 읽는다 — 음소거 UI 는 ready 이후에만
-  // 보이므로 마운트 시 상태를 미리 세팅할(=effect 안에서 setState 할) 이유가 없다.
+  // 음소거는 이 세션 한정이라 항상 false(=소리 켜짐)로 시작한다 — 과거 설정을 복원하지 않는다.
+  // 음소거 UI 는 ready 이후에만 보이므로 마운트 시 미리 세팅할 이유가 없다.
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(muted);
 
@@ -140,18 +101,12 @@ export function useCheckInSound(): CheckInSound {
     }
     const ctx = ctxRef.current;
 
-    // 저장된 음소거 설정을 여기서 처음 읽어 ref·상태에 반영한다(제스처 → 클라이언트 전용, 안전).
-    // 확인음 판정(settle)이 이 값을 읽으므로 resume 전에 동기로 세팅한다.
-    const storedMuted = readMuted();
-    mutedRef.current = storedMuted;
-    setMuted(storedMuted);
-
     let confirmed = false;
     const settle = () => {
       const running = ctx.state === "running";
       setReady(running);
       // 컨텍스트가 실제로 running 이 된 뒤 딱 한 번 확인음을 낸다 — 운영자가 소리를 바로 검증한다.
-      // 저장된 상태가 음소거면 오해를 부르지 않도록 재생하지 않는다.
+      // 음소거 중이면 오해를 부르지 않도록 재생하지 않는다.
       // (checkIn.panel 을 건드리지 않으므로 직전 결과음이 다시 울리지 않는다.)
       if (running && !confirmed) {
         confirmed = true;
@@ -174,9 +129,9 @@ export function useCheckInSound(): CheckInSound {
 
   const toggleMute = useCallback(() => {
     // mutedRef 를 즉시 갱신해 play·확인음 판정이 다음 렌더를 기다리지 않게 한다.
+    // 세션 한정 설정이라 저장하지 않는다 — 다음 화면 진입은 다시 소리 켜짐으로 시작한다.
     const next = !mutedRef.current;
     mutedRef.current = next;
-    writeMuted(next);
     setMuted(next);
     // 음소거를 **해제**하는 순간, running 이면 확인음을 한 번 — 소리가 살아있음을 알린다.
     // 확인음은 새 톤을 직접 재생할 뿐이라 직전 체크인 패널을 다시 울리지 않는다.

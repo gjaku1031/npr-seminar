@@ -285,19 +285,19 @@ describe("admin student response contract", () => {
   it("projects seminar reservations with matching top-level and nested booleans in one batch query", async () => {
     const seminarSessionId = "00000000-0000-4000-8000-000000000900";
     const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{ id: 11n }, { id: 12n }, { id: 13n }])
-      .mockResolvedValueOnce([{ count: 3n }])
+      .mockResolvedValueOnce([{ id: 11n }, { id: 12n }, { id: 13n }, { id: 14n }, { id: 15n }, { id: 16n }])
+      .mockResolvedValueOnce([{ count: 6n }])
       .mockResolvedValueOnce([{
-        unique_student_count: 3n,
+        unique_student_count: 6n,
         multi_assignment_student_count: 0n,
-        regular_representative_count: 3n,
+        regular_representative_count: 6n,
         science_alias_representative_count: 0n,
         multiple_regular_ambiguous_count: 0n,
         no_class_ambiguous_count: 0n,
-        math_regular_student_count: 3n,
+        math_regular_student_count: 6n,
         science_regular_student_count: 0n,
-        eligible_unique_student_count: 3n,
-        math_student_count: 3n,
+        eligible_unique_student_count: 6n,
+        math_student_count: 6n,
         science_only_student_count: 0n,
       }])
       .mockResolvedValueOnce([{ count: 0n }])
@@ -311,11 +311,33 @@ describe("admin student response contract", () => {
           booking_source: "WEB_APP",
         },
         {
+          // 형제 학생은 같은 가족 예약을 공유해도 각 학생 행에 각각 투영되어야 한다.
+          student_id: 12n,
+          family_booking_id: "00000000-0000-4000-8000-000000000901",
+          status: "RESERVED",
+          attendance_party: "BOTH",
+          booking_source: "WEB_APP",
+        },
+        {
           student_id: 13n,
           family_booking_id: "00000000-0000-4000-8000-000000000903",
           status: "CANCELLED",
           attendance_party: "FATHER",
           booking_source: "ON_SITE",
+        },
+        {
+          student_id: 14n,
+          family_booking_id: "00000000-0000-4000-8000-000000000904",
+          status: "CHECKED_IN",
+          attendance_party: "MOTHER",
+          booking_source: "PHONE",
+        },
+        {
+          student_id: 15n,
+          family_booking_id: "00000000-0000-4000-8000-000000000905",
+          status: "NO_SHOW",
+          attendance_party: "BOTH",
+          booking_source: "TEACHER",
         },
       ]);
     const student = (id: bigint, sourceStudentNo: string, name: string) => ({
@@ -352,13 +374,14 @@ describe("admin student response contract", () => {
       $queryRaw: queryRaw,
       syncRun: { findFirst: vi.fn(async () => null) },
       student: { findMany: vi.fn(async () => [
-        student(13n, "S13", "셋"), student(12n, "S12", "둘"), student(11n, "S11", "하나"),
+        student(16n, "S16", "여섯"), student(13n, "S13", "셋"), student(15n, "S15", "다섯"),
+        student(12n, "S12", "둘"), student(14n, "S14", "넷"), student(11n, "S11", "하나"),
       ]) },
     } as never, {} as never, { reveal: vi.fn() } as never);
 
     const response = await service.list({ seminarSessionId, page: 1, pageSize: 50 });
 
-    expect(response.items.map((item) => item.sourceStudentNo)).toEqual(["S11", "S12", "S13"]);
+    expect(response.items.map((item) => item.sourceStudentNo)).toEqual(["S11", "S12", "S13", "S14", "S15", "S16"]);
     expect(response.items[0]).toMatchObject({
       hasReservation: true,
       reservation: {
@@ -369,7 +392,15 @@ describe("admin student response contract", () => {
         bookingSource: "WEB_APP",
       },
     });
-    expect(response.items[1]).toMatchObject({ hasReservation: false, reservation: null });
+    expect(response.items[1]).toMatchObject({
+      hasReservation: true,
+      reservation: {
+        status: "RESERVED",
+        hasReservation: true,
+        // 동일 가족 예약이 연결된 두 학생 모두 같은 가족예약 ID를 받아야 한다.
+        familyBookingId: "00000000-0000-4000-8000-000000000901",
+      },
+    });
     expect(response.items[2]).toMatchObject({
       hasReservation: false,
       reservation: {
@@ -380,6 +411,15 @@ describe("admin student response contract", () => {
         bookingSource: "ON_SITE",
       },
     });
+    expect(response.items[3]).toMatchObject({
+      hasReservation: true,
+      reservation: { status: "CHECKED_IN", hasReservation: true },
+    });
+    expect(response.items[4]).toMatchObject({
+      hasReservation: true,
+      reservation: { status: "NO_SHOW", hasReservation: true },
+    });
+    expect(response.items[5]).toMatchObject({ hasReservation: false, reservation: null });
     for (const item of response.items) {
       expect(item).not.toHaveProperty("bookingStatus");
       expect(item).not.toHaveProperty("familyBookingId");
@@ -390,8 +430,12 @@ describe("admin student response contract", () => {
     }
     expect(queryRaw).toHaveBeenCalledTimes(6);
     const bookingQuery = queryRaw.mock.calls[5]![0] as { strings: string[]; values: unknown[] };
-    expect(bookingQuery.strings.join(" ")).toContain("distinct on (booking_student.student_id)");
-    expect(bookingQuery.values).toEqual(expect.arrayContaining([11n, 12n, 13n, seminarSessionId]));
+    const bookingSql = bookingQuery.strings.join(" ");
+    expect(bookingSql).toContain("distinct on (booking_student.student_id)");
+    expect(bookingSql).toContain("join family_bookings booking on booking.id=booking_student.family_booking_id");
+    expect(bookingSql).toContain("session.public_id=");
+    expect(bookingSql).toContain("booking_student.active and booking.status in ('RESERVED','CHECKED_IN')");
+    expect(bookingQuery.values).toEqual(expect.arrayContaining([11n, 12n, 13n, 14n, 15n, 16n, seminarSessionId]));
   });
 
   it("maps review-required students to the exact branch-based response and reason codes", async () => {

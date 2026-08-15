@@ -6,13 +6,13 @@
  * 표시하는 사실은 전부 계약 ScannerDevice 에서 온다:
  * - 연결 여부는 서버의 `online`(Redis presence)만 쓴다. durable ACTIVE 를 "연결됨"으로 오독하지
  *   않는다 — offline 인 ACTIVE 기기는 `오프라인 · 페어링 유지` 로만 말한다([[scannerPresence]]).
- * - 배터리 3필드는 nullable 이며 null 은 "미지원 또는 미보고"다 → `확인 불가`.
- *   숫자를 추정하거나 마지막 값을 이어 붙이지 않는다.
+ *
+ * 배터리 표시는 카드에서 제거했다(현장 운영에 노이즈). 계약의 배터리·heartbeat 필드와 타입은
+ * 그대로 유지되며(계약 호환) 텔레메트리 보고 경로도 손대지 않는다 — 여기서 렌더만 안 할 뿐이다.
  */
 
-import { Activity, BatteryCharging, BatteryMedium, Tablet, Trash2, Wifi, WifiOff } from "lucide-react";
+import { Tablet, Trash2, Wifi, WifiOff } from "lucide-react";
 import { Card } from "@/shared/ui";
-import { fmtDateTimeShort } from "@/shared/lib/format";
 import { BRANCH_LABELS, type ScannerDevice } from "@/shared/api";
 import { scannerPresence } from "../model/devicePresence";
 
@@ -21,8 +21,6 @@ export interface ScannerDeviceCardProps {
   onDelete: (device: ScannerDevice) => void;
   animationDelayMs?: number;
 }
-
-const UNKNOWN = "확인 불가";
 
 function StatusRow({
   icon,
@@ -50,11 +48,6 @@ function StatusRow({
       )}
     </div>
   );
-}
-
-function batteryValue(device: ScannerDevice): string {
-  if (device.lastBatteryLevelPercent === null) return UNKNOWN;
-  return device.isCharging ? `${device.lastBatteryLevelPercent}% 충전 중` : `${device.lastBatteryLevelPercent}%`;
 }
 
 export function ScannerDeviceCard({ device, onDelete, animationDelayMs = 0 }: ScannerDeviceCardProps) {
@@ -124,24 +117,6 @@ export function ScannerDeviceCard({ device, onDelete, animationDelayMs = 0 }: Sc
           icon={online ? <Wifi size={14} aria-hidden="true" /> : <WifiOff size={14} aria-hidden="true" />}
           label={presence.label}
           tone={presence.tone}
-        />
-        <StatusRow
-          icon={
-            device.isCharging ? (
-              <BatteryCharging size={14} aria-hidden="true" />
-            ) : (
-              <BatteryMedium size={14} aria-hidden="true" />
-            )
-          }
-          label="배터리"
-          value={batteryValue(device)}
-          tone={device.lastBatteryLevelPercent === null ? "faint" : "success"}
-        />
-        <StatusRow
-          icon={<Activity size={14} aria-hidden="true" />}
-          label="배터리 보고"
-          value={device.batteryReportedAt ? fmtDateTimeShort(new Date(device.batteryReportedAt)) : UNKNOWN}
-          tone={device.batteryReportedAt ? "success" : "faint"}
         />
       </div>
 

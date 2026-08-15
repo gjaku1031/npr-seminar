@@ -33,7 +33,7 @@ export async function cancelReservationAction(
   }
 }
 
-/** 회차 이동 — 예약번호·QR 유지. 대상 회차의 정원·중복도 검사된다 (명세 §10.8) */
+/** 회차 이동 — 예약번호·QR 유지. 대상 회차의 중복 여부를 검사한다 (명세 §10.8). */
 export async function moveReservationAction(
   _prev: ManageReservationState,
   formData: FormData,

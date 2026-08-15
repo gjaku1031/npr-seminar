@@ -1,0 +1,22 @@
+[Unit]
+Description=NPR Seminar Caddy upstream proxy
+Requires=npr-seminar-caddy-upstream.socket
+After=npr-seminar-web.service
+
+[Service]
+Type=notify
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3000
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

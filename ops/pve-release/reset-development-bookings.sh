@@ -71,8 +71,18 @@ select json_build_object(
     select count(*) from sms_outbox
     where source in ('BOOKING_CONFIRMED','BOOKING_CANCELLED','FIRST_CHECK_IN','SURVEY')
   ),
-  'reservedCapacity', (select coalesce(sum(reserved_count),0) from session_capacities),
-  'checkedInCapacity', (select coalesce(sum(checked_in_count),0) from session_capacities)
+  'activeFamilyBookings', (
+    select count(*) from family_bookings where status in ('RESERVED','CHECKED_IN')
+  ),
+  'checkedInFamilyBookings', (
+    select count(*) from family_bookings where status='CHECKED_IN'
+  ),
+  'activeAttendees', (
+    select coalesce(sum(seat_count),0) from family_bookings where status in ('RESERVED','CHECKED_IN')
+  ),
+  'checkedInAttendees', (
+    select coalesce(sum(seat_count),0) from family_bookings where status='CHECKED_IN'
+  )
 )::text;
 SQL
 }
@@ -106,8 +116,6 @@ select case when
        'SURVEY_RESPONSE_SUBMIT'
      )
   )
-  and (select coalesce(sum(reserved_count),0) from session_capacities)=0
-  and (select coalesce(sum(checked_in_count),0) from session_capacities)=0
 then 'ok' else 'failed' end;
 SQL
 }
@@ -282,12 +290,6 @@ begin
   execute 'truncate table ' || table_list || ' restart identity';
 end
 $truncate$;
-
-update session_capacities
-   set reserved_count=0,
-       checked_in_count=0,
-       version=version+1,
-       updated_at=now();
 
 -- New installations default to OFF in the migration. Re-running a
 -- development reset after migration also closes every existing guest flow.

@@ -37,7 +37,7 @@ export const smsLogs = pgTable(
   (t) => [index("sms_logs_when_idx").on(t.when)],
 );
 
-/** 만족도 설문 응답 — 결과 테이블 9열 스냅샷 (명세 §6.5) */
+/** 만족도 설문 응답 — 결과 테이블 스냅샷 (명세 §6.5) */
 export const surveyResponses = pgTable(
   "survey_responses",
   {
@@ -54,9 +54,6 @@ export const surveyResponses = pgTable(
     phone: text("phone").notNull().default(""),
     rating: integer("rating").$type<SurveyRating>().notNull(),
     comment: text("comment").notNull().default(""),
-    /** 사진 첨부 여부 — 업로드는 목업 (명세 §12) */
-    photo: boolean("photo").notNull().default(false),
-    photoName: text("photo_name"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("survey_responses_session_idx").on(t.sessionId)],

@@ -168,18 +168,18 @@ export type {
 /* ── 관리자 문자 ───────────────────────────────────────────────────────── */
 
 export {
-  archiveSmsTemplate,
   classifySmsSendFailure,
   createSmsTemplate,
   enqueueSmsSend,
   getSmsGatewayReadiness,
-  isLastActiveTemplate,
   isSmsSendDisabled,
   listSmsMessages,
   listSmsTemplates,
   previewSmsTargets,
   primarySample,
-  SMS_LAST_ACTIVE_TEMPLATE_REQUIRED_CODE,
+  removeSmsTemplate,
+  SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE,
+  SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE,
   SMS_PREVIEW_TOKEN_CHANGED_CODE,
   SMS_TEMPLATE_KEY_CONFLICT_CODE,
   SMS_TEMPLATE_VERSION_CONFLICT_CODE,
@@ -235,13 +235,36 @@ export type { UnpairReconciliation } from "./scanner-device-unpair";
 export { requestOtpChallenge, verifyOtpChallenge } from "./public-otp";
 export type { RequestOtpInput } from "./public-otp";
 
+/* ── 공개/관리 포스터 ────────────────────────────────────────────────────── */
+
+export {
+  getPublicPoster,
+  isPosterMediaType,
+  isValidPosterDescriptor,
+  isValidPosterImageUrl,
+  MAX_POSTER_BYTES,
+  parsePosterResource,
+  parseUploadedPoster,
+  POSTER_ACCEPT_ATTR,
+  POSTER_ACCEPT_MEDIA_TYPES,
+  POSTER_IMAGE_PATH_PREFIX,
+  POSTER_UPLOAD_FIELD,
+  posterFileRejectionMessage,
+  posterUploadErrorMessage,
+  publicPosterErrorMessage,
+  uploadAdminPoster,
+  validatePosterFile,
+} from "./poster";
+export type { PosterFileRejection } from "./poster";
+
 export {
   cancelPublicFamilyBooking,
   createPublicFamilyBooking,
+  establishFamilyBookingContactReadSession,
   exchangeBookingAccessToken,
   getPublicFamilyBooking,
-  listOwnedFamilyBookings,
   listPublicSeminarSessions,
+  lookupPublicFamilyBookings,
   recoverOwnedFamilyBookingQr,
   searchAuthorizedStudents,
   seatCountFor,
@@ -250,9 +273,7 @@ export {
 } from "./public-booking";
 export type {
   ListPublicSessionsParams,
-  ManagementSessionMutationOptions,
   ManagementSessionReadOptions,
-  OwnedBookingMutationAuth,
   OwnedBookingReadAuth,
   ProofMutationOptions,
   ProofReadOptions,

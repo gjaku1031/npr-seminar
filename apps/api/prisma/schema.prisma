@@ -360,7 +360,6 @@ model SeminarSession {
   updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   seminar               Seminar                @relation(fields: [seminarId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   branch                Branch?                @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  capacity              SessionCapacity?
   familyBookings        FamilyBooking[]
   familyBookingStudents FamilyBookingStudent[]
   checkInEvents         CheckInEvent[]
@@ -371,18 +370,6 @@ model SeminarSession {
   @@index([branchId, startsAt], map: "seminar_sessions_branch_starts_idx")
   @@index([status, startsAt], map: "seminar_sessions_status_starts_idx")
   @@map("seminar_sessions")
-}
-
-model SessionCapacity {
-  sessionId      BigInt         @id @map("session_id")
-  capacity       Int
-  reservedCount  Int            @default(0) @map("reserved_count")
-  checkedInCount Int            @default(0) @map("checked_in_count")
-  version        BigInt         @default(0)
-  updatedAt      DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
-  session        SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@map("session_capacities")
 }
 
 model OtpProofAudit {
@@ -458,6 +445,7 @@ model FamilyBooking {
   managementSessions BookingManagementSession[]
 
   @@unique([id, sessionId], map: "family_bookings_id_session_unique")
+  @@index([contactDigest, createdAt(sort: Desc), id(sort: Desc)], map: "family_bookings_contact_created_id_idx")
   @@index([sessionId, status], map: "family_bookings_session_status_idx")
   @@index([sessionId, contactLast4, status], map: "family_bookings_last4_active_idx")
   @@index([otpProofAuditId], map: "family_bookings_otp_proof_idx")
@@ -664,6 +652,7 @@ model SmsTemplate {
   title     String?  @db.VarChar(200)
   body      String   @db.Text
   active    Boolean  @default(true)
+  isDefault Boolean  @default(false) @map("is_default")
   version   BigInt   @default(1)
   createdBy String   @map("created_by") @db.VarChar(160)
   updatedBy String   @map("updated_by") @db.VarChar(160)
@@ -812,8 +801,6 @@ model SurveyResponse {
   sessionId       BigInt         @map("session_id")
   rating          Int            @db.SmallInt
   comment         String?        @db.Text
-  photoAttached   Boolean        @default(false) @map("photo_attached")
-  photoName       String?        @map("photo_name") @db.VarChar(255)
   submittedAt     DateTime       @default(now()) @map("submitted_at") @db.Timestamptz(6)
   familyBooking   FamilyBooking  @relation(fields: [familyBookingId, sessionId], references: [id, sessionId], onDelete: NoAction, onUpdate: NoAction, map: "survey_responses_family_session_fk")
   session         SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)

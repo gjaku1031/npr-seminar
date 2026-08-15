@@ -12,20 +12,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Smartphone } from "lucide-react";
-import { parseBookingAccessFragment } from "@/entities/reservation";
-import { Button, Input } from "@/shared/ui";
+import { initBookingAccessFragment } from "@/entities/reservation";
 import {
   exchangeBookingAccessToken,
   isApiError,
-  useOperationKey,
+  useKeyedOperationIntents,
 } from "@/shared/api";
-import { ErrorNote, FlowHeader, ManageBookingPanel } from "@/widgets/reserve-flow";
-import { usePublicSessions } from "@/features/public-booking";
-
-function normalizeContact(raw: string): string {
-  return raw.replace(/\D/g, "");
-}
+import { ContactEntryForm, FlowHeader, ManageBookingPanel } from "@/widgets/reserve-flow";
+import { isCompleteContact, normalizeContactDigits, usePublicSessions } from "@/features/public-booking";
 
 type FragmentPhase = "pending" | "ready" | "missing";
 
@@ -35,6 +29,13 @@ interface FragmentInit {
   /** 원문 access token — React state 가 아닌 ref 레코드 메모리에만 머문다. 교환 성공 시 비운다. */
   token: string | null;
 }
+
+interface ExchangeIntent {
+  accessToken: string;
+  contact: string;
+}
+
+const EXCHANGE_INTENT_TARGET = "booking-access-exchange";
 
 export function BookingAccessView() {
   // 회차 메타(제목·일시)를 관리 패널에 붙이는 데만 쓴다 — 교환 전에는 예약을 요청하지 않는다.
@@ -47,8 +48,10 @@ export function BookingAccessView() {
   const fragmentMissing = fragmentPhase === "missing";
 
   /*
-   * 첫 mount: fragment 를 엄격 파싱→토큰을 ref 레코드(메모리)로 옮기고 주소창에서 즉시 제거.
-   * 렌더 위상 갱신은 마이크로태스크로 비동기 예약해 동기 effect setState 를 피한다.
+   * 첫 mount: fragment 를 엄격 파싱해 **유효 토큰만** ref 레코드(메모리)로 옮긴다. 그리고 hash 가
+   * 비어 있지 않으면 **파싱 성공 여부와 무관하게** 주소창·history 에서 즉시 제거한다 — 잘못되거나
+   * 파라미터가 여럿인 조각도 남기지 않는다(path/query 로 옮기지 않고 그냥 없앤다). 렌더 위상
+   * 갱신은 마이크로태스크로 비동기 예약해 동기 effect setState 를 피한다.
    *
    * StrictMode setup→cleanup→setup 안전성:
    * - 첫 setup 만 파싱·replaceState 를 수행하고 결과를 initRef 에 캐시한다.
@@ -60,14 +63,17 @@ export function BookingAccessView() {
   useEffect(() => {
     let active = true;
     if (initRef.current === null) {
-      const token = parseBookingAccessFragment(window.location.hash);
-      if (token === null) {
-        initRef.current = { phase: "missing", token: null };
-      } else {
-        // 토큰을 주소창·history 에서 지운다 — path/query 로 옮기지 않고 그냥 없앤다.
-        window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        initRef.current = { phase: "ready", token };
+      const result = initBookingAccessFragment({
+        hash: window.location.hash,
+        pathname: window.location.pathname,
+        search: window.location.search,
+      });
+      // 비어 있지 않은 hash 는 파싱 성공 여부와 무관하게 즉시 지운다 — cleanUrl 은 정확히
+      // pathname+search 라 fragment(유효/무효 불문)가 주소창·history 에 남지 않는다.
+      if (result.cleanUrl !== null) {
+        window.history.replaceState(null, "", result.cleanUrl);
       }
+      initRef.current = { phase: result.phase, token: result.token };
     }
     const cached = initRef.current;
     queueMicrotask(() => {
@@ -82,50 +88,75 @@ export function BookingAccessView() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [familyBookingId, setFamilyBookingId] = useState<string | null>(null);
-  const exchangeKey = useOperationKey();
+  const exchangeIntents = useKeyedOperationIntents<ExchangeIntent>(1);
 
-  const digits = normalizeContact(contact);
-  const canSubmit = digits.length >= 8 && digits.length <= 15 && !submitting;
+  const digits = normalizeContactDigits(contact);
+  const canSubmit = isCompleteContact(digits) && !submitting;
 
   const submit = useCallback(async () => {
     const token = initRef.current?.token ?? null;
     if (!token || !canSubmit) return;
 
+    const operation = exchangeIntents.begin(EXCHANGE_INTENT_TARGET, {
+      accessToken: token,
+      contact: digits,
+    });
+    if (!operation.ok) {
+      const retained = exchangeIntents.retained(EXCHANGE_INTENT_TARGET);
+      if (retained !== null) setContact(retained.contact);
+      setError(
+        operation.reason === "diverged"
+          ? "직전 요청의 결과를 확인하지 못했습니다. 이전에 입력한 연락처로 되돌렸습니다. 같은 요청을 다시 시도해 주세요."
+          : "결과를 확인하지 못한 요청이 남아 있습니다. 같은 요청을 다시 시도해 주세요.",
+      );
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
       const result = await exchangeBookingAccessToken(
-        { accessToken: token, contact: digits },
-        { idempotencyKey: exchangeKey.current() },
+        operation.intent,
+        { idempotencyKey: operation.key },
       );
-      exchangeKey.settle();
+      exchangeIntents.settle(EXCHANGE_INTENT_TARGET);
       // 성공 즉시 원문 토큰만 비운다 — 더는 필요 없다(phase 는 유지).
       if (initRef.current) initRef.current.token = null;
       setFamilyBookingId(result.familyBookingId);
     } catch (caught) {
-      exchangeKey.settle(caught);
-      if (isApiError(caught) && caught.status === 401) {
+      exchangeIntents.settle(EXCHANGE_INTENT_TARGET, caught);
+      const retained = exchangeIntents.retained(EXCHANGE_INTENT_TARGET);
+      if (retained !== null) {
+        // 결과 미상에서는 키뿐 아니라 최초 연락처·토큰 의도도 그대로 유지한다.
+        setContact(retained.contact);
+        setError("예약 열기 요청의 결과를 확인하지 못했습니다. 입력값을 그대로 두고 다시 시도해 주세요.");
+      } else if (isApiError(caught) && caught.status === 401) {
         // 토큰·연락처 중 무엇이 틀렸는지 구분하지 않는다.
-        setError("링크 또는 연락처가 맞지 않아요. 예약하신 연락처가 맞는지 확인해 주세요.");
+        setError("링크 또는 연락처가 맞지 않습니다. 예약하신 연락처가 맞는지 확인해 주세요.");
       } else if (isApiError(caught) && caught.status === 429) {
-        setError("요청이 너무 잦아요. 잠시 후 다시 시도해 주세요.");
+        setError("요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
       } else if (isApiError(caught) && caught.status === 403) {
-        setError("이 링크로는 예약을 열 수 없어요. 문자에서 링크를 다시 열어주세요.");
+        setError("이 링크로는 예약을 열 수 없습니다. 문자로 받은 링크를 다시 열어 주세요.");
       } else {
-        setError("예약을 여는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.");
+        setError("예약을 여는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.");
       }
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, digits, exchangeKey]);
+  }, [canSubmit, digits, exchangeIntents]);
 
-  /* 교환 성공 — 관리 세션 모드 패널로 넘어간다(예약 데이터는 여기서 처음 요청된다). */
+  /*
+   * 교환 성공 — 관리 세션 모드 패널로 넘어간다(예약 데이터는 여기서 처음 요청된다).
+   * ★ 이미 입력한 전체 연락처(digits)를 패널에 넘겨 **변경 경계 OTP 발송 입력만** 미리 채운다.
+   *   패널은 이 값을 저장·로깅·URL 에 쓰지 않고, 세션은 변경 인증에 절대 쓰지 않는다.
+   */
   if (familyBookingId !== null) {
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100dvh" }}>
         <ManageBookingPanel
           sessions={sessions}
           accessSession={{ familyBookingId }}
+          prefillContact={digits}
           onExit={() => { window.location.href = "/"; }}
           onToast={() => {}}
         />
@@ -138,38 +169,29 @@ export function BookingAccessView() {
       <FlowHeader title="예약 관리" />
       <div style={{ padding: "14px 18px 30px" }}>
         <div style={{ padding: "8px 4px 16px" }}>
-          <h2 style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.35 }}>예약 확인이 필요해요</h2>
+          <h2 style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.35 }}>예약 확인이 필요합니다</h2>
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.55 }}>
-            문자로 받은 개인 링크예요. 예약하신 <b>학부모 연락처 전체 번호</b>를 입력하면 예약을 열어드려요.
+            문자로 받은 개인 링크입니다. 예약하신 <b>학부모 연락처 전체 번호</b>를 입력하시면 예약을 열어드립니다.
           </p>
         </div>
 
         {fragmentMissing ? (
           <div role="alert" style={{ padding: "16px 14px", borderRadius: "var(--radius-md)", background: "var(--status-danger-soft)", color: "var(--status-danger)", fontSize: 13, lineHeight: 1.6 }}>
-            링크 정보를 읽을 수 없어요. 문자에서 예약 링크를 다시 열어주세요.
+            링크 정보를 읽을 수 없습니다. 문자로 받은 예약 링크를 다시 열어 주세요.
           </div>
         ) : (
-          <>
-            <Input
-              label="학부모 연락처"
-              placeholder="010-0000-0000"
-              value={contact}
-              onChange={setContact}
-              disabled={!fragmentReady || submitting}
-              icon={<Smartphone size={16} aria-hidden="true" />}
-              hint="예약할 때 사용한 전체 번호를 입력해 주세요."
-            />
-            <Button
-              size="lg"
-              fullWidth
-              onClick={() => void submit()}
-              disabled={!fragmentReady || !canSubmit}
-              style={{ marginTop: 16 }}
-            >
-              {submitting ? "예약 여는 중…" : "예약 열기"}
-            </Button>
-            <ErrorNote message={error} />
-          </>
+          <ContactEntryForm
+            value={contact}
+            onChange={(v) => { setContact(v); setError(null); }}
+            onSubmit={() => void submit()}
+            disabled={!fragmentReady}
+            submitting={submitting}
+            canSubmit={canSubmit}
+            submitLabel="예약 열기"
+            submittingLabel="예약을 여는 중입니다…"
+            hint="예약하실 때 사용한 전체 번호를 입력해 주세요."
+            error={error}
+          />
         )}
       </div>
     </div>

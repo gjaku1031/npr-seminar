@@ -1,4 +1,8 @@
 // features/public-booking 공개 API (barrel) — 학부모 공개 예약 (설계 §4.1).
+export { publicBranchLabel } from "./model/publicBranchLabel";
+
+export { formatContactInput, isCompleteContact, normalizeContactDigits } from "./model/contact";
+
 export { useBookingProof } from "./model/useBookingProof";
 export type { BookingProof, BookingProofState } from "./model/useBookingProof";
 

@@ -471,6 +471,11 @@ describe("ADMIN seminar session roster", () => {
       branch: "CAMPUS_A", unitGroup: "ALL", page: 1, pageSize: 100,
     });
     expect(result.page).toEqual({ page: 1, pageSize: 100, totalItems: 7, totalPages: 1 });
+    expect(result.monitoring).toEqual({
+      studentCount: 4,
+      familyBookingCount: 3,
+      attendeeCount: 3,
+    });
     expect(result.facets.teachers).toEqual(["이교사"]);
     expect(result.facets.unmatchedUnitCount).toBe(1);
     expect(result.items.some((row) => row.studentId === students.get("unbooked")!.publicId)).toBe(false);
@@ -581,6 +586,11 @@ describe("ADMIN seminar session roster", () => {
 
     const allCampuses = await service.list(sessionPublicId, { unitGroup: "ALL", page: 1, pageSize: 100 });
     expect([...new Set(allCampuses.items.map((item) => item.branch))]).toEqual(["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"]);
+    expect(allCampuses.monitoring).toEqual({
+      studentCount: 7,
+      familyBookingCount: 6,
+      attendeeCount: 6,
+    });
 
     const paged = await service.list(sessionPublicId, { branch: "CAMPUS_A", unitGroup: "ALL", page: 2, pageSize: 3 });
     expect(paged.items).toHaveLength(3);
@@ -597,35 +607,36 @@ describe("ADMIN seminar session roster", () => {
       uncheckedBookingCount: 4,
       cancelledBookingCount: 4,
       noShowBookingCount: 1,
+      attendeeCount: 6,
     });
 
     const all = await statisticsService.statistics(sessionPublicId);
     expect(all).toMatchObject({
       branch: null,
       summary: {
-        eligibleCurrentStudentCount: 7,
         activeBookingCount: 6,
         reservedBookingCount: 4,
         checkedInBookingCount: 2,
         cancelledBookingCount: 4,
         noShowBookingCount: 1,
+        monitoring: { studentCount: 7, familyBookingCount: 6, attendeeCount: 6 },
       },
       survey: { averageRating: 4, responseCount: 2, scope: "SESSION" },
     });
     expect(all.units).toHaveLength(8);
     expect(all.units.find((row) => row.unitGroup === "ALL")).toEqual({
       unitGroup: "ALL",
-      eligibleStudentCount: 7,
       activeBookingCount: 6,
       reservedBookingCount: 4,
       checkedInBookingCount: 2,
+      monitoring: { studentCount: 7, familyBookingCount: 6, attendeeCount: 6 },
     });
     expect(all.units.find((row) => row.unitGroup === "HIGH")).toEqual({
       unitGroup: "HIGH",
-      eligibleStudentCount: 4,
       activeBookingCount: 1,
       reservedBookingCount: 0,
       checkedInBookingCount: 1,
+      monitoring: { studentCount: 2, familyBookingCount: 1, attendeeCount: 1 },
     });
     expect(all.summary.activeBookingCount).toBe(
       all.summary.reservedBookingCount + all.summary.checkedInBookingCount,
@@ -652,6 +663,7 @@ describe("ADMIN seminar session roster", () => {
         checkedInBookingCount: 1,
         cancelledBookingCount: 3,
         noShowBookingCount: 1,
+          monitoring: { studentCount: 3, familyBookingCount: 2, attendeeCount: 2 },
       },
       {
         channel: "MANUAL",
@@ -661,6 +673,7 @@ describe("ADMIN seminar session roster", () => {
         checkedInBookingCount: 1,
         cancelledBookingCount: 1,
         noShowBookingCount: 0,
+        monitoring: { studentCount: 4, familyBookingCount: 4, attendeeCount: 4 },
       },
     ]);
     for (const field of [
@@ -675,12 +688,12 @@ describe("ADMIN seminar session roster", () => {
 
     const campusA = await statisticsService.statistics(sessionPublicId, "CAMPUS_A");
     expect(campusA.summary).toEqual({
-      eligibleCurrentStudentCount: 5,
       activeBookingCount: 3,
       reservedBookingCount: 1,
       checkedInBookingCount: 2,
       cancelledBookingCount: 4,
       noShowBookingCount: 1,
+      monitoring: { studentCount: 4, familyBookingCount: 3, attendeeCount: 3 },
     });
     expect(campusA.survey).toEqual(all.survey);
   });

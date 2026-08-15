@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
-import { ReserveView } from "@/views/reserve";
+import { PosterEntranceView } from "@/views/poster";
+import { brandSeminarTitle } from "@/shared/ui/brand";
 
-export const metadata: Metadata = { title: "npr 입시설명회 — 예약" };
+export const metadata: Metadata = {
+  title: brandSeminarTitle(),
+  description: `${brandSeminarTitle()} 안내 포스터 · 예약`,
+};
 
 /**
- * 학부모 모바일 예약 (명세 §10 · flows PARENT-P1~P5) — **로그인 없는 공개 루트**.
+ * 공개 진입면 (루트 `/`) — **포스터 우선**, 로그인 없는 공개 경로.
  *
- * 서버에서 데이터를 내려주지 않는다: 모든 조회·변경이 브라우저에서 same-origin
- * Nest `/api/v1` 계약 API 로 이뤄진다 (`@/server`·레거시 서버 액션 없음).
- * 예약 권한은 SMS OTP 로 얻는 X-Booking-Proof(메모리 전용)가 정한다.
+ * 업로드된 설명회 안내 포스터를 same-origin 계약(GET `/api/v1/public/poster`)에서 브라우저가
+ * 직접 읽어 전체(contain)로 보여 주고, 하단 액션이 학부모를 예약 플로우로 보낸다:
+ * - `설명회 예약하기` → `/reserve`
+ * - `이미 예약했나요? 예약 조회 · 변경 · 취소` → `/reserve?mode=manage`
  *
- * 관리자 콘솔은 `/admin`, 옛 공개 경로 `/reserve` 는 여기로 308 영구 이동한다.
+ * 예약 플로우(ReserveView · flows PARENT-P1~P5) 자체는 이제 `/reserve` 다. 관리자 콘솔은
+ * `/admin` (`(main)` 레이아웃이 인증을 강제). 포스터 업로드 관리도 `/admin` 허브 패널에 있다.
  */
-export default function ParentReservePage() {
-  return <ReserveView />;
+export default function PublicEntrancePage() {
+  return <PosterEntranceView />;
 }

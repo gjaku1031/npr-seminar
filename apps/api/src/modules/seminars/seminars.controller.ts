@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from "class-validator";
+import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Length, Min } from "class-validator";
 import { CsrfGuard } from "../../common/auth/csrf.guard.js";
 import { Roles } from "../../common/auth/roles.decorator.js";
 import { RolesGuard } from "../../common/auth/roles.guard.js";
@@ -32,7 +32,6 @@ class SessionCreateDto {
   @IsString() @Length(1, 300) public location!: string;
   @IsDateString() public bookingOpensAt!: string;
   @IsDateString() public bookingClosesAt!: string;
-  @IsInt() @Min(1) @Max(100_000) public capacity!: number;
   @IsOptional() @IsBoolean() public guestBookingEnabled?: boolean;
 }
 class SessionUpdateDto {
@@ -44,7 +43,6 @@ class SessionUpdateDto {
   @IsOptional() @IsString() @Length(1, 300) public location?: string;
   @IsOptional() @IsDateString() public bookingOpensAt?: string;
   @IsOptional() @IsDateString() public bookingClosesAt?: string;
-  @IsOptional() @IsInt() @Min(1) @Max(100_000) public capacity?: number;
   @IsOptional() @IsIn(["DRAFT", "OPEN", "CLOSED", "CANCELLED"]) public status?: string;
   @IsOptional() @IsBoolean() public guestBookingEnabled?: boolean;
 }

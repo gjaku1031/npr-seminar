@@ -8,16 +8,16 @@
  *
  * ★ 비재원(guest) 카드 상태는 boolean 하나로 오류를 숨기지 않는다: loading·error·disabled·enabled 를
  *   정직하게 보여 준다. `disabled` 는 활성 가능한 공개 회차가 하나도 없을 때이고, 이때만 고정 문구
- *   `7/23일부터 예약 가능` 을 쓴다. loading·error 에서는 카드를 열지 않는다(실패 시 임의 활성화 금지).
+ *   `7/23(목)부터 예약 가능` 을 쓴다. loading·error 에서는 카드를 열지 않는다(실패 시 임의 활성화 금지).
  */
 
 import { ArrowRight, GraduationCap, UserPlus } from "lucide-react";
-import { Badge } from "@/shared/ui";
+import { Badge, brandSeminarTitle, BRAND_NAME } from "@/shared/ui";
 import type { GuestEntryState } from "@/features/public-booking";
 import { FlowHeader, FlowToast } from "./MobileChrome";
 
 /** 활성 가능한 회차가 하나도 없을 때만 쓰는 운영 확정 문구(변경 금지). */
-const GUEST_DISABLED_BADGE = "7/23일부터 예약 가능";
+const GUEST_DISABLED_BADGE = "7/23(목)부터 예약 가능";
 
 export interface ReservationTypeStepProps {
   guestState: GuestEntryState;
@@ -44,7 +44,7 @@ export function ReservationTypeStep({
       data-screen-label="모바일 — 예약 유형 선택"
       style={{ minHeight: "100%", background: "var(--surface-page)" }}
     >
-      <FlowHeader title="npr 입시설명회" />
+      <FlowHeader title={brandSeminarTitle()} />
       <div style={{ padding: "10px 18px 30px" }}>
         <div style={{ padding: "20px 4px 18px" }}>
           <div style={{ fontSize: 11, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)" }}>
@@ -56,7 +56,7 @@ export function ReservationTypeStep({
             선택해 주세요
           </h2>
           <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 6 }}>
-            재원 여부에 따라 예약 절차가 달라요.
+            재원 여부에 따라 예약 절차가 다릅니다.
           </div>
         </div>
 
@@ -101,7 +101,7 @@ export function ReservationTypeStep({
                 재원생 예약
               </span>
               <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
-                자녀가 NPR에 다니고 있어요
+                자녀가 {BRAND_NAME}에 다니고 있습니다
               </span>
             </span>
             <ArrowRight size={16} aria-hidden="true" style={{ color: "var(--violet-800)", flexShrink: 0 }} />
@@ -155,7 +155,7 @@ export function ReservationTypeStep({
                 비재원생 예약
               </span>
               <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, opacity: guestEnabled ? 1 : 0.6 }}>
-                자녀가 아직 NPR에 다니지 않아요
+                자녀가 아직 {BRAND_NAME}에 다니지 않습니다
               </span>
               {/* 상태 안내 — 배지(disabled) 또는 진행 문구(loading/error). 배지는 흐리지 않는다. */}
               {guestState === "disabled" && (
@@ -181,7 +181,7 @@ export function ReservationTypeStep({
               )}
               {guestState === "error" && (
                 <span style={{ display: "block", fontSize: 11.5, color: "var(--status-warning)", marginTop: 6 }}>
-                  예약 정보를 불러오지 못했어요
+                  예약 정보를 불러오지 못했습니다
                 </span>
               )}
             </span>
@@ -210,7 +210,7 @@ export function ReservationTypeStep({
             onClick={onManage}
             style={{ background: "none", border: "none", fontSize: 13.5, fontWeight: 700, color: "var(--violet-800)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer", fontFamily: "var(--font-body)", padding: 8 }}
           >
-            이미 예약했나요? 예약 조회 · 변경 · 취소
+            이미 예약하셨나요? 예약 조회 · 변경 · 취소
           </button>
         </div>
       </div>

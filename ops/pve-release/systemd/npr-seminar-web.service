@@ -15,6 +15,7 @@ Environment=HOSTNAME=127.0.0.1
 Environment=NEST_API_ORIGIN=http://127.0.0.1:4000
 UnsetEnvironment=DATABASE_URL WORKER_DATABASE_URL MIGRATION_DATABASE_URL REDIS_URL SESSION_SECRET PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY GOOGLE_APPLICATION_CREDENTIALS ALIGO_IDENTIFIER ALIGO_KEY
 UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
+UnsetEnvironment=POSTER_STORAGE_DIR
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/.next/BUILD_ID
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next
 ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000

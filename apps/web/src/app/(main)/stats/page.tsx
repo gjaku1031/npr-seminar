@@ -4,9 +4,8 @@ import { StatsView } from "@/views/stats";
 export const dynamic = "force-dynamic";
 
 /**
- * 통계 (명세 §8) — 회차 × 분원 필터.
- * 계약에 집계 엔드포인트가 없어, 뷰가 서버가 이미 센 값(정원 원장 · page.totalItems ·
- * 설문 summary)만 조합한다.
+ * 통계 (명세 §8) — 회차 × 캠퍼스 필터.
+ * 학생·가족·실 참가자와 운영 상태의 절대 건수를 서버 집계 API에서 읽는다.
  */
 export default async function StatsPage() {
   await requireModuleAccess("stats");

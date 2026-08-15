@@ -8,12 +8,15 @@
  * iPhone 처럼 좁은 화면에서는 min(100%, 480px) 이 100% 라 가장자리까지 그대로 간다.
  */
 
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { BrandMark } from "@/shared/ui";
 
 /** 앱 뷰포트 폭 — ReserveView 의 max-width 480 과 같은 값. */
 export const APP_MAX_WIDTH = 480;
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** 고정 요소를 앱 폭 안에 가둔다 (데스크톱에서 화면 전체로 퍼지지 않게). */
 export const appViewportStyle: CSSProperties = {
@@ -106,14 +109,81 @@ export function ErrorNote({ message }: { message: string | null }) {
 export function FlowOverlay({
   onDismiss,
   align = "center",
+  ariaLabel,
+  dialogRole = "dialog",
   children,
 }: {
   onDismiss: () => void;
   align?: "center" | "bottom";
+  ariaLabel: string;
+  dialogRole?: "dialog" | "alertdialog";
   children: ReactNode;
 }) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () =>
+      overlay
+        ? Array.from(overlay.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+            (element) => element.offsetParent !== null || element === document.activeElement,
+          )
+        : [];
+
+    queueMicrotask(() => {
+      const first = focusable()[0];
+      (first ?? overlay)?.focus();
+    });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const candidates = focusable();
+      if (candidates.length === 0) {
+        event.preventDefault();
+        overlay?.focus();
+        return;
+      }
+      const first = candidates[0]!;
+      const last = candidates[candidates.length - 1]!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === overlay)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (restoreFocus?.isConnected) restoreFocus.focus();
+    };
+  }, []);
+
   return (
     <div
+      ref={overlayRef}
+      role={dialogRole}
+      aria-modal="true"
+      aria-label={ariaLabel}
+      tabIndex={-1}
       onClick={(event) => {
         if (event.target === event.currentTarget) onDismiss();
       }}

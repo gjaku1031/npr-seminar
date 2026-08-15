@@ -9,7 +9,7 @@ readonly spreadsheet_id=EXAMPLE_SHEET_ID_xxxxxxxxxxxxxxxxxxxxxxxxxxx
 readonly confirmation="CLEAR NPR DEVELOPMENT SHEETS ${spreadsheet_id}"
 readonly command_path=/srv/npr-seminar/current/ops/pve-release/google-sheets-reset-development-data.mjs
 readonly deploy_lock=/run/lock/npr-seminar-deploy.lock
-readonly sheets_v4_fingerprint=ffb044e3773f51b25797d9dd79fc507b42900f0d49a19f768daba1f86bc2e522
+readonly sheets_v4_fingerprint=a89087d355e8b9e1cd1039fabc1fa715d8473ebf08ed55f164a844f437b789be
 
 mode=${1:-preflight}
 provided_confirmation=${2:-}

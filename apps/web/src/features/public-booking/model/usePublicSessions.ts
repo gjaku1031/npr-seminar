@@ -3,8 +3,8 @@
 /**
  * 공개 회차 목록 — 계약 GET /public/seminar-sessions.
  *
- * 정원·가능 여부는 **서버가 준 availability/remainingCapacity 만** 쓴다.
- * 클라이언트가 예약 배열을 세어 정원을 추정하지 않는다(옛 목업 방식 제거).
+ * 예약 가능 여부는 **서버가 준 availability 만** 쓴다.
+ * 클라이언트가 예약 건수로 마감 여부를 추정하지 않는다.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";

@@ -21,6 +21,7 @@ export type { CheckInSoundKind } from "./lib/check-in-sound";
 
 export { PairingCodeInput } from "./ui/PairingCodeInput";
 export { CheckInResultPanel } from "./ui/CheckInResultPanel";
+export { CheckInResultOverlay } from "./ui/CheckInResultOverlay";
 export { ScannerShiftPanel } from "./ui/ScannerShiftPanel";
 export { ScannerManualPanel } from "./ui/ScannerManualPanel";
 export { UnpairDeviceDialog } from "./ui/UnpairDeviceDialog";

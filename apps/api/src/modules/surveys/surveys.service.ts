@@ -11,8 +11,6 @@ import { currentOrHistoricMathHomeroomTeacher } from "../student-sync/student-ho
 export interface SubmitSurveyInput {
   readonly rating: number;
   readonly comment?: string;
-  readonly photoAttached: boolean;
-  readonly photoName?: string;
 }
 
 @Injectable()
@@ -26,14 +24,11 @@ export class SurveysService {
 
   public async submit(familyBookingId: string, input: SubmitSurveyInput, proofValue: string, key: string) {
     const comment = input.comment?.normalize("NFC").trim() || null;
-    const photoName = input.photoName?.normalize("NFC").trim() || null;
-    if ((input.photoAttached && (photoName === null || /[/\\\0]/u.test(photoName)))
-      || (!input.photoAttached && photoName !== null)) this.fail(400, "SURVEY_PHOTO_METADATA_INVALID");
     const proofDigest = createHash("sha256").update(proofValue).digest("base64url");
     const result = await this.idempotency.executeWithReplay(
       "SURVEY_RESPONSE_SUBMIT",
       key,
-      { familyBookingId, rating: input.rating, comment, photoAttached: input.photoAttached, photoName, proofDigest },
+      { familyBookingId, rating: input.rating, comment, proofDigest },
       async (transaction) => {
         const bookings = await transaction.$queryRaw<Array<{
           id: bigint; public_id: string; session_id: bigint; session_public_id: string;
@@ -54,8 +49,6 @@ export class SurveysService {
           sessionId: booking.session_id,
           rating: input.rating,
           comment,
-          photoAttached: input.photoAttached,
-          photoName,
         } });
         return {
           surveyResponseId: created.publicId,
@@ -63,8 +56,6 @@ export class SurveysService {
           seminarSessionId: booking.session_public_id,
           rating: created.rating,
           comment: created.comment,
-          photoAttached: created.photoAttached,
-          photoName: created.photoName,
           submittedAt: created.submittedAt,
         };
       },
@@ -82,7 +73,7 @@ export class SurveysService {
         where, orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * pageSize, take: pageSize,
         select: {
-          publicId: true, rating: true, comment: true, photoAttached: true, photoName: true, submittedAt: true,
+          publicId: true, rating: true, comment: true, submittedAt: true,
           familyBooking: { select: {
             publicId: true,
             contactCiphertext: true,
@@ -153,8 +144,6 @@ export class SurveysService {
           },
           rating: row.rating,
           comment: row.comment,
-          photoAttached: row.photoAttached,
-          photoName: row.photoAttached ? row.photoName : null,
           submittedAt: row.submittedAt,
         };
       }),

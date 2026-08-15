@@ -9,8 +9,9 @@
  *   (소유 예약 전체 조회를 타지 않는다 — ManageBookingPanel 의 initialBookingId 모드.)
  * - 서버도 proof digest 와 예약 소유자를 대조하므로 링크를 주운 사람은 열 수 없다.
  *
- * 인증 뒤에는 루트의 예약 조회와 **같은 패널**을 쓴다: 회차 변경·취소·QR 확인·설문이
+ * 인증 뒤에는 예약 조회(`/reserve?mode=manage`)와 **같은 패널**을 쓴다: 회차 변경·취소·QR 확인·설문이
  * 동일한 변경/리플레이/오류/QR 시크릿 규칙으로 동작한다(QR 은 활성본 복구 GET 조회뿐, 재발급 없음).
+ * 종료(onExit)는 공개 홈(루트 `/`, 포스터 진입면)으로 돌아간다.
  */
 
 import { useRouter } from "next/navigation";

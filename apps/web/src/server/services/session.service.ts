@@ -22,7 +22,7 @@ export async function getSessionStats(id: string): Promise<SessionStats> {
   return sessionRepository.stats(id);
 }
 
-/** 설명회 목록 + 각 현황 — 목록 카드의 정원 게이지용 (명세 §6.1) */
+/** 설명회 목록 + 각 예약 상태 현황. */
 export async function listSessionsWithStats(): Promise<Array<{ session: Session; stats: SessionStats }>> {
   const sessions = await sessionRepository.list();
   return Promise.all(
@@ -31,7 +31,6 @@ export async function listSessionsWithStats(): Promise<Array<{ session: Session;
 }
 
 export async function createSession(draft: SessionDraft): Promise<Session> {
-  if (draft.capacity <= 0) throw new InvalidStateError("정원은 1명 이상이어야 합니다.");
   return sessionRepository.create(draft);
 }
 

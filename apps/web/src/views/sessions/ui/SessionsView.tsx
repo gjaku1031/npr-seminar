@@ -8,21 +8,17 @@
  *   보여 주느니 **비활성(disabled)** 으로 원래 자리에 두고 "API 연결 전"을 스크린리더까지 알린다.
  *   가짜 성공을 만들지 않는다.
  *
- * ★ 헤더의 큰 %(예약률)와 4개 카드(총 예약·입장 완료·미체크·취소), 그리고 좌측 **모든** 회차
- *   카드의 예약률·총 예약은 모두 **가족 예약 건수** 기준이다(좌석 원장이 아니다). 회차 목록이
- *   항목마다 함께 주는 `operationsSummary` 실집계에서 온다 — 근사(reservedCount)도, 선택 회차만
- *   따로 세는 일도 없다. 예약률% = 활성 예약(RESERVED+CHECKED_IN, **노쇼 제외**)/정원,
- *   총 예약 = 활성 예약 "/ 정원", 입장 완료·미체크는 '명', 취소는 '건'이다. NO_SHOW 는 총 예약·
- *   미체크·취소 어디에도 안 들어간다.
+ * ★ 4개 카드(총 예약·입장 완료·미체크·취소)와 좌측 모든 회차의 숫자는 회차 목록이 함께 주는
+ *   `operationsSummary` 실집계다. 정원·예약률·좌석 원장은 운영 화면에 노출하지 않는다.
  *
  * ★ 설문 결과 표는 계약 GET survey-responses 의 실데이터다 — 응답마다 `participant`(캠퍼스·단위·
- *   학생·반·담임·학부모 연락처)까지 와서 POC 의 9열을 그대로 채운다. 사진은 계약이 URL 을 주지
- *   않아 파일명만 텍스트로 보인다(가짜 링크를 만들지 않는다). 보내기 카드의 문구·변수·바이트는
- *   **미리보기(예시)** 이며 편집 불가다.
+ *   학생·반·담임·학부모 연락처)까지 와서 POC 의 8열(캠퍼스·단위명·학생명·반명·담임명·학부모HP·
+ *   별점·후기)을 그대로 채운다. 보내기 카드의 문구·변수·바이트는 **미리보기(예시)** 이며 편집 불가다.
  */
 
 import { useMemo, useState } from "react";
 import { useGuestBookingToggle, useSeminarSessions, useSessionSurvey } from "@/features/admin-overview";
+import { PosterAdminPanel } from "@/features/admin-poster";
 import {
   BRANCH_LABELS,
   type SeminarSessionOption,
@@ -31,7 +27,8 @@ import {
 import { isLms, smsByteLength, SURVEY_SMS_VARIABLES } from "@/entities/sms";
 import { fmtDateTimeShort, fmtSessionDate } from "@/shared/lib/format";
 import { fmtPhone } from "@/shared/lib/phone";
-import { Badge, Button, Card, EmptyState, Icons, StatCard, Switch } from "@/shared/ui";
+import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
+import { Badge, BRAND_SMS_TAG, Button, Card, EmptyState, Icons, StatCard, Switch } from "@/shared/ui";
 
 const STATUS_LABELS: Record<SeminarSessionStatus, string> = {
   DRAFT: "작성 중",
@@ -70,16 +67,11 @@ const SR_ONLY: React.CSSProperties = {
  * 바이트 감을 주기 위한 예시일 뿐이라 read-only 로만 보여 준다(가짜 저장을 만들지 않는다).
  */
 const SURVEY_SMS_PREVIEW =
-  "[NPR세미나] {학생명} 학부모님, 설명회에 참석해 주셔서 감사합니다. 아래 링크에서 별점·후기·사진을 남겨 주세요 → {설문링크}";
+  `${BRAND_SMS_TAG} {학생명} 학부모님, 설명회에 참석해 주셔서 감사합니다. 아래 링크에서 별점·후기를 남겨 주세요 → {설문링크}`;
 
-/** 예약률 = 활성 가족 예약(RESERVED+CHECKED_IN) / 정원. 좌석 원장이 아니라 예약 건수 기준이다. */
-function occupancyPercent(activeCount: number, capacity: number): number {
-  return capacity > 0 ? Math.round((activeCount / capacity) * 100) : 0;
-}
-
-/** 만족도 결과 표 — POC 9열(캠퍼스·단위명·학생명·반명·담임명·학부모HP·별점·후기·사진첨부). */
-const SURVEY_COLS = "80px 52px 72px 66px 66px 118px 92px 1.6fr 112px";
-const SURVEY_MIN_WIDTH = 980;
+/** 만족도 결과 표 — POC 8열(캠퍼스·단위명·학생명·반명·담임명·학부모HP·별점·후기). */
+const SURVEY_COLS = "80px 52px 72px 66px 66px 118px 92px 1.6fr";
+const SURVEY_MIN_WIDTH = 860;
 
 export function SessionsView() {
   const sessions = useSeminarSessions();
@@ -144,11 +136,8 @@ export function SessionsView() {
   }
 
   const session = selected.session;
-  const ledger = session.capacity;
   /** 회차 목록이 항목마다 함께 준 실집계 — 별도 요청 없이 바로 읽는다(근사·로딩 없음). */
   const summary = session.operationsSummary;
-  /** 예약률% = 활성 가족 예약 / 정원. */
-  const occupancy = occupancyPercent(summary.activeCount, ledger.capacity);
   const scope = session.branch === null ? "전체" : BRANCH_LABELS[session.branch];
 
   return (
@@ -170,10 +159,9 @@ export function SessionsView() {
           {sessions.options.map((option, i) => {
             const item = option.session;
             const sel = item.seminarSessionId === session.seminarSessionId;
-            // 게이지·라벨 = 활성 가족 예약 / 정원(좌석 원장 아님). 목록이 항목마다 operationsSummary 를
-            // 함께 주므로, 선택 여부와 무관하게 **모든** 행이 자기 실집계를 쓴다(근사 없음).
+            // 목록이 항목마다 operationsSummary 를 함께 주므로 모든 행이 자기 실집계를 쓴다.
             const rowActive = item.operationsSummary.activeCount;
-            const rowOccupancy = occupancyPercent(rowActive, item.capacity.capacity);
+            const rowCheckedIn = item.operationsSummary.checkedInCount;
             return (
               <button
                 key={item.seminarSessionId}
@@ -191,13 +179,10 @@ export function SessionsView() {
                 <div style={{ fontSize: 12, marginTop: 5, color: "var(--text-muted)" }}>
                   {fmtSessionDate(new Date(item.startsAt))} · {item.branch === null ? "전체" : BRANCH_LABELS[item.branch]}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-                  <span style={{ flex: 1, height: 5, borderRadius: 3, background: sel ? "var(--violet-100)" : "var(--gray-2)", overflow: "hidden" }}>
-                    <span style={{ display: "block", height: "100%", width: `${Math.min(100, rowOccupancy)}%`, background: sel ? "var(--violet-700)" : "var(--violet-600)", transition: "width var(--dur-hero) var(--ease-smooth)" }} />
-                  </span>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, fontFeatureSettings: '"tnum"', color: sel ? "var(--text-brand)" : "var(--text-muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                    {rowActive}/{item.capacity.capacity}
-                  </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11.5, color: sel ? "var(--text-brand)" : "var(--text-muted)", fontFeatureSettings: '"tnum"' }}>
+                  <span>예약 <b>{rowActive.toLocaleString("ko-KR")}</b>건</span>
+                  <span aria-hidden="true">·</span>
+                  <span>입장 <b>{rowCheckedIn.toLocaleString("ko-KR")}</b>건</span>
                 </div>
               </button>
             );
@@ -224,10 +209,10 @@ export function SessionsView() {
                   <Icons.calendar size={13} /> {fmtDateTimeShort(new Date(session.startsAt))}
                 </span>
                 <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
-                  <Icons.mapPin size={13} /> {session.location}
+                  <Icons.mapPin size={13} /> {SEMINAR_LOCATION}
                 </span>
                 <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
-                  <Icons.users size={13} /> 정원 {ledger.capacity}명 · {scope}
+                  <Icons.users size={13} /> {scope}
                 </span>
               </div>
               <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 6 }}>
@@ -264,12 +249,6 @@ export function SessionsView() {
                 )}
               </div>
             </div>
-            <div style={{ textAlign: "center", padding: "0 8px" }}>
-              <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, color: occupancy >= 90 ? "var(--status-danger)" : "var(--violet-800)", fontFeatureSettings: '"tnum"', whiteSpace: "nowrap" }}>
-                {occupancy}%
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--text-faint)" }}>예약률</div>
-            </div>
             {/* POC 위치(우측)에 종료·삭제를 되살리되, 두 조작 모두 계약 연결 전이라 비활성이다. */}
             <div style={{ display: "flex", gap: 14 }}>
               <PendingLink icon={<Icons.check size={12} />} label="설명회 종료" tone="var(--text-muted)" />
@@ -279,13 +258,12 @@ export function SessionsView() {
 
           {/*
             현황 스탯 (명세 §6.3) — POC 의 총 예약·입장 완료·미체크·취소.
-            전부 **가족 예약 건수**다(좌석 아님). 목록 항목의 operationsSummary 실집계(노쇼 제외)다.
-            총 예약 = active / 정원, 입장 완료 = checkedIn, 미체크 = unchecked, 취소 = cancelled.
+            전부 **가족 예약 건수**다. 목록 항목의 operationsSummary 실집계(노쇼 제외)다.
           */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            <StatCard label="총 예약" value={summary.activeCount} suffix={`/ ${ledger.capacity}`} tone="brand" icon={<Icons.ticket size={15} />} delay={0} />
-            <StatCard label="입장 완료" value={summary.checkedInCount} suffix="명" tone="success" icon={<Icons.check size={15} />} delay={50} />
-            <StatCard label="미체크" value={summary.uncheckedCount} suffix="명" tone="accent" icon={<Icons.clock size={15} />} delay={100} />
+            <StatCard label="총 예약" value={summary.activeCount} suffix="건" tone="brand" icon={<Icons.ticket size={15} />} delay={0} />
+            <StatCard label="입장 완료" value={summary.checkedInCount} suffix="건" tone="success" icon={<Icons.check size={15} />} delay={50} />
+            <StatCard label="미체크" value={summary.uncheckedCount} suffix="건" tone="accent" icon={<Icons.clock size={15} />} delay={100} />
             <StatCard label="취소" value={summary.cancelledCount} suffix="건" tone="danger" icon={<Icons.x size={15} />} delay={150} />
           </div>
 
@@ -297,11 +275,11 @@ export function SessionsView() {
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
                 대상: 입장 완료{" "}
-                <b style={{ color: "var(--text-strong)", fontFeatureSettings: '"tnum"' }}>{summary.checkedInCount}명</b>
+                <b style={{ color: "var(--text-strong)", fontFeatureSettings: '"tnum"' }}>{summary.checkedInCount}건</b>
               </span>
             </div>
             <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 4, marginBottom: 10 }}>
-              학부모님이 문자 속 URL 로 들어가 <b>별점 · 후기 · 사진</b>을 남깁니다. 문구 편집·발송은 <b>{PENDING}</b>이라 아래는 미리보기(예시)예요.
+              학부모님이 문자 속 URL 로 들어가 <b>별점 · 후기</b>를 남깁니다. 문구 편집·발송은 <b>{PENDING}</b>이라 아래는 미리보기(예시)예요.
             </div>
             <textarea
               value={SURVEY_SMS_PREVIEW}
@@ -375,7 +353,6 @@ export function SessionsView() {
                     <span>학부모HP</span>
                     <span>별점</span>
                     <span>후기</span>
-                    <span>사진첨부</span>
                   </div>
                   {survey.items.map((response, i) => {
                     const p = response.participant;
@@ -402,17 +379,6 @@ export function SessionsView() {
                         <span title={response.comment ?? ""} style={{ color: response.comment !== null ? "var(--text-body)" : "var(--text-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: longComment ? "help" : "default" }}>
                           {response.comment ?? "—"}
                         </span>
-                        {/* 계약이 사진 URL 을 주지 않는다 — 파일명만 사실이라 링크를 걸지 않고 텍스트로만 둔다. */}
-                        <span style={{ color: response.photoAttached ? "var(--text-body)" : "var(--text-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {response.photoAttached ? (
-                            <span title={response.photoName ?? "사진 있음"} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
-                              <Icons.image size={11} style={{ color: "var(--violet-800)", flexShrink: 0 }} />
-                              {response.photoName ?? "사진 있음"}
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </span>
                       </div>
                     );
                   })}
@@ -428,6 +394,14 @@ export function SessionsView() {
             )}
           </Card>
         </div>
+      </div>
+
+      {/*
+        공개 진입면(`/`) 포스터 관리 — 선택 회차에 매이지 않는 **전역** 설정이라, 회차별 대시보드
+        아래 전체 폭 영역에 둔다(예전 허브에 있던 패널을 여기로 옮겼다). 회차 카드가 아니다.
+      */}
+      <div style={{ marginTop: 28, paddingTop: 24, borderTop: "1px solid var(--border-hairline)", animation: "ds-fade-up var(--dur-slow) var(--ease-out) 120ms both" }}>
+        <PosterAdminPanel />
       </div>
     </div>
   );

@@ -1,0 +1,10 @@
+{
+	# DNS still points at the previous endpoint during bootstrap, so serve HTTP
+	# only until the WireGuard and upstream checks have passed.
+	auto_https off
+}
+
+http://survey.example.kr {
+	encode zstd gzip
+	reverse_proxy 10.10.10.165:3001
+}

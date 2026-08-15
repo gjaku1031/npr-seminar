@@ -17,7 +17,10 @@ grep -Fq 'NPR_DEPLOY_LOCK_HELD=true "${current_link}/ops/pve-release/google-shee
 grep -Fq 'google-sheets-control.sh" \' "${deploy}"
 grep -Fq 'enable "${mapping_id}" "${spreadsheet_id}"' "${deploy}"
 grep -Fq 'deferred marker does not match the current release' "${deploy}"
-grep -Fq 'configure_and_verify_tailscale_funnel' "${deploy}"
+grep -Fq 'systemctl stop "${caddy_upstream_service}" "${caddy_upstream_socket}"' "${deploy}"
+grep -Fq "\$4 ~ /:(3000|3001)\$/" "${deploy}"
+grep -Fq 'start_and_verify_caddy_upstream' "${deploy}"
+grep -Fq 'verify_public_https' "${deploy}"
 grep -Fq 'recover_failed_deferred_activation "${old_target}"' "${deploy}"
 
 help=$(bash "${deploy}" --help)
