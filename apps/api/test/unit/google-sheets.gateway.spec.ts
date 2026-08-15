@@ -21,7 +21,7 @@ import {
 } from "../../src/modules/google-sheets/google-sheets-v4.client.js";
 
 const spreadsheetId = "EXAMPLE_SHEET_ID_xxxxxxxxxxxxxxxxxxxxxxxxxxx";
-const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 17 }, () => ""), ""];
+const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 16 }, () => ""), ""];
 const summaryHeader = [...FAMILY_SUMMARY_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), FAMILY_SUMMARY_TECHNICAL_MARKER_HEADER];
 const logHeader = [...BOOKING_LOG_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), BOOKING_LOG_TECHNICAL_MARKER_HEADER];
 
@@ -162,14 +162,16 @@ function plan(overrides: Partial<Pick<SheetDispatchPlan, "row" | "family" | "eve
     },
     valueInputMode: "RAW",
     hiddenMarkerColumn: "AD",
-    studentKeyColumn: "B",
+    sourceStudentNoDisplayColumn: "B",
+    rowIdentity: "FAMILY_BOOKING_STUDENT_ID_ONLY",
     postVerify: true,
     row: {
       bookingCreatedAt: "2026-07-18 12:00:00",
       sourceStudentNo: "S-1",
       campus: "A",
       studentName: "'=FORMULA",
-      className: "중3A",
+      mathClassNames: "중3A",
+      scienceClassNames: "과고3생2[화2], 과2내신[토10]",
       schoolName: "풍성중",
       grade: "3",
       primaryTeacher: "담임",
@@ -251,8 +253,8 @@ describe("Google Sheets v4 projection gateway", () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
     await expect(gateway.apply(plan())).resolves.toEqual({ kind: "SUCCEEDED" });
-    expect(client.rows.get("예약명단")?.[1]?.slice(0, 12)).toEqual([
-      "2026-07-18 12:00:00", "S-1", "A", "'=FORMULA", "중3A", "풍성중", "3", "담임",
+    expect(client.rows.get("예약명단")?.[1]?.slice(0, 13)).toEqual([
+      "2026-07-18 12:00:00", "S-1", "A", "'=FORMULA", "중3A", "과고3생2[화2], 과2내신[토10]", "풍성중", "3", "담임",
       "010-0000-0001", "010-0000-0002", "입장 완료 (모/부) · 2명", "입장 완료 2026-07-18 12:10:00",
     ]);
     expect(client.rows.get("예약집계")?.[1]?.slice(0, 13)).toEqual([
@@ -290,10 +292,10 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.rows.get("예약집계")?.[1]?.[25]).toBe("family-booking-1");
     expect(client.rows.get("로그")?.[1]?.slice(0, 2)).toEqual(["2026-07-18 12:10:00", "입장 완료"]);
     expect(client.rows.get("로그")?.[1]?.[25]).toBe("event-1");
-    expect(client.writes).toContain("예약명단!A2:L2");
+    expect(client.writes).toContain("예약명단!A2:M2");
     expect(client.writes).toContain("예약집계!A2:M2");
     expect(client.writes).toContain("로그!A2:M2");
-    expect(client.writes).not.toContain("예약명단!A7:L7");
+    expect(client.writes).not.toContain("예약명단!A7:M7");
   });
 
   it("repairs a matching orphan event marker into the first empty row", async () => {
@@ -324,6 +326,32 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.rows.get("예약집계")?.filter((row) => row[25] === "family-booking-1")).toHaveLength(1);
     expect(client.rows.get("예약집계")?.[1]?.slice(5, 9)).toEqual(["1", "2", "1", "2"]);
     expect(client.rows.get("로그")?.filter((row) => row[25] === "event-1")).toHaveLength(1);
+  });
+
+  it("never overwrites another booking row that has the same source student number", async () => {
+    const client = new FakeSheetsClient();
+    const gateway = await prepared(client);
+    await expect(gateway.apply(plan())).resolves.toEqual({ kind: "SUCCEEDED" });
+    const anotherSessionBooking = plan({
+      row: {
+        ...plan().row,
+        bookingCreatedAt: "2026-07-19 09:00:00",
+        studentName: "같은 학생의 다른 회차",
+        marker: "student-link-other-session",
+      },
+      family: { ...plan().family, familyBookingId: "family-booking-other-session", marker: "family-booking-other-session" },
+      event: { ...plan().event, familyBookingId: "family-booking-other-session", marker: "event-other-session" },
+    });
+
+    await expect(gateway.apply(anotherSessionBooking)).resolves.toEqual({ kind: "SUCCEEDED" });
+
+    const reservationRows = client.rows.get("예약명단")?.filter((row) => row[1] === "S-1") ?? [];
+    expect(reservationRows).toHaveLength(2);
+    expect(reservationRows.map((row) => row[29])).toEqual([
+      "student-link-1",
+      "student-link-other-session",
+    ]);
+    expect(reservationRows.map((row) => row[3])).toEqual(["'=FORMULA", "같은 학생의 다른 회차"]);
   });
 
   it("updates the same family row and appends a new event marker", async () => {

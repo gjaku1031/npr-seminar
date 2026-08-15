@@ -9,20 +9,24 @@ The contract defines:
 
 - Redis-backed ADMIN and SCANNER project sessions with same-origin CSRF
   protection.
-- Contact-bound public X-Booking-Proof authorization, family-level booking
-  seats, and exactly one family QR lifecycle.
-- Seminar/session capacity, student assignment resolution, three-branch sync,
+- Contact-bound public X-Booking-Proof authorization, family-level attendance
+  parties, and exactly one family QR lifecycle.
+- Unlimited seminar sessions, student assignment resolution, three-branch sync,
   scanner pairing/shift locking/check-in, and append-only audit histories.
 - Explicit session scope: `ALL` has `branch: null` and accepts every branch;
   `BRANCH` requires one branch and matching students/scanner devices. The current
-  seed session is `ALL` with capacity 800.
+  seed session is `ALL`, has no attendance ceiling or rate contract, and uses
+  `서울시 교통회관 (올림픽로 319)` as its venue.
 - Exact six-character scanner pairing codes, atomic unused-code cancellation,
   administrator and self-unpair hard deletion with check-in preservation,
   revocation preservation, re-pair lifecycle, and nullable battery telemetry
   from scanner heartbeats.
 - A booked-only ADMIN session roster with an unpaginated filtered XLSX export,
   family-level operations/statistics summaries, enrolled-student unit rows, and
-  explicit guest-only booking count semantics.
+  explicit guest-only booking count semantics. Monitoring uses three distinct
+  absolute counts: filtered student rows (`studentCount`), distinct active
+  family bookings (`familyBookingCount`), and actual parent attendees
+  (`attendeeCount`, 모/부 = 2) without multiplying siblings.
 - SMS OTP challenge/verification plus ADMIN template management, recipient
   snapshot preview, idempotent group/survey enqueue, and safe delivery history.
   Booking proofs are fresh 256-bit bearer secrets returned once; PostgreSQL

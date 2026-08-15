@@ -62,7 +62,7 @@ interface ProjectionFetchState {
 const reservationSheet: SheetDefinition = { sheetId: 1777564107, title: "예약명단", columnCount: 30 };
 const summarySheet: SheetDefinition = { sheetId: 202607180, title: "예약집계", columnCount: 26 };
 const logSheet: SheetDefinition = { sheetId: 1415280656, title: "로그", columnCount: 26 };
-const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 17 }, () => ""), ""];
+const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 16 }, () => ""), ""];
 const summaryHeader = [...FAMILY_SUMMARY_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), FAMILY_SUMMARY_TECHNICAL_MARKER_HEADER];
 const logHeader = [...BOOKING_LOG_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), BOOKING_LOG_TECHNICAL_MARKER_HEADER];
 

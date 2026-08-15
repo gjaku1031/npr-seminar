@@ -9,14 +9,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  archiveSmsTemplate,
   createSmsTemplate,
   defaultErrorMessage,
   isAborted,
   isApiError,
-  isLastActiveTemplate,
   listSmsTemplates,
-  SMS_LAST_ACTIVE_TEMPLATE_REQUIRED_CODE,
+  removeSmsTemplate,
+  SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE,
+  SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE,
   SMS_TEMPLATE_KEY_CONFLICT_CODE,
   SMS_TEMPLATE_VERSION_CONFLICT_CODE,
   smsContentErrorMessage,
@@ -24,26 +24,20 @@ import {
   useKeyedOperationKeys,
 } from "@/shared/api";
 import type { SmsTemplate } from "@/shared/api";
-
-/** 이 화면이 만드는 템플릿의 용도는 관리자 그룹 발송 하나뿐이다 (계약 SmsPurpose). */
-const TEMPLATE_PURPOSE = "ADMIN_GROUP" as const;
-
-/** 계약 key 패턴 `^[A-Z0-9_]{3,80}$` — 이름과 달리 사람이 고치는 값이 아니라 생성 시 한 번 짓는다. */
-export function newTemplateKey(): string {
-  const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase();
-  return `GROUP_${suffix}`;
-}
+import { newTemplateKey, type EditableSmsPurpose } from "@/entities/sms";
 
 function templateErrorMessage(error: unknown): string {
   if (isApiError(error)) {
     switch (error.code) {
       case SMS_TEMPLATE_VERSION_CONFLICT_CODE:
         return "다른 곳에서 이 템플릿이 먼저 바뀌었어요. 새로고침한 뒤 다시 저장해 주세요.";
-      // 서버도 마지막 활성 템플릿을 지킨다 — 화면 판정이 목록보다 낡았을 때 여기로 온다.
-      case SMS_LAST_ACTIVE_TEMPLATE_REQUIRED_CODE:
-        return "마지막 남은 템플릿이라 삭제할 수 없어요. 새 템플릿을 먼저 만들어 주세요.";
       case SMS_TEMPLATE_KEY_CONFLICT_CODE:
         return "같은 키의 템플릿이 이미 있어요. 다시 시도해 주세요.";
+      // 현재 기본 템플릿은 다른 템플릿을 기본으로 지정한 뒤에야 보관할 수 있다.
+      case SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE:
+        return "기본 템플릿이라 바로 삭제할 수 없어요. 다른 템플릿을 먼저 기본으로 지정해 주세요.";
+      case SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE:
+        return "보관된 템플릿은 기본으로 지정할 수 없어요. 먼저 활성 상태로 되돌려 주세요.";
       default:
         break;
     }
@@ -60,9 +54,14 @@ export interface SmsTemplatesState {
   error: string | null;
   busy: boolean;
   reload: () => void;
-  create: (input: { name: string; body: string }) => Promise<SmsTemplate | null>;
-  save: (templateId: string, input: { name: string; body: string }) => Promise<SmsTemplate | null>;
+  create: (input: { name: string; body: string; purpose: EditableSmsPurpose }) => Promise<SmsTemplate | null>;
+  save: (
+    templateId: string,
+    input: { name: string; body: string; purpose: EditableSmsPurpose },
+  ) => Promise<SmsTemplate | null>;
   archive: (templateId: string) => Promise<boolean>;
+  /** 같은 용도의 기본 템플릿을 이 템플릿으로 옮긴다 — 성공하면 목록을 다시 읽는다. */
+  setDefault: (templateId: string) => Promise<boolean>;
   /** 조작 실패 문구 — 성공하면 null 로 지운다. */
   mutationError: string | null;
   clearMutationError: () => void;
@@ -113,8 +112,13 @@ export function useSmsTemplates(): SmsTemplatesState {
     });
   }, []);
 
+  /** 하드 삭제된 행을 목록에서 뺀다 — 서버가 행을 없앤 뒤에만 부른다. */
+  const removeRow = useCallback((templateId: string) => {
+    setTemplates((previous) => previous.filter((item) => item.templateId !== templateId));
+  }, []);
+
   const create = useCallback(
-    async (input: { name: string; body: string }): Promise<SmsTemplate | null> => {
+    async (input: { name: string; body: string; purpose: EditableSmsPurpose }): Promise<SmsTemplate | null> => {
       const lookup = keys.keyFor("create");
       if (!lookup.ok) {
         setMutationError("확인되지 않은 요청이 남아 있어요. 새로고침한 뒤 다시 시도해 주세요.");
@@ -124,7 +128,8 @@ export function useSmsTemplates(): SmsTemplatesState {
       setBusy(true);
       try {
         const created = await createSmsTemplate(
-          { key: newTemplateKey(), name: input.name, purpose: TEMPLATE_PURPOSE, body: input.body },
+          // key 는 용도 접두어를 담아 생성 시 한 번 짓는다 — 이름과 달리 사람이 고치는 값이 아니다.
+          { key: newTemplateKey(input.purpose), name: input.name, purpose: input.purpose, body: input.body },
           { idempotencyKey: lookup.key },
         );
         keys.settle("create");
@@ -143,7 +148,10 @@ export function useSmsTemplates(): SmsTemplatesState {
   );
 
   const save = useCallback(
-    async (templateId: string, input: { name: string; body: string }): Promise<SmsTemplate | null> => {
+    async (
+      templateId: string,
+      input: { name: string; body: string; purpose: EditableSmsPurpose },
+    ): Promise<SmsTemplate | null> => {
       const current = templates.find((item) => item.templateId === templateId);
       if (current === undefined) {
         setMutationError("템플릿을 찾을 수 없어요. 새로고침해 주세요.");
@@ -158,9 +166,10 @@ export function useSmsTemplates(): SmsTemplatesState {
 
       setBusy(true);
       try {
+        // 이름·본문·용도를 함께 보낸다 — 서버 응답(특히 새 version·purpose)이 진실이다.
         const saved = await updateSmsTemplate(
           templateId,
-          { name: input.name, body: input.body, version: current.version },
+          { name: input.name, body: input.body, purpose: input.purpose, version: current.version },
           { idempotencyKey: lookup.key },
         );
         keys.settle(`save:${templateId}`);
@@ -186,12 +195,8 @@ export function useSmsTemplates(): SmsTemplatesState {
         return false;
       }
 
-      // 명세 §5.1 — 마지막 활성 템플릿은 남긴다. 서버에 물어보기 전에 막고 이유를 말한다.
-      if (isLastActiveTemplate(templates, templateId)) {
-        setMutationError("마지막 남은 템플릿이라 삭제할 수 없어요. 새 템플릿을 먼저 만들어 주세요.");
-        return false;
-      }
-
+      // 마지막 활성 템플릿을 전역으로 막지 않는다 — 활성 기본은 용도(purpose)별로 하나 유지되고,
+      // 그 보호는 서버가(그리고 현재 기본은 SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED 로) 담당한다.
       const lookup = keys.keyFor(`archive:${templateId}`);
       if (!lookup.ok) {
         setMutationError("확인되지 않은 요청이 남아 있어요. 새로고침한 뒤 다시 시도해 주세요.");
@@ -200,11 +205,19 @@ export function useSmsTemplates(): SmsTemplatesState {
 
       setBusy(true);
       try {
-        const archived = await archiveSmsTemplate(templateId, current.version, {
+        const result = await removeSmsTemplate(templateId, current.version, {
           idempotencyKey: lookup.key,
         });
         keys.settle(`archive:${templateId}`);
-        upsert(archived);
+        // 서버 결과를 그대로 반영한다: 하드 삭제면 행을 빼고, 보관이면 내려온 inactive 행으로 교체한다
+        // (active 목록에서 저절로 빠진다). 응답 모양이 어긋나면 지어내지 않고 목록을 다시 읽는다.
+        if (result.disposition === "DELETED") {
+          removeRow(templateId);
+        } else if (result.disposition === "ARCHIVED" && result.archivedTemplate !== null) {
+          upsert(result.archivedTemplate);
+        } else {
+          reload();
+        }
         setMutationError(null);
         return true;
       } catch (caught) {
@@ -215,7 +228,48 @@ export function useSmsTemplates(): SmsTemplatesState {
         setBusy(false);
       }
     },
-    [keys, templates, upsert],
+    [keys, templates, upsert, removeRow, reload],
+  );
+
+  const setDefault = useCallback(
+    async (templateId: string): Promise<boolean> => {
+      const current = templates.find((item) => item.templateId === templateId);
+      if (current === undefined) {
+        setMutationError("템플릿을 찾을 수 없어요. 새로고침해 주세요.");
+        return false;
+      }
+
+      // 이미 기본이면 왕복하지 않는다 — 서버 상태를 바꿀 게 없다.
+      if (current.isDefault) return true;
+
+      const lookup = keys.keyFor(`default:${templateId}`);
+      if (!lookup.ok) {
+        setMutationError("확인되지 않은 요청이 남아 있어요. 새로고침한 뒤 다시 시도해 주세요.");
+        return false;
+      }
+
+      setBusy(true);
+      try {
+        await updateSmsTemplate(
+          templateId,
+          { isDefault: true, version: current.version },
+          { idempotencyKey: lookup.key },
+        );
+        keys.settle(`default:${templateId}`);
+        setMutationError(null);
+        // 서버가 같은 용도의 이전 기본을 동시에 내리고 version 도 올린다 — 응답 한 행만 반영하면
+        // 이전 기본이 stale 로 남는다. 반드시 목록을 다시 읽어 진실을 통째로 갱신한다.
+        reload();
+        return true;
+      } catch (caught) {
+        keys.settle(`default:${templateId}`, caught);
+        setMutationError(templateErrorMessage(caught));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [keys, templates, reload],
   );
 
   return {
@@ -228,6 +282,7 @@ export function useSmsTemplates(): SmsTemplatesState {
     create,
     save,
     archive,
+    setDefault,
     mutationError,
     clearMutationError,
   };

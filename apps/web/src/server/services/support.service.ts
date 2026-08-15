@@ -169,7 +169,6 @@ export async function submitMobileSurvey(input: {
   sessionId: string;
   rating: SurveyDraft["rating"];
   comment: string;
-  photo: boolean;
   reservationId?: string | null;
 }): Promise<SurveyResponse> {
   const base = input.reservationId
@@ -185,8 +184,6 @@ export async function submitMobileSurvey(input: {
     phone: base?.phone ?? "",
     rating: input.rating,
     comment: input.comment,
-    photo: input.photo,
-    photoName: input.photo ? `현장사진_${String(Date.now()).slice(-4)}.jpg` : undefined,
   });
 }
 

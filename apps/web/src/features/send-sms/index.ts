@@ -7,7 +7,7 @@
 export { useSmsGateway } from "./model/useSmsGateway";
 export type { SmsGatewayState } from "./model/useSmsGateway";
 
-export { newTemplateKey, useSmsTemplates } from "./model/useSmsTemplates";
+export { useSmsTemplates } from "./model/useSmsTemplates";
 export type { SmsTemplatesState } from "./model/useSmsTemplates";
 
 export { useSmsSendFlow } from "./model/useSmsSendFlow";

@@ -2,13 +2,14 @@
 
 /**
  * 새 설명회 생성 다이얼로그 (명세 §6.2) — 와이어프레임 SessionsScreen 생성 모달 이식.
- * 명*·날짜*·회차·정원·장소* + 설명 + 참석 인원 토글 + 페이지 꾸미기(배너 3종·안내문).
+ * 명*·날짜*·회차·장소* + 설명 + 참석 인원 토글 + 페이지 꾸미기(배너 3종·안내문).
  * ⚠️ 시작 시각 입력 없음 — 10:00 고정 저장 (명세 §6.2 공백 그대로).
  */
 
 import { Fragment, useActionState, useState, useTransition } from "react";
 import type { BannerTheme } from "@/entities/session";
 import { idleState } from "@/shared/lib/action";
+import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 import { Button, Dialog, Icons, Input, Switch } from "@/shared/ui";
 import { createSessionAction, type CreateSessionState } from "../api/actions";
 
@@ -18,7 +19,7 @@ const BANNERS: Array<[BannerTheme, string, string]> = [
   ["slate", "딥 포레스트", "var(--violet-950)"],
 ];
 
-const EMPTY = { title: "", date: "", round: "1회차", place: "", capacity: "", desc: "", attendField: false, notice: "", banner: "violet" as BannerTheme };
+const EMPTY = { title: "", date: "", round: "1회차", place: SEMINAR_LOCATION, desc: "", attendField: false, notice: "", banner: "violet" as BannerTheme };
 
 export function CreateSessionDialog({
   open,
@@ -51,7 +52,6 @@ export function CreateSessionDialog({
     fd.set("date", form.date);
     fd.set("round", String(parseInt(form.round, 10) || 1));
     fd.set("place", form.place);
-    fd.set("capacity", form.capacity || "50");
     fd.set("desc", form.desc);
     if (form.attendField) fd.set("attendField", "on");
     fd.set("banner", form.banner);
@@ -80,10 +80,7 @@ export function CreateSessionDialog({
           <Input label="날짜" type="date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
           <Input label="회차" placeholder="1회차" value={form.round} onChange={(v) => setForm({ ...form, round: v })} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(0,0.9fr)", gap: 12 }}>
-          <Input label="장소" placeholder="A 교통회관 2층 대강당" value={form.place} onChange={(v) => setForm({ ...form, place: v })} />
-          <Input label="정원" placeholder="800" value={form.capacity} onChange={(v) => setForm({ ...form, capacity: v })} />
-        </div>
+        <Input label="장소" placeholder={SEMINAR_LOCATION} value={form.place} onChange={(v) => setForm({ ...form, place: v })} />
         <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-strong)" }}>
             설명 <span style={{ color: "var(--text-faint)", fontWeight: 500 }}>(선택)</span>

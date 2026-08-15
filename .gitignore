@@ -13,6 +13,8 @@ build/
 target/
 .gradle/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 
 # env — 예시 파일만 커밋한다
 .env*

@@ -37,10 +37,10 @@ describe("booking access exchange", () => {
     }))).not.toEqual([]);
 
     const auditCreate = vi.fn().mockResolvedValue({});
-    const increment = vi.fn().mockResolvedValue(1);
+    const evaluate = vi.fn().mockResolvedValue(1);
     const redis = {
       prefix: "npr:",
-      client: { incr: increment, expire: vi.fn().mockResolvedValue(true) },
+      client: { eval: evaluate },
     };
     const service = new BookingAccessService(
       { authAudit: { create: auditCreate } } as never,
@@ -57,8 +57,8 @@ describe("booking access exchange", () => {
 
     await expect(service.exchange(request, body.accessToken, body.contact, "malformed-key"))
       .rejects.toMatchObject({ status: 401, code: "BOOKING_ACCESS_INVALID" });
-    expect(increment).toHaveBeenCalledOnce();
-    expect(increment.mock.calls[0]?.[0]).toContain("booking-access:ip:");
+    expect(evaluate).toHaveBeenCalledOnce();
+    expect(evaluate.mock.calls[0]?.[1].keys[0]).toContain("booking-access:ip:");
     expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ resultCode: "INVALID" }),
     }));
@@ -68,7 +68,7 @@ describe("booking access exchange", () => {
     const auditCreate = vi.fn().mockResolvedValue({});
     const redis = {
       prefix: "npr:",
-      client: { incr: vi.fn().mockResolvedValue(31), expire: vi.fn().mockResolvedValue(true) },
+      client: { eval: vi.fn().mockResolvedValue(31) },
     };
     const service = new BookingAccessService(
       { authAudit: { create: auditCreate } } as never,
@@ -113,7 +113,7 @@ describe("booking access exchange", () => {
     };
     const redis = {
       prefix: "npr:",
-      client: { incr: vi.fn().mockResolvedValue(1), expire: vi.fn().mockResolvedValue(true) },
+      client: { eval: vi.fn().mockResolvedValue(1) },
     };
     let replayedIdentity: { familyBookingId: string } | null = null;
     const idempotency = {
@@ -176,7 +176,7 @@ describe("booking access exchange", () => {
     expect(create).toHaveBeenCalledTimes(2);
     expect(idempotency.execute).toHaveBeenCalledTimes(1);
     expect(auditCreate).toHaveBeenCalledTimes(1);
-    expect(redis.client.incr).toHaveBeenCalledTimes(6);
+    expect(redis.client.eval).toHaveBeenCalledTimes(6);
     const durableRequest = idempotency.execute.mock.calls[0]![2];
     expect(durableRequest).toEqual({
       accessDigest: crypto.digest(rawAccessToken).toString("base64url"),
@@ -185,4 +185,187 @@ describe("booking access exchange", () => {
     expect(JSON.stringify(durableRequest)).not.toContain(rawAccessToken);
     expect(JSON.stringify(durableRequest)).not.toContain("01000007147");
   });
+
+  it("establishes a contact-owned read/QR session without persisting the full contact", async () => {
+    const crypto = new BookingCryptoService();
+    const phone = new PhoneProtector(environment());
+    const protectedContact = phone.protect("01000007147");
+    const familyBookingPublicId = randomUUID();
+    const managementPublicId = randomUUID();
+    const credential = {
+      id: 25n,
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 60_000),
+      familyBooking: {
+        id: 27n,
+        publicId: familyBookingPublicId,
+        contactDigest: protectedContact.digest,
+      },
+    };
+    const authAuditCreate = vi.fn().mockResolvedValue({});
+    const prisma = {
+      bookingAccessCredential: { findFirst: vi.fn().mockResolvedValue(credential) },
+      bookingManagementSession: {
+        create: vi.fn().mockResolvedValue({ id: 29n, publicId: managementPublicId }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      authAudit: { create: authAuditCreate },
+    };
+    const redis = {
+      prefix: "npr:",
+      client: { eval: vi.fn().mockResolvedValue(1) },
+    };
+    const idempotency = {
+      replay: vi.fn().mockResolvedValue(null),
+      execute: vi.fn().mockImplementation(async (_scope, _key, _request, operation) => operation(prisma)),
+    };
+    const session = {
+      cookie: {},
+      regenerate: (callback: (error?: Error) => void) => callback(),
+      save: (callback: (error?: Error) => void) => callback(),
+    };
+    const request = {
+      ip: "127.0.0.1",
+      socket: { remoteAddress: "127.0.0.1" },
+      sessionID: "contact-owned-read-session",
+      session,
+    } as unknown as Request;
+    const service = new BookingAccessService(
+      prisma as never,
+      crypto,
+      phone,
+      redis as never,
+      idempotency as never,
+    );
+
+    const result = await service.establishContactReadSession(
+      request,
+      familyBookingPublicId,
+      "010-0000-7147",
+      "contact-read-key-123",
+    );
+
+    expect(result).toMatchObject({ familyBookingId: familyBookingPublicId });
+    expect(request.session).toMatchObject({
+      bookingManagementSessionId: managementPublicId,
+      bookingManagementExpiresAt: result.expiresAt.getTime(),
+      csrfToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+    });
+    expect(prisma.bookingAccessCredential.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        familyBooking: {
+          publicId: familyBookingPublicId,
+          status: { in: ["RESERVED", "CHECKED_IN"] },
+        },
+        status: "ACTIVE",
+      }),
+    }));
+    expect(idempotency.execute).toHaveBeenCalledWith(
+      "BOOKING_CONTACT_READ_SESSION",
+      "contact-read-key-123",
+      {
+        familyBookingId: familyBookingPublicId,
+        contactDigest: Buffer.from(protectedContact.digest).toString("base64url"),
+      },
+      expect.any(Function),
+    );
+    expect(authAuditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: "BOOKING_CONTACT_READ_SESSION",
+        resultCode: "SUCCEEDED",
+      }),
+    }));
+    expect(JSON.stringify(idempotency.execute.mock.calls)).not.toContain("01000007147");
+  });
+
+  it("returns one generic error for a missing booking or mismatched contact", async () => {
+    const crypto = new BookingCryptoService();
+    const phone = new PhoneProtector(environment());
+    const authAuditCreate = vi.fn().mockResolvedValue({});
+    const prisma = {
+      bookingAccessCredential: { findFirst: vi.fn().mockResolvedValue(null) },
+      authAudit: { create: authAuditCreate },
+    };
+    const redis = {
+      prefix: "npr:",
+      client: { eval: vi.fn().mockResolvedValue(1) },
+    };
+    const idempotency = { replay: vi.fn().mockResolvedValue(null) };
+    const request = {
+      ip: "127.0.0.1",
+      socket: { remoteAddress: "127.0.0.1" },
+      session: {},
+    } as unknown as Request;
+    const service = new BookingAccessService(
+      prisma as never,
+      crypto,
+      phone,
+      redis as never,
+      idempotency as never,
+    );
+
+    await expect(service.establishContactReadSession(
+      request,
+      randomUUID(),
+      "010-0000-7147",
+      "contact-read-invalid-123",
+    )).rejects.toMatchObject({ status: 401, code: "BOOKING_READ_SESSION_INVALID" });
+    expect(authAuditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: "BOOKING_CONTACT_READ_SESSION",
+        resultCode: "INVALID",
+      }),
+    }));
+  });
+
+  it.each(["NO_SHOW", "CANCELLED"])(
+    "returns the same generic read-session error for a %s booking",
+    async (bookingStatus) => {
+      const crypto = new BookingCryptoService();
+      const phone = new PhoneProtector(environment());
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const authAuditCreate = vi.fn().mockResolvedValue({});
+      const familyBookingPublicId = randomUUID();
+      const prisma = {
+        bookingAccessCredential: { findFirst },
+        authAudit: { create: authAuditCreate },
+      };
+      const redis = { prefix: "npr:", client: { eval: vi.fn().mockResolvedValue(1) } };
+      const idempotency = { replay: vi.fn().mockResolvedValue(null) };
+      const request = {
+        ip: "127.0.0.1",
+        socket: { remoteAddress: "127.0.0.1" },
+        session: {},
+      } as unknown as Request;
+      const service = new BookingAccessService(
+        prisma as never,
+        crypto,
+        phone,
+        redis as never,
+        idempotency as never,
+      );
+
+      await expect(service.establishContactReadSession(
+        request,
+        familyBookingPublicId,
+        "010-0000-7147",
+        `contact-read-${bookingStatus.toLowerCase()}-key`,
+      )).rejects.toMatchObject({
+        status: 401,
+        code: "BOOKING_READ_SESSION_INVALID",
+        message: "The booking or contact is invalid.",
+      });
+      expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          familyBooking: {
+            publicId: familyBookingPublicId,
+            status: { in: ["RESERVED", "CHECKED_IN"] },
+          },
+        }),
+      }));
+      expect(authAuditCreate).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ resultCode: "INVALID" }),
+      }));
+    },
+  );
 });

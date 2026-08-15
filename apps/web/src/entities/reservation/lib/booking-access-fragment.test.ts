@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseBookingAccessFragment } from "./booking-access-fragment";
+import { initBookingAccessFragment, parseBookingAccessFragment } from "./booking-access-fragment";
 
 // 정확히 43자 base64url.
 const VALID = "abcDEF012345678901234567890123456789012_-XY";
@@ -57,5 +57,49 @@ describe("parseBookingAccessFragment — 거절", () => {
 
   it("문자열이 아니면 null", () => {
     assert.equal(parseBookingAccessFragment(undefined as unknown as string), null);
+  });
+});
+
+describe("initBookingAccessFragment — 첫 mount 초기화 정리", () => {
+  // pathname+search 로만 정리되고 fragment 는 어디에도 옮기지 않는지 본다.
+  const at = (hash: string) => ({ hash, pathname: "/booking/access", search: "?ref=sms" });
+
+  it("유효 fragment → ready + 원문 토큰 캐시 + 정확히 pathname+search 로 정리", () => {
+    const init = initBookingAccessFragment(at(`#token=${VALID}`));
+    assert.equal(init.phase, "ready");
+    assert.equal(init.token, VALID);
+    assert.equal(init.cleanUrl, "/booking/access?ref=sms");
+  });
+
+  it("잘못된 fragment → missing + 토큰 없음 + 그래도 정리 요청(조각을 남기지 않는다)", () => {
+    for (const hash of ["#token=short", `#token=${VALID}extra`, "#garbage", "#token="]) {
+      const init = initBookingAccessFragment(at(hash));
+      assert.equal(init.phase, "missing");
+      assert.equal(init.token, null);
+      assert.equal(init.cleanUrl, "/booking/access?ref=sms");
+    }
+  });
+
+  it("확장·다중 파라미터 fragment → missing + 토큰 없음 + 그래도 정리 요청", () => {
+    for (const hash of [`#token=${VALID}&x=1`, `#token=${VALID}&token=${VALID}`, "#foo=bar&baz=qux"]) {
+      const init = initBookingAccessFragment(at(hash));
+      assert.equal(init.phase, "missing");
+      assert.equal(init.token, null);
+      assert.equal(init.cleanUrl, "/booking/access?ref=sms");
+    }
+  });
+
+  it("비어 있지 않은 hash 는 search 가 없어도 정확히 pathname 으로 정리한다", () => {
+    const init = initBookingAccessFragment({ hash: "#token=nope", pathname: "/booking/access", search: "" });
+    assert.equal(init.cleanUrl, "/booking/access");
+  });
+
+  it("빈 hash(''·'#')는 재작성하지 않는다 — cleanUrl null, phase missing", () => {
+    for (const hash of ["", "#"]) {
+      const init = initBookingAccessFragment(at(hash));
+      assert.equal(init.phase, "missing");
+      assert.equal(init.token, null);
+      assert.equal(init.cleanUrl, null);
+    }
   });
 });

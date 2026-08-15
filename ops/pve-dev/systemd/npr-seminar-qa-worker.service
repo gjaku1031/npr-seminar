@@ -1,0 +1,29 @@
+[Unit]
+Description=NPR Seminar QA isolated worker
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=ken
+Group=ken
+WorkingDirectory=/home/ken/develop/npr-seminar/apps/api
+EnvironmentFile=/etc/npr-seminar-qa/worker.env
+EnvironmentFile=-/etc/npr-seminar-qa/integrations-worker.env
+Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/test -f /home/ken/develop/npr-seminar/apps/api/dist/worker.js
+ExecStart=/usr/bin/node /home/ken/develop/npr-seminar/apps/api/dist/worker.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ken/develop/npr-seminar/apps/api
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -25,16 +25,6 @@ export class DuplicateReservationError extends DomainError {
   }
 }
 
-/**
- * ★ 서버 불변식 ② 정원 초과 (설계 §6.4 — 결정 S9) ★
- * 명세 §11의 두 번째 정책 공백. 모바일만 마감을 표시했으나 서버가 모든 경로를 차단한다.
- */
-export class CapacityExceededError extends DomainError {
-  constructor(message = "정원이 모두 찼습니다.") {
-    super("CAPACITY_EXCEEDED", message);
-  }
-}
-
 /** 조회 대상 없음 */
 export class NotFoundError extends DomainError {
   constructor(message = "대상을 찾을 수 없습니다.") {

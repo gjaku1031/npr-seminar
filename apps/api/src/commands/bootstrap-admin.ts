@@ -14,6 +14,12 @@ interface BootstrapAdminInput {
   readonly displayName: string;
   readonly password: string;
   readonly rotate: boolean;
+  /**
+   * Isolated, synthetic QA only.  The CLI enables this solely for the exact
+   * `admin` / `admin` tester credential in APP_ENV=staging; normal callers and
+   * every other credential continue to use the production password policy.
+   */
+  readonly allowInsecureQaCredential?: boolean;
 }
 
 export interface BootstrapAdminResult {
@@ -34,7 +40,11 @@ export async function bootstrapAdmin(prisma: PrismaService, input: BootstrapAdmi
   const username = input.username.normalize("NFKC").trim().toLowerCase();
   const displayName = input.displayName.normalize("NFKC").trim();
   validateIdentity(username, displayName);
-  validatePassword(input.password, username);
+  validatePassword(
+    input.password,
+    username,
+    input.allowInsecureQaCredential === true && process.env.APP_ENV === "staging",
+  );
   const passwordHash = await hash(input.password, {
     type: argon2id,
     memoryCost: 65_536,
@@ -75,7 +85,8 @@ function validateIdentity(username: string, displayName: string): void {
   if (displayName.length < 1 || displayName.length > 120) throw new Error("ADMIN_BOOTSTRAP_DISPLAY_NAME is invalid");
 }
 
-function validatePassword(password: string, username: string): void {
+function validatePassword(password: string, username: string, allowInsecureQaCredential: boolean): void {
+  if (allowInsecureQaCredential && username === "admin" && password === "admin") return;
   const strong = password.length >= 14 && password.length <= 512
     && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
   if (!strong || password.toLowerCase().includes(username)) throw new Error("The bootstrap password does not meet policy");
@@ -104,10 +115,12 @@ async function main(): Promise<void> {
   const username = process.env.ADMIN_BOOTSTRAP_USERNAME ?? "";
   const displayName = process.env.ADMIN_BOOTSTRAP_DISPLAY_NAME ?? "";
   const password = passwordFromEnvironment();
+  const allowInsecureQaCredential = process.env.APP_ENV === "staging"
+    && process.env.ADMIN_BOOTSTRAP_ALLOW_INSECURE_QA_CREDENTIAL === "true";
   const context = await NestFactory.createApplicationContext(BootstrapAdminModule, { logger: false });
   try {
     const result = await bootstrapAdmin(context.get(PrismaService), {
-      username, displayName, password, rotate: process.argv.includes("--rotate"),
+      username, displayName, password, rotate: process.argv.includes("--rotate"), allowInsecureQaCredential,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {

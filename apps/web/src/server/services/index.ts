@@ -77,7 +77,6 @@ export { currentUser, requireModuleAccess, assertModuleAccess } from "./auth.ser
 export {
   DomainError,
   DuplicateReservationError,
-  CapacityExceededError,
   NotFoundError,
   InvalidStateError,
   ForbiddenError,

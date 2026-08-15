@@ -1,8 +1,8 @@
 /**
  * 만족도 설문(SurveyResponse) 도메인 모델 — 명세 v4.0 §2 · §6.5 · §10.9.
  *
- * v4.0 개편: 별점(필수) + 후기(주관식) + 사진 첨부(목업)로 문항 개편(구 helpful/again 폐기).
- * 결과 테이블 9열(캠퍼스·단위명·학생명·반명·담임명·학부모HP·별점·후기·사진첨부)이
+ * v4.0 개편: 별점(필수) + 후기(주관식)로 문항 개편(구 helpful/again 폐기).
+ * 결과 테이블(캠퍼스·단위명·학생명·반명·담임명·학부모HP·별점·후기)이
  * 직접 쓰는 스냅샷 필드를 응답에 보관한다 (명세 §6.5).
  */
 
@@ -23,10 +23,6 @@ export interface SurveyResponse {
   rating: SurveyRating;
   /** 후기 (주관식, 선택) */
   comment: string;
-  /** 사진 첨부 여부 — 업로드는 목업 (명세 §12) */
-  photo: boolean;
-  /** 첨부 파일명 — 다운로드 링크 목업 (명세 §6.5) */
-  photoName?: string;
   createdAt: Date;
 }
 
@@ -40,8 +36,6 @@ export interface SurveyDraft {
   phone: string;
   rating: SurveyRating;
   comment: string;
-  photo: boolean;
-  photoName?: string;
 }
 
 /** 응답 요약 — 건수·평균 별점 (명세 §6.5 보조 표시) */

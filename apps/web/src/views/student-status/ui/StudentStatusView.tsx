@@ -100,7 +100,7 @@ const FILTER_TAG_STYLE = { height: 30, padding: "0 9px", fontSize: 12 } as const
 /* 두 줄 필터의 열 맞춤 상수 — 1행 검색폭 = 2행 왼쪽 여백이라야 `캠퍼스`·`단위` 라벨이
    같은 x 에서 시작하고, 라벨 폭이 같아야 그 뒤 버튼들도 같은 x 에서 시작한다. 라벨은
    flexShrink:0 + 고정폭이라 아무리 좁아져도 잘리지 않는다(각 줄은 스스로 가로 스크롤한다). */
-const FILTER_SEARCH_WIDTH = 220;
+const FILTER_SEARCH_WIDTH = 280;
 const FILTER_LABEL_WIDTH = 46;
 const FILTER_ROW_GAP = 12;
 
@@ -639,7 +639,9 @@ function FilterBar({
           options={[{ value: "", label: "담임 전체" }, ...teacherOptions.map((teacher) => ({ value: teacher, label: teacher }))]}
           value={filters.teacherName}
           onChange={(teacherName) => onChange({ teacherName })}
-          style={{ width: 132, flexShrink: 0 }}
+          // 넓어진 검색폭(280)으로 2행이 넓어져도 담임은 줄어들지 않는다 — 고정 최소폭 + 비축소.
+          // 잘림 대신 줄이 스스로 가로 스크롤하고(FILTER_ROW_STYLE), 메뉴는 portal 로 카드 밖에 뜬다.
+          style={{ width: 132, minWidth: 132, flexShrink: 0 }}
         />
       </div>
     </div>
@@ -1048,9 +1050,8 @@ function StudentRow({
 }
 
 /**
- * 예약 여부 칸 — 오직 예약 / 미예약 두 값만. 선택된 회차 기준 학생별 상태를 서버가 실어
- * 주면(reservationStatus) 그대로 접고, 없으면 미예약이다. 세부 상태·참석 학부모·로그·시각은
- * 이 칸에 절대 싣지 않는다(지시된 최종 규칙).
+ * 예약 여부 칸 — 선택 회차의 정식 hasReservation 을 예약/미예약 두 값으로 표시한다.
+ * 레거시 값은 어댑터가 롤링 배포 fallback 으로만 읽는다.
  */
 function ReservationCell({ student }: { student: AdminStudentReservation }) {
   const label = studentReservationLabel(student);

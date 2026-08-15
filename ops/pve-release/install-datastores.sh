@@ -133,7 +133,8 @@ if [[ ! -f ${runtime_env} ]]; then
     printf 'APP_ENV=production\n'
     printf 'PORT=4000\n'
     printf 'TRUST_PROXY=1\n'
-    printf 'PUBLIC_BASE_URL=https://npr-survey.example.ts.net\n'
+    printf 'PUBLIC_BASE_URL=https://survey.example.kr\n'
+    printf 'POSTER_STORAGE_DIR=/var/lib/npr-seminar/poster\n'
     printf 'SESSION_SECRET=%s\n' "${session_secret}"
     printf 'PHONE_ENCRYPTION_KEY=%s\n' "${phone_encryption_key}"
     printf 'PHONE_HMAC_KEY=%s\n' "${phone_hmac_key}"

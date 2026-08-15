@@ -49,10 +49,14 @@ and session.
   unit, and teacher snapshots.
 
 The active enrolled index is unique on `(session_id, student_id)` where the
-student ID is not null. Capacity and duplicate decisions are made while the
-relevant capacity rows are locked.
+student ID is not null. Duplicate decisions and serialized booking/check-in
+mutations are made while the relevant `seminar_sessions` rows are locked.
+After that session lock, the booking row is locked and its current session and
+status are re-read before any state transition is applied.
 
-Session moves lock source and target capacity rows in numeric order. The
+Session moves lock source and target `seminar_sessions` rows in numeric order.
+Check-in locks both its lookup-session snapshot and the scanner-selected
+session in the same order, then rejects a booking that moved after lookup. The
 composite participant/booking FK is `DEFERRABLE INITIALLY IMMEDIATE`; the move
 transaction explicitly defers it, updates the booking and every participant,
 then validates it at commit. QR credentials are unchanged during a move.

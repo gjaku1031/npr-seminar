@@ -7,6 +7,12 @@ const optionalBase64Key = z.string().refine((value) => {
   return decoded.length === 32 && decoded.toString("base64") === value;
 }, "must be canonical base64 encoding of exactly 32 bytes").optional();
 
+const optionalAbsoluteStoragePath = z.string().min(2).max(4_096).refine(
+  (value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\0")
+    && !value.split("/").includes(".."),
+  "must be a non-root absolute path without parent traversal",
+).optional();
+
 const safeRelativePath = z.string().regex(/^\/(?!\/)(?!.*(?:\.\.|[?#]))[^\s]*$/, "must be a safe absolute-path reference");
 const safeRelativeUrl = z.string().regex(/^\/(?!\/)(?!.*(?:\.\.|#))[^\s]*$/, "must be a safe same-origin URL reference");
 const wireField = z.string().min(1).max(100);
@@ -97,6 +103,7 @@ const environmentSchema = z.object({
   SCANNER_PAIRING_HMAC_KEY: optionalBase64Key,
   QR_ENCRYPTION_KEY: optionalBase64Key,
   PUBLIC_BASE_URL: z.string().url().optional(),
+  POSTER_STORAGE_DIR: optionalAbsoluteStoragePath,
   ALIGO_IDENTIFIER: z.string().min(1).optional(),
   ALIGO_KEY: z.string().min(1).optional(),
   SMS_ENABLED: z.enum(["true", "false"]).default("false"),
@@ -135,6 +142,7 @@ export interface AppEnvironment {
   readonly scannerPairingHmacKey?: string;
   readonly qrEncryptionKey?: string;
   readonly publicBaseUrl?: string;
+  readonly posterStorageDir?: string;
   readonly aligoIdentifier?: string;
   readonly aligoKey?: string;
   readonly smsEnabled: boolean;
@@ -166,13 +174,16 @@ export const environmentProvider: FactoryProvider<AppEnvironment> = {
       : [
         parsed.DATABASE_URL, parsed.REDIS_URL, parsed.SESSION_SECRET, parsed.PHONE_ENCRYPTION_KEY,
         parsed.PHONE_HMAC_KEY, parsed.OTP_PEPPER, parsed.SCANNER_PAIRING_HMAC_KEY,
-        parsed.QR_ENCRYPTION_KEY, parsed.PUBLIC_BASE_URL,
+        parsed.QR_ENCRYPTION_KEY, parsed.PUBLIC_BASE_URL, parsed.POSTER_STORAGE_DIR,
       ];
     if (parsed.APP_ENV === "production" && productionRequired.some((value) => value === undefined)) {
       throw new Error("Production configuration is incomplete");
     }
     if (parsed.PROCESS_ROLE === "api" && parsed.GOOGLE_APPLICATION_CREDENTIALS !== undefined) {
       throw new Error("The HTTP API process must not receive Google service-account credentials");
+    }
+    if (parsed.PROCESS_ROLE === "worker" && parsed.POSTER_STORAGE_DIR !== undefined) {
+      throw new Error("Poster storage is restricted to the HTTP API process");
     }
     if (parsed.PROCESS_ROLE === "api" && parsed.GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT === "true") {
       throw new Error("The Google Sheets public-writer development override is restricted to the isolated worker");
@@ -247,13 +258,16 @@ export const environmentProvider: FactoryProvider<AppEnvironment> = {
       ...(parsed.SCANNER_PAIRING_HMAC_KEY === undefined ? {} : { scannerPairingHmacKey: parsed.SCANNER_PAIRING_HMAC_KEY }),
       ...(parsed.QR_ENCRYPTION_KEY === undefined ? {} : { qrEncryptionKey: parsed.QR_ENCRYPTION_KEY }),
       ...(parsed.PUBLIC_BASE_URL === undefined ? {} : { publicBaseUrl: parsed.PUBLIC_BASE_URL }),
+      ...(parsed.POSTER_STORAGE_DIR === undefined ? {} : { posterStorageDir: parsed.POSTER_STORAGE_DIR }),
       ...(parsed.ALIGO_IDENTIFIER === undefined ? {} : { aligoIdentifier: parsed.ALIGO_IDENTIFIER }),
       ...(parsed.ALIGO_KEY === undefined ? {} : { aligoKey: parsed.ALIGO_KEY }),
       smsEnabled: parsed.SMS_ENABLED === "true",
       smsRecipientAllowlistEnabled: parsed.SMS_RECIPIENT_ALLOWLIST_ENABLED === "true",
       smsTestRecipients,
       smsSenders,
-      smsAligoTestMode: parsed.APP_ENV !== "production" || parsed.SMS_ALIGO_TEST_MODE === "true",
+      // Non-production environments default to provider test mode, but an isolated staging
+      // stack may explicitly opt into real delivery for end-to-end QA.
+      smsAligoTestMode: parsed.SMS_ALIGO_TEST_MODE === "true",
       googleSheetsEnabled: parsed.GOOGLE_SHEETS_ENABLED === "true",
       googleSheetsAllowPublicWriterInDevelopment:
         parsed.GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT === "true",

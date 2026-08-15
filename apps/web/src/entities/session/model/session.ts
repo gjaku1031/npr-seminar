@@ -27,7 +27,6 @@ export interface Session {
    */
   time: string;
   place: string;
-  capacity: number;
   desc: string;
   /** true면 예약 시 참석 학부모(모/부)·참석 인원 수집 (명세 §10.4) */
   attendField: boolean;
@@ -49,7 +48,6 @@ export interface SessionDraft {
   round: number;
   time: string;
   place: string;
-  capacity: number;
   desc: string;
   attendField: boolean;
   banner: BannerTheme;
@@ -62,7 +60,7 @@ export interface SessionStats {
   entered: number;
   noShow: number;
   cancelled: number;
-  /** 정원 대비 유효 예약(reserved+entered) */
+  /** 유효 예약(reserved+entered) */
   active: number;
 }
 
@@ -72,25 +70,9 @@ export const bannerThemeLabel: Record<BannerTheme, string> = {
   slate: "딥 포레스트",
 };
 
-/** 신규 설명회의 설문 문자 기본값 (명세 §6.4) */
+/** 신규 설명회의 설문 문자 기본값 (명세 §6.4) — 발신 머리표는 브랜드명([예시학원]). */
 export const DEFAULT_SURVEY_SMS =
-  "[npr] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기·사진 남기기: {설문링크}";
-
-/** 예약률 % — 현황 헤더 표기 (명세 §6.3) */
-export function reservationRate(activeCount: number, capacity: number): number {
-  if (capacity <= 0) return 0;
-  return Math.round((activeCount / capacity) * 100);
-}
-
-/** 잔여석 — 음수 방지 */
-export function remainingSeats(activeCount: number, capacity: number): number {
-  return Math.max(0, capacity - activeCount);
-}
-
-/** 마감 여부 — 정원 초과 차단의 판정 기준 (서버 불변식, 설계 §6.4) + 모바일 마감 배지 (명세 §10.2) */
-export function isFull(activeCount: number, capacity: number): boolean {
-  return activeCount >= capacity;
-}
+  "[예시학원] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기 남기기: {설문링크}";
 
 /** 설명회가 해당 캠퍼스 예약 화면에 노출되는지 — campus='전체' 포함 (명세 §10.1) */
 export function isVisibleAtCampus(session: Session, campus: string): boolean {

@@ -24,7 +24,7 @@ export interface CreatedTicket {
 export type CreateReservationState = ActionState<{ tickets: CreatedTicket[] }>;
 
 /**
- * 모바일 예약 생성 (명세 §10.3~10.6) — 서버 불변식(중복·정원)은 서비스가 일괄 적용 (설계 §6.4).
+ * 모바일 예약 생성 (명세 §10.3~10.6) — 서버 불변식(중복·예약 가능 기간)은 서비스가 일괄 적용 (설계 §6.4).
  * 재원생 신원은 서버가 다시 읽는다 — 클라이언트 입력 신뢰 금지.
  */
 

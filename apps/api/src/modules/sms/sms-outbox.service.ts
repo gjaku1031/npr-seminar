@@ -4,7 +4,7 @@ import { PhoneProtector } from "../../common/crypto/phone-protector.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { SmsMessagePolicy } from "./sms-message-policy.service.js";
 
-export type SmsSource = "OTP" | "BOOKING_CONFIRMED" | "BOOKING_CANCELLED" | "FIRST_CHECK_IN" | "ADMIN_GROUP" | "SURVEY";
+export type SmsSource = "OTP" | "BOOKING_CONFIRMED" | "BOOKING_UPDATED" | "BOOKING_CANCELLED" | "FIRST_CHECK_IN" | "ADMIN_GROUP" | "SURVEY";
 export type SmsBranch = "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
 
 export interface EnqueueSmsInput {

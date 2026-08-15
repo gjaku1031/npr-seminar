@@ -71,8 +71,8 @@ describe("panelSoundKind — 패널 상태별 소리(중복 억제는 훅의 몫
     assert.equal(panelSoundKind({ kind: "error", message: "네트워크 실패" }), "error");
   });
 
-  it("결과 미상 정원(capacity)은 경고음", () => {
-    assert.equal(panelSoundKind({ kind: "capacity" }), "warning");
+  it("결과 미상 처리 누적(backlog)은 경고음", () => {
+    assert.equal(panelSoundKind({ kind: "backlog" }), "warning");
   });
 
   it("성공 결과는 성공음, 거부 결과는 오류음", () => {

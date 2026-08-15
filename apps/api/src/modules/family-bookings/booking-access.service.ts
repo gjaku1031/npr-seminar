@@ -5,12 +5,14 @@ import { PhoneProtector } from "../../common/crypto/phone-protector.service.js";
 import { DomainError } from "../../common/errors/domain-error.js";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service.js";
 import { PrismaService } from "../../common/prisma/prisma.service.js";
+import { incrementFixedWindowRateLimit } from "../../common/redis/fixed-window-rate-limit.js";
 import { RedisService } from "../../common/redis/redis.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { BookingCryptoService } from "./booking-crypto.service.js";
 
 const MANAGEMENT_SESSION_TTL_MS = 30 * 60_000;
 const IDEMPOTENCY_SCOPE = "BOOKING_ACCESS_EXCHANGE";
+const CONTACT_READ_SESSION_IDEMPOTENCY_SCOPE = "BOOKING_CONTACT_READ_SESSION";
 
 interface BookingAccessIdentity {
   readonly familyBookingId: string;
@@ -124,6 +126,90 @@ export class BookingAccessService {
     return this.establishSession(request, credential);
   }
 
+  /**
+   * Establishes the same booking-scoped read/QR session as a personal access
+   * link, but only after an exact full-contact ownership check.  The public
+   * update, cancel, QR-rotation, and survey controllers intentionally do not
+   * accept this session as mutation authority; they continue to require a
+   * fresh BOOKING_MANAGE proof.
+   */
+  public async establishContactReadSession(
+    request: Request,
+    familyBookingPublicId: string,
+    contactValue: string,
+    idempotencyKey: string,
+  ) {
+    const bookingFingerprint = this.crypto.digest(familyBookingPublicId).toString("base64url").slice(0, 12);
+    const ipDigest = this.crypto.digest(request.ip ?? request.socket.remoteAddress ?? "unknown").toString("base64url");
+    try {
+      await Promise.all([
+        this.rateLimit(`${this.redis.prefix}booking-contact-read:ip:${ipDigest}`, 30),
+        this.rateLimit(`${this.redis.prefix}booking-contact-read:global`, 600, 60),
+      ]);
+    } catch (error) {
+      await this.auditContactRead("RATE_LIMITED", bookingFingerprint, ipDigest);
+      throw this.mapContactReadRateLimit(error);
+    }
+
+    let contact: ReturnType<PhoneProtector["protect"]>;
+    try {
+      contact = this.phoneProtector.protect(contactValue);
+    } catch {
+      await this.auditContactRead("INVALID", bookingFingerprint, ipDigest);
+      this.invalidContactReadSession();
+    }
+    const contactKey = Buffer.from(contact.digest).toString("base64url");
+    try {
+      await Promise.all([
+        this.rateLimit(`${this.redis.prefix}booking-contact-read:contact:${contactKey}`, 10),
+        this.rateLimit(`${this.redis.prefix}booking-contact-read:booking:${bookingFingerprint}`, 10),
+      ]);
+    } catch (error) {
+      await this.auditContactRead("RATE_LIMITED", bookingFingerprint, ipDigest);
+      throw this.mapContactReadRateLimit(error);
+    }
+
+    const durableRequest = {
+      familyBookingId: familyBookingPublicId,
+      contactDigest: contactKey,
+    };
+    const replay = await this.idempotency.replay<BookingAccessIdentity>(
+      CONTACT_READ_SESSION_IDEMPOTENCY_SCOPE,
+      idempotencyKey,
+      durableRequest,
+    );
+    if (replay !== null && replay.familyBookingId !== familyBookingPublicId) {
+      await this.auditContactRead("INVALID", bookingFingerprint, ipDigest);
+      this.invalidContactReadSession();
+    }
+
+    const credential = await this.findContactOwnedActiveCredential(
+      familyBookingPublicId,
+      contact.digest,
+      bookingFingerprint,
+      ipDigest,
+    );
+    if (replay === null) {
+      const identity = await this.idempotency.execute<BookingAccessIdentity>(
+        CONTACT_READ_SESSION_IDEMPOTENCY_SCOPE,
+        idempotencyKey,
+        durableRequest,
+        async (transaction) => {
+          await this.auditContactReadWith(
+            transaction,
+            "SUCCEEDED",
+            bookingFingerprint,
+            ipDigest,
+            familyBookingPublicId,
+          );
+          return { familyBookingId: familyBookingPublicId };
+        },
+      );
+      if (identity.familyBookingId !== familyBookingPublicId) this.invalidContactReadSession();
+    }
+    return this.establishSession(request, credential);
+  }
+
   private async findActiveCredential(
     accessDigest: Uint8Array,
     contactDigest: Uint8Array,
@@ -143,6 +229,36 @@ export class BookingAccessService {
       || !this.equal(credential.familyBooking.contactDigest, contactDigest)) {
       await this.audit("INVALID", accessFingerprint, ipFingerprint);
       this.invalidAccess();
+    }
+    return credential;
+  }
+
+  private async findContactOwnedActiveCredential(
+    familyBookingPublicId: string,
+    contactDigest: Uint8Array,
+    bookingFingerprint: string,
+    ipFingerprint: string,
+  ): Promise<ActiveBookingAccessCredential> {
+    const credential = await this.prisma.bookingAccessCredential.findFirst({
+      where: {
+        familyBooking: {
+          publicId: familyBookingPublicId,
+          status: { in: ["RESERVED", "CHECKED_IN"] },
+        },
+        status: "ACTIVE",
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        familyBooking: { select: { id: true, publicId: true, contactDigest: true } },
+      },
+      orderBy: [{ issuedAt: "desc" }, { id: "desc" }],
+    });
+    if (credential === null || !this.equal(credential.familyBooking.contactDigest, contactDigest)) {
+      await this.auditContactRead("INVALID", bookingFingerprint, ipFingerprint);
+      this.invalidContactReadSession();
     }
     return credential;
   }
@@ -239,12 +355,19 @@ export class BookingAccessService {
     return new Promise((resolve, reject) => request.session.save((error) => error == null ? resolve() : reject(error)));
   }
 
-  private async rateLimit(key: string, maximum: number): Promise<void> {
-    const attempts = await this.redis.client.incr(key);
-    if (attempts === 1) await this.redis.client.expire(key, 15 * 60);
+  private async rateLimit(key: string, maximum: number, ttlSeconds = 15 * 60): Promise<void> {
+    const attempts = await incrementFixedWindowRateLimit(this.redis, key, ttlSeconds);
     if (attempts > maximum) {
       throw new DomainError(429, "BOOKING_ACCESS_RATE_LIMITED", "Too many booking access attempts.");
     }
+  }
+
+  private mapContactReadRateLimit(error: unknown): DomainError {
+    if (error instanceof DomainError && error.code === "BOOKING_ACCESS_RATE_LIMITED") {
+      return new DomainError(429, "BOOKING_READ_SESSION_RATE_LIMITED", "Too many booking read session attempts.");
+    }
+    if (error instanceof Error) throw error;
+    throw error;
   }
 
   private async audit(
@@ -276,6 +399,41 @@ export class BookingAccessService {
     });
   }
 
+  private async auditContactRead(
+    resultCode: "SUCCEEDED" | "INVALID" | "RATE_LIMITED",
+    bookingFingerprint: string,
+    ipFingerprint: string,
+    familyBookingId?: string,
+  ): Promise<void> {
+    await this.auditContactReadWith(
+      this.prisma,
+      resultCode,
+      bookingFingerprint,
+      ipFingerprint,
+      familyBookingId,
+    );
+  }
+
+  private async auditContactReadWith(
+    client: Prisma.TransactionClient | PrismaService,
+    resultCode: "SUCCEEDED" | "INVALID" | "RATE_LIMITED",
+    bookingFingerprint: string,
+    ipFingerprint: string,
+    familyBookingId?: string,
+  ): Promise<void> {
+    await client.authAudit.create({
+      data: {
+        eventType: "BOOKING_CONTACT_READ_SESSION",
+        resultCode,
+        safeMetadata: {
+          bookingFingerprint,
+          ipFingerprint: ipFingerprint.slice(0, 12),
+          ...(familyBookingId === undefined ? {} : { familyBookingId }),
+        },
+      },
+    });
+  }
+
   private equal(left: Uint8Array, right: Uint8Array): boolean {
     const a = Buffer.from(left);
     const b = Buffer.from(right);
@@ -290,6 +448,10 @@ export class BookingAccessService {
 
   private invalidAccess(): never {
     throw new DomainError(401, "BOOKING_ACCESS_INVALID", "The booking access link or phone number is invalid.");
+  }
+
+  private invalidContactReadSession(): never {
+    throw new DomainError(401, "BOOKING_READ_SESSION_INVALID", "The booking or contact is invalid.");
   }
 
   private invalidSession(request: Request): never {

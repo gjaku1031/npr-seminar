@@ -7,15 +7,18 @@ info:
     web and scanner clients.
 
     ADMIN and SCANNER actors use a Redis-backed project session cookie. Every
-    state-changing session request requires X-CSRF-Token, an allowed same-origin
-    Origin, and application/json. Public family access uses a separate,
+    state-changing session request requires X-CSRF-Token and an allowed same-origin
+    Origin. JSON is required except for the explicitly bounded ADMIN poster
+    multipart upload. Public family access uses a separate,
     contact-bound X-Booking-Proof credential. QR tokens, booking proofs, OTPs,
     cookies, passwords, pairing codes, and full parent contact values are secrets and
     MUST be redacted from application, proxy, tracing, analytics, and audit logs.
 
-    Durable resources are never hard-deleted. Booking, check-in, student, sync,
-    circuit, and scanner-device histories are append-only and returned in stable
-    chronological order.
+    Historical resources are never hard-deleted. Booking, check-in, student,
+    sync, circuit, and scanner-device histories are append-only and returned in
+    stable chronological order. An SMS template that has no outbox usage history
+    is configuration, not history, and may be hard-deleted after optimistic-lock
+    and active-default checks; a used template is archived instead.
   x-contract-authority: packages/contracts/openapi.yaml
   x-backend-runtime: NestJS modular monolith
   x-sensitive-log-redaction:
@@ -57,9 +60,8 @@ info:
     description: Current deployment seed; implementations must preserve the scope semantics below.
     scope: ALL
     branch: null
-    capacity: 800
   x-google-sheets-projection:
-    schemaVersion: 3
+    schemaVersion: 4
     authority: POSTGRESQL
     direction: POSTGRESQL_TO_GOOGLE_SHEETS_ONLY
     inboundSyncSupported: false
@@ -72,13 +74,31 @@ info:
     reservationSheet:
       title: 예약명단
       sheetId: 1777564107
-      businessRange: A:L
-      reservedBlankRange: M:AC
-      studentKeyColumn: B
+      businessRange: A:M
+      reservedBlankRange: N:AC
+      sourceStudentNoDisplayColumn: B
+      rowIdentity: FAMILY_BOOKING_STUDENT_ID_ONLY
       valueInputMode: RAW
       postWriteExactVerification: true
+    familySummarySheet:
+      title: 예약집계
+      sheetId: 202607180
+      businessRange: A:M
+      reservedBlankRange: N:Y
+      valueInputMode: RAW
+      postWriteExactVerification: true
+    bookingLogSheet:
+      title: 로그
+      sheetId: 1415280656
+      businessRange: A:M
+      reservedBlankRange: N:Y
+      valueInputMode: RAW
+      appendOnly: true
+      postWriteExactVerification: true
     visibleHeaders:
-      reservationRosterAtoL: [예약일시, 학번, 캠퍼스, 학생명, 반명, 학교, 학년, 담임, '학부모HP (모)', '학부모HP (부)', 예약상태, 로그]
+      reservationRosterAtoM: [예약일시, 학번, 캠퍼스, 학생명, 수학반, 과학반, 학교, 학년, 담임, '학부모HP (모)', '학부모HP (부)', 예약상태, 로그]
+      familySummaryAtoM: [예약일시, 가족예약ID, 캠퍼스, 학생명 목록, 참석자, 예약건수, 예약인원, 입장건수, 입장인원, 상태, 예약경로, 체크인시각, 최신로그]
+      bookingLogAtoM: [이벤트일시, 이벤트, 가족예약ID, 캠퍼스, 학생수, 학생명, 참석자, 예약인원, 입장인원, 예약상태, 예약경로, 처리자, 로그]
     campusValues:
       CAMPUS_A: A
       CAMPUS_B: B
@@ -100,8 +120,28 @@ info:
         protected: true
         bootstrap: INITIALIZE_IF_BLANK_IDEMPOTENTLY
         conflictingHeader: BLOCK_WITH_SCHEMA_DRIFT
+      familySummary:
+        sheetTitle: 예약집계
+        column: Z
+        header: __NPR_FAMILY_BOOKING_ID
+        value: familyBookingId
+        hidden: true
+        protected: true
+        bootstrap: INITIALIZE_IF_BLANK_IDEMPOTENTLY
+        conflictingHeader: BLOCK_WITH_SCHEMA_DRIFT
+      bookingLog:
+        sheetTitle: 로그
+        column: Z
+        header: __NPR_BOOKING_EVENT_ID
+        value: eventId
+        hidden: true
+        protected: true
+        bootstrap: INITIALIZE_IF_BLANK_IDEMPOTENTLY
+        conflictingHeader: BLOCK_WITH_SCHEMA_DRIFT
     markerUniqueness:
       reservationRoster: EXACTLY_ONE_PER_FAMILY_BOOKING_STUDENT_ID
+      familySummary: EXACTLY_ONE_PER_FAMILY_BOOKING_ID
+      bookingLog: EXACTLY_ONE_PER_BOOKING_EVENT_ID
       staleDuplicatePolicy: KEEP_ONE_MATCHING_PROJECTION_AND_CLEAR_OTHER_TECHNICAL_MARKERS
     description: |
       PostgreSQL is the sole source of truth. A committed family-booking create,
@@ -109,10 +149,13 @@ info:
       per-child durable outbox delivery. Google Sheets is an asynchronous
       projection only: Sheet edits never create or change application state and
       no Sheet-to-application endpoint, poller, or import worker is permitted.
-      Visible 예약명단 A:L headers are the strict live-workbook schema; M:AC must
-      remain blank. Blank AD1 technical headers may be initialized, hidden, and
-      protected for the service account and Drive owner only by the explicit
-      prepare command; normal dispatch never bootstraps schema. Public/link,
+      Visible 예약명단 A:M headers are the strict live-workbook schema; N:AC must
+      remain blank. 수학반 and 과학반 preserve every current representative
+      assignment name, including valid terminal timetable suffixes. Blank AD1/Z1
+      technical headers may be initialized, hidden, and protected for the service
+      account and Drive owner only by the explicit prepare command; normal dispatch
+      never bootstraps schema. Reservation rows are located only by
+      familyBookingStudentId, never by the visible source student number. Public/link,
       domain-wide, or group sharing, a conflicting nonblank header, stale worker
       validation, or other schema drift blocks live writes.
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
@@ -125,11 +168,13 @@ tags:
   - name: Public seminar sessions
   - name: Public students
   - name: Public family bookings
+  - name: Public poster
   - name: Public QR pass
   - name: Admin seminars
   - name: Admin students
   - name: Admin student sync
   - name: Admin family bookings
+  - name: Admin poster
   - name: Admin check-in audit
   - name: Admin scanner devices
   - name: Admin SMS
@@ -263,6 +308,146 @@ paths:
                 $ref: '#/components/schemas/CurrentActor'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/public/poster:
+    get:
+      operationId: getCurrentPublicPoster
+      tags: [Public poster]
+      summary: Get the current poster descriptor without caching stale metadata
+      description: |
+        Returns poster=null when an administrator has not uploaded a poster yet.
+        Descriptor responses are no-store; clients cache only the versioned asset URL.
+      security: []
+      responses:
+        '200':
+          description: Current immutable asset descriptor, or an explicit empty state
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentPosterResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/public/poster/image/{version}:
+    parameters:
+      - $ref: '#/components/parameters/PosterVersion'
+    get:
+      operationId: getVersionedPublicPosterAsset
+      tags: [Public poster]
+      summary: Fetch one content-addressed immutable poster asset
+      description: |
+        The version is the lowercase SHA-256 content hash. The server resolves
+        the trusted media type from its immutable asset metadata. Previously
+        active versions remain readable so immutable caches never change meaning.
+        If-None-Match takes precedence over If-Modified-Since.
+      security: []
+      x-binary-response-media-type: image/*
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: If-Modified-Since
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Exact PNG, JPEG, or WebP bytes for this immutable version
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Strong SHA-256 entity tag.
+            Last-Modified:
+              schema:
+                type: string
+              description: Immutable asset filesystem timestamp in HTTP-date form.
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=31536000, immutable
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: Conditional request matched the immutable asset
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/admin/poster:
+    put:
+      operationId: replaceCurrentPoster
+      tags: [Admin poster]
+      summary: Atomically replace the single active poster
+      description: |
+        Durable multipart upload of exactly one poster field. The server ignores
+        the untrusted client filename, enforces a 10 MiB hard limit, accepts only
+        PNG, JPEG, or WebP, and requires the declared media type to match raster
+        magic bytes. It writes a content-addressed immutable asset before
+        atomically replacing the current manifest. File-backed idempotency records
+        replay the original descriptor and reject key reuse with different bytes.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      x-mutation-kind: durable
+      x-idempotency: required
+      x-requires-csrf: true
+      x-requires-same-origin: true
+      x-request-media-type: multipart/form-data
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/Origin'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [poster]
+              properties:
+                poster:
+                  type: string
+                  format: binary
+              additionalProperties: false
+            encoding:
+              poster:
+                contentType: image/png, image/jpeg, image/webp
+      responses:
+        '200':
+          description: New active descriptor or an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosterUploadResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -445,8 +630,9 @@ paths:
       description: |
         X-Booking-Proof supplies the authoritative parent-contact digest. The
         response contains only family bookings with the same digest, ordered
-        newest first. The endpoint deliberately accepts no contact or search
-        query that could broaden the proof-owned set.
+        newest first as PublicMaskedFamilyBooking objects. The endpoint
+        deliberately accepts no contact or search query that could broaden the
+        proof-owned set, and never returns full participant or contact PII.
       security:
         - bookingProof: []
       x-proof-scopes: [BOOKING_READ, BOOKING_MANAGE]
@@ -456,7 +642,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OwnedFamilyBookingList'
+                $ref: '#/components/schemas/PublicMaskedFamilyBookingList'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -538,17 +724,69 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/public/family-bookings/lookup:
+    post:
+      operationId: lookupMaskedFamilyBookingsByContact
+      tags: [Public family bookings]
+      summary: Look up masked reservations using the normalized full phone number
+      description: |
+        This ephemeral same-origin lookup deliberately requires the full phone but
+        no cookie, OTP, or booking proof. It matches only the keyed full-contact
+        digest and returns at most 100 masked aggregates. No match is an empty
+        items array. Responses never include a full phone, full participant name,
+        student number, school, class, teacher, raw QR, or access credential.
+        Redis independently rate limits contact, IP, and global request classes;
+        audit events contain only truncated fingerprints and the result count.
+      security: []
+      x-mutation-kind: ephemeral
+      x-idempotency: exempt
+      x-idempotency-exemption-reason: Read-only lookup creates no durable business resource or booking transition; rate counters and audit telemetry do not authorize or mutate a booking.
+      x-requires-same-origin: true
+      x-rate-limit-error-code: BOOKING_LOOKUP_RATE_LIMITED
+      x-rate-limits:
+        contact: {maximum: 10, windowSeconds: 900}
+        ip: {maximum: 30, windowSeconds: 900}
+        global: {maximum: 600, windowSeconds: 60}
+      x-audit-pii-policy: fingerprints-and-result-count-only
+      parameters:
+        - $ref: '#/components/parameters/Origin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicFamilyBookingLookupRequest'
+      responses:
+        '200':
+          description: Newest-first masked matches, or an empty list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicMaskedFamilyBookingList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/public/booking-access/session:
     post:
       operationId: exchangeBookingAccessToken
       tags: [Public family bookings]
-      summary: Exchange a fragment-delivered access token and full phone for a booking-scoped session
+      summary: Exchange a fragment-delivered access token and full phone for a booking-scoped read/QR session
       description: |
         The raw 256-bit access token is delivered only in the URL fragment of
         /booking/access and is submitted in this JSON body, never in a request
         path or query. The server verifies SHA-256(token) and the normalized full
         phone, regenerates the browser session, and creates a 30-minute
-        booking-scoped management session. PostgreSQL stores only access-token
+        booking-scoped read/QR session. This session never authorizes update or
+        cancellation; those mutations require a fresh BOOKING_MANAGE proof.
+        PostgreSQL stores only access-token
         and session-ID digests. Attempts are rate limited and append a secret-free
         authentication audit event. A safe idempotent replay verifies the same
         digests and establishes a fresh 30-minute browser-bound session without
@@ -570,7 +808,7 @@ paths:
               $ref: '#/components/schemas/BookingAccessExchangeRequest'
       responses:
         '200':
-          description: Booking-scoped management session established
+          description: Booking-scoped read/QR session established
           headers:
             Set-Cookie:
               schema:
@@ -591,6 +829,75 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/public/family-bookings/{familyBookingId}/read-session:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBookingId'
+    post:
+      operationId: establishFamilyBookingContactReadSession
+      tags: [Public family bookings]
+      summary: Establish a booking-scoped read/QR session after an exact contact ownership check
+      description: |
+        After the masked contact lookup, the client submits the selected booking
+        ID and the same full parent contact. The server verifies the keyed full
+        contact digest against exactly that active booking, regenerates the
+        browser session, and creates a short-lived booking-scoped session. The
+        lookup response itself never contains a raw QR. The new session permits
+        only masked booking detail and recovery of the existing QR for this one
+        booking. It never authorizes update, cancellation, survey submission, or
+        QR rotation; every public business mutation still requires a fresh
+        BOOKING_MANAGE proof. Missing bookings, contact mismatch, cancelled
+        bookings, and unavailable access credentials share the generic
+        BOOKING_READ_SESSION_INVALID response.
+      security: []
+      x-mutation-kind: durable
+      x-idempotency: required
+      x-requires-csrf: true
+      x-requires-same-origin: true
+      x-access-session-authorization: read-and-existing-qr-only
+      x-rate-limit-error-code: BOOKING_READ_SESSION_RATE_LIMITED
+      x-rate-limits:
+        contact: {maximum: 10, windowSeconds: 900}
+        booking: {maximum: 10, windowSeconds: 900}
+        ip: {maximum: 30, windowSeconds: 900}
+        global: {maximum: 600, windowSeconds: 60}
+      x-audit-pii-policy: fingerprints-and-owned-booking-id-only
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/Origin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicFamilyBookingReadSessionRequest'
+      responses:
+        '200':
+          description: Booking-scoped read/QR session established
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: HttpOnly booking-scoped session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingAccessExchangeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/public/family-bookings/{familyBookingId}:
     parameters:
       - $ref: '#/components/parameters/FamilyBookingId'
@@ -598,18 +905,21 @@ paths:
       operationId: getPublicFamilyBooking
       tags: [Public family bookings]
       summary: Read a family booking owned by the booking proof contact
-      description: Proof contact digest must equal the family booking contact digest.
+      description: |
+        A BOOKING_MANAGE proof contact digest must equal the booking contact
+        digest, or a fragment-token/contact-read session must be bound to
+        exactly this booking. Every path receives only the masked public DTO.
       security:
         - cookieAuth: []
         - bookingProof: []
       x-proof-scopes: [BOOKING_READ, BOOKING_MANAGE]
       responses:
         '200':
-          description: Contact-owned family booking without raw QR material
+          description: Contact-owned masked family booking without raw QR material
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FamilyBooking'
+                $ref: '#/components/schemas/PublicMaskedFamilyBooking'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -628,8 +938,8 @@ paths:
         family QR. The automatically linked student set is immutable in public
         self-service and is rechecked against the proof digest under lock; a
         guest keeps its immutable guest branch.
-        seatCount is recalculated only from attendanceParty. Target capacity,
-        duplicate, booking-window, and branch-scope constraints are checked in
+        seatCount is recalculated only from attendanceParty. Duplicate,
+        booking-window, and branch-scope constraints are checked in
         the same transaction. For an ALL session the immutable enrolled family
         remains bound to its original proof-selected campus and a guest may use
         its immutable campus; for a BRANCH session that campus must match the
@@ -638,9 +948,10 @@ paths:
         off. The same transaction appends UPDATED Google Sheets outbox deliveries
         without reading Sheet state.
       security:
-        - cookieAuth: []
         - bookingProof: []
       x-proof-scopes: [BOOKING_MANAGE]
+      x-proof-consumption: same-transaction-on-success
+      x-access-session-authorization: forbidden
       x-mutation-kind: durable
       x-idempotency: required
       x-requires-csrf: true
@@ -668,7 +979,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FamilyBooking'
+                $ref: '#/components/schemas/PublicMaskedFamilyBooking'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -692,17 +1003,18 @@ paths:
       tags: [Public family bookings]
       summary: Cancel a contact-owned reserved family booking
       description: |
-        Proof contact must match. Cancellation is a status transition, releases
-        reserved capacity, revokes the active family QR, and appends events; no
+        Proof contact must match. Cancellation is a status transition, updates
+        the legacy transactional counters, revokes the active family QR, and appends events; no
         row is deleted. A checked-in booking cannot be publicly cancelled. The
         same transaction appends one CANCELLED Google Sheets outbox delivery for
         every child active immediately before cancellation. The audit event is
         classified as SELF_SERVICE. The optional legacy reason remains accepted
         for public-client compatibility.
       security:
-        - cookieAuth: []
         - bookingProof: []
       x-proof-scopes: [BOOKING_MANAGE]
+      x-proof-consumption: same-transaction-on-success
+      x-access-session-authorization: forbidden
       x-mutation-kind: durable
       x-idempotency: required
       x-requires-csrf: true
@@ -724,7 +1036,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FamilyBooking'
+                $ref: '#/components/schemas/PublicMaskedFamilyBooking'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -746,8 +1058,8 @@ paths:
       tags: [Public family bookings]
       summary: Recover the current active family QR for display
       description: |
-        Requires either the 30-minute booking management session or the legacy
-        BOOKING_MANAGE proof retained for one compatibility release. The server
+        Requires either the 30-minute fragment-token read/QR session bound to
+        exactly this booking or an unconsumed BOOKING_MANAGE proof. The server
         decrypts the AEAD-protected active credential and verifies its SHA-256
         digest before returning it. This is QR viewing, not QR reissuance.
       security:
@@ -789,17 +1101,18 @@ paths:
         already be CHECKED_IN or its seminar session must have ended. A booking
         accepts at most one response. The response and proof consumption commit
         atomically; the first successful management mutation consumes the proof.
-        Photo bytes are not uploaded by this contract: photoAttached and the
-        basename-only photoName record the current product's photo mock state.
       security:
         - bookingProof: []
       x-proof-scopes: [BOOKING_MANAGE]
       x-proof-consumption: consumed-by-first-successful-management-mutation
+      x-access-session-authorization: forbidden
       x-mutation-kind: durable
       x-idempotency: required
+      x-requires-csrf: true
       x-requires-same-origin: true
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/Origin'
       requestBody:
         required: true
@@ -1028,7 +1341,7 @@ paths:
     get:
       operationId: listAdminSeminarSessions
       tags: [Admin seminars]
-      summary: List every session and its capacity ledger for a seminar
+      summary: List every session and its booking operations summary
       description: |
         Every item includes operationsSummary, counted in family-booking
         aggregates rather than seats or participant rows. All session summaries
@@ -1064,10 +1377,11 @@ paths:
     post:
       operationId: createAdminSeminarSession
       tags: [Admin seminars]
-      summary: Create a session with an initial capacity
+      summary: Create a session
       description: |
         scope and branch are coupled: ALL requires branch=null; BRANCH requires
-        one concrete Branch. The current seeded session is ALL with capacity 800.
+        one concrete Branch. Booking availability is governed only by the session
+        status and booking window.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
@@ -1087,7 +1401,7 @@ paths:
               $ref: '#/components/schemas/SeminarSessionCreateRequest'
       responses:
         '201':
-          description: Session and capacity ledger created
+          description: Session created
           content:
             application/json:
               schema:
@@ -1109,13 +1423,13 @@ paths:
     get:
       operationId: getAdminSeminarSession
       tags: [Admin seminars]
-      summary: Get one session and capacity ledger
+      summary: Get one session
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
       responses:
         '200':
-          description: Session and capacity
+          description: Session
           content:
             application/json:
               schema:
@@ -1129,10 +1443,9 @@ paths:
     patch:
       operationId: updateAdminSeminarSession
       tags: [Admin seminars]
-      summary: Update session schedule, state, booking window, or capacity
+      summary: Update session schedule, state, or booking window
       description: |
-        Capacity cannot be lowered below reservedCount. The update uses the
-        supplied version as optimistic concurrency control and never rewrites
+        The update uses the supplied version as optimistic concurrency control and never rewrites
         historical booking or check-in snapshots. When scope or branch changes,
         both fields must be supplied: ALL requires branch=null and BRANCH requires
         one concrete Branch. Existing bookings and scanner locks that would
@@ -1156,7 +1469,7 @@ paths:
               $ref: '#/components/schemas/SeminarSessionUpdateRequest'
       responses:
         '200':
-          description: Updated session and capacity
+          description: Updated session
           content:
             application/json:
               schema:
@@ -1813,10 +2126,15 @@ paths:
         math class when present, otherwise the first active science class for a
         science-only student, then participant name and source student number.
         The generic students.class_name alias is never the science-only sort key.
-        Unmatched enrolled units follow those groups.
+        Unmatched enrolled units follow those groups. monitoring uses the complete
+        filtered result before pagination, but only RESERVED and CHECKED_IN
+        participation contributes: studentCount is the active participant identity
+        count, familyBookingCount removes active sibling duplicates, and
+        attendeeCount sums those active parent attendees.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
+      x-monitoring-statuses: [RESERVED, CHECKED_IN]
       parameters:
         - $ref: '#/components/parameters/BranchQuery'
         - name: unitGroup
@@ -1945,6 +2263,8 @@ paths:
         RESERVED; cancelled is CANCELLED; and no-show is NO_SHOW. NO_SHOW is
         excluded from both active and unchecked. Guest-only family bookings are
         included because this is a session-level family operations summary.
+        attendeeCount is an active parent-person count, with MOTHER/FATHER=1 and
+        BOTH=2; children, cancelled bookings, and no-shows add zero.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
@@ -1976,20 +2296,20 @@ paths:
     get:
       operationId: getAdminSessionStatistics
       tags: [Admin family bookings]
-      summary: Get branch-aware enrollment, booking-channel, and survey statistics
+      summary: Get branch-aware participant, booking-channel, and survey statistics
       description: |
-        Eligible denominators are current sourceActive students with at least one
-        recognized active math or science assignment in the effective session and
-        branch scope. summary and channels count family booking aggregates. Their
+        summary and channels count family booking aggregates. Their
         active count is exactly RESERVED plus CHECKED_IN, with CANCELLED and
         NO_SHOW excluded. Guest and other scoped family bookings belong in
         summary, their WEB_APP or manual channel, and the units[ALL] booking
-        numerator. units[ALL].activeBookingCount, reservedBookingCount, and
+        counts. units[ALL].activeBookingCount, reservedBookingCount, and
         checkedInBookingCount therefore equal the corresponding summary fields.
         Concrete unit rows still count only distinct bookings linked to eligible
         enrolled students in that unit; guests are not assigned to a concrete
         unit. Overall UI totals must use summary or the ALL row, never a sum of
-        concrete units. Survey statistics remain scoped to the whole session.
+        concrete units. Every summary/unit/channel monitoring object separately
+        exposes linked student rows, de-duplicated family bookings, and active
+        parent attendees. Survey statistics remain scoped to the whole session.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
@@ -2008,6 +2328,7 @@ paths:
       x-channel-source-map:
         MOBILE: [WEB_APP]
         MANUAL: [PHONE, TEACHER, ON_SITE]
+      x-monitoring-statuses: [RESERVED, CHECKED_IN]
       parameters:
         - $ref: '#/components/parameters/BranchQuery'
       responses:
@@ -2077,7 +2398,7 @@ paths:
       tags: [Admin family bookings]
       summary: Create a family booking as an administrator
       description: |
-        Uses the same family aggregate, student-contact validation, capacity lock,
+        Uses the same family aggregate, student-contact validation, session lock,
         server-derived family seatCount, and single family QR as public creation.
         bookingSource is explicitly PHONE, TEACHER, or ON_SITE; WEB_APP is
         reserved for the public flow. The optional bounded administrative reason,
@@ -2208,8 +2529,8 @@ paths:
       tags: [Admin family bookings]
       summary: Cancel a family booking as an administrator
       description: |
-        Status transition only; no hard delete. Capacity and active QR are updated
-        atomically and the selected PHONE, TEACHER, or OTHER cancellation type is
+        Status transition only; no hard delete. Attendance counters and active QR are
+        updated atomically and the selected PHONE, TEACHER, or OTHER cancellation type is
         persisted on the append-only audit event. Free-form administrator reasons
         are not accepted. Post-check-in cancellation is rejected. The same
         transaction appends one CANCELLED Google Sheets outbox delivery per child
@@ -3321,8 +3642,15 @@ paths:
     delete:
       operationId: archiveSmsTemplate
       tags: [Admin SMS]
-      summary: Archive a template by transitioning it to inactive
-      description: No row is deleted; If-Match carries the current decimal version string.
+      summary: Delete an unused template or archive a used template
+      description: |
+        If-Match carries the current decimal version string. The operation takes
+        the same transaction-scoped lifecycle lock as create, update, and default
+        reassignment. A template without any SMS outbox snapshot is hard-deleted;
+        a template with usage history is preserved and transitioned to inactive.
+        A current default is never deleted or archived: another active template
+        of the same purpose must first be made default. Idempotent replay returns
+        the original deletion or archival result even after a hard delete.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
@@ -3330,7 +3658,11 @@ paths:
       x-idempotency: required
       x-requires-csrf: true
       x-requires-same-origin: true
-      x-hard-delete: forbidden
+      x-hard-delete: conditional-unused
+      x-delete-missing: not-found-except-idempotency-replay
+      x-delete-dependencies:
+        smsOutboxSnapshots: preserve
+        activeDefault: reassign-before-removal
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
@@ -3338,11 +3670,11 @@ paths:
         - $ref: '#/components/parameters/IfMatchVersion'
       responses:
         '200':
-          description: Inactive template with incremented version
+          description: Conditional hard-deletion or archival result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SmsTemplate'
+                $ref: '#/components/schemas/SmsTemplateRemovalResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3787,6 +4119,13 @@ components:
       schema:
         type: string
         format: uuid
+    PosterVersion:
+      name: version
+      in: path
+      required: true
+      description: Lowercase SHA-256 hash of the exact poster bytes.
+      schema:
+        $ref: '#/components/schemas/PosterVersion'
     RunId:
       name: runId
       in: path
@@ -3907,7 +4246,7 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
     Conflict:
-      description: State transition, capacity, duplicate, lock, version, or idempotency conflict
+      description: State transition, duplicate, lock, version, or idempotency conflict
       content:
         application/problem+json:
           schema:
@@ -3936,6 +4275,18 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: Uploaded poster exceeds the 10 MiB hard limit
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnsupportedMediaType:
+      description: Request media type or poster raster signature is unsupported or inconsistent
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     ServiceUnavailable:
       description: Required PostgreSQL, Redis, source, or cryptographic configuration is unavailable
       content:
@@ -3955,6 +4306,55 @@ components:
     EmptyObject:
       type: object
       maxProperties: 0
+      additionalProperties: false
+
+    PosterMediaType:
+      type: string
+      enum: [image/png, image/jpeg, image/webp]
+
+    PosterVersion:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+      description: Lowercase SHA-256 hash of the exact poster bytes.
+
+    PosterDescriptor:
+      type: object
+      required: [version, imageUrl, mediaType, sizeBytes, updatedAt]
+      properties:
+        version:
+          $ref: '#/components/schemas/PosterVersion'
+        imageUrl:
+          type: string
+          format: uri-reference
+          pattern: '^/api/v1/public/poster/image/[a-f0-9]{64}$'
+        mediaType:
+          $ref: '#/components/schemas/PosterMediaType'
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    CurrentPosterResponse:
+      type: object
+      required: [poster]
+      properties:
+        poster:
+          description: Null is the explicit safe state before the first upload.
+          oneOf:
+            - $ref: '#/components/schemas/PosterDescriptor'
+            - type: 'null'
+      additionalProperties: false
+
+    PosterUploadResult:
+      type: object
+      required: [poster]
+      properties:
+        poster:
+          $ref: '#/components/schemas/PosterDescriptor'
       additionalProperties: false
 
     Problem:
@@ -4226,7 +4626,7 @@ components:
 
     SmsPurpose:
       type: string
-      enum: [OTP, BOOKING_CONFIRMED, BOOKING_CANCELLED, FIRST_CHECK_IN, ADMIN_GROUP, SURVEY]
+      enum: [OTP, BOOKING_CONFIRMED, BOOKING_UPDATED, BOOKING_CANCELLED, FIRST_CHECK_IN, ADMIN_GROUP, SURVEY]
 
     SmsMessageType:
       type: string
@@ -4284,7 +4684,7 @@ components:
 
     SmsTemplate:
       type: object
-      required: [templateId, key, name, purpose, title, body, active, version, createdAt, updatedAt]
+      required: [templateId, key, name, purpose, title, body, active, isDefault, version, createdAt, updatedAt]
       properties:
         templateId:
           type: string
@@ -4310,6 +4710,9 @@ components:
           description: Server additionally enforces 1..2000 EUC-KR bytes.
         active:
           type: boolean
+        isDefault:
+          type: boolean
+          description: Exactly one active default is maintained for each purpose that has an active template.
         version:
           type: string
           pattern: '^[0-9]+$'
@@ -4354,6 +4757,9 @@ components:
           minLength: 1
           maxLength: 2000
           description: Limited to 2000 EUC-KR bytes after NFC normalization.
+        isDefault:
+          type: boolean
+          description: Makes this template the active default for its purpose.
       additionalProperties: false
 
     SmsTemplateUpdateRequest:
@@ -4377,6 +4783,9 @@ components:
           maxLength: 2000
         active:
           type: boolean
+        isDefault:
+          type: boolean
+          description: Reassigns the active default. A current default must be reassigned before archival.
         version:
           type: string
           pattern: '^[0-9]+$'
@@ -4384,7 +4793,7 @@ components:
 
     SmsTemplateCreated:
       type: object
-      required: [templateId, key, name, purpose, title, body, active, version, createdAt, updatedAt, classification]
+      required: [templateId, key, name, purpose, title, body, active, isDefault, version, createdAt, updatedAt, classification]
       properties:
         templateId:
           type: string
@@ -4408,6 +4817,8 @@ components:
           maxLength: 2000
         active:
           type: boolean
+        isDefault:
+          type: boolean
         version:
           type: string
           pattern: '^[0-9]+$'
@@ -4419,6 +4830,30 @@ components:
           format: date-time
         classification:
           $ref: '#/components/schemas/SmsPayloadClassification'
+      additionalProperties: false
+
+    SmsTemplateRemovalDisposition:
+      type: string
+      enum: [DELETED, ARCHIVED]
+
+    SmsTemplateRemovalResult:
+      type: object
+      required: [templateId, disposition, usageCount, archivedTemplate]
+      properties:
+        templateId:
+          type: string
+          format: uuid
+        disposition:
+          $ref: '#/components/schemas/SmsTemplateRemovalDisposition'
+        usageCount:
+          type: integer
+          minimum: 0
+          description: Number of durable SMS outbox snapshots that reference the template.
+        archivedTemplate:
+          description: Present only when usage history requires the template row to be retained inactive.
+          oneOf:
+            - $ref: '#/components/schemas/SmsTemplate'
+            - type: 'null'
       additionalProperties: false
 
     SmsTargetRequest:
@@ -5164,7 +5599,7 @@ components:
 
     PublicAvailability:
       type: string
-      enum: [AVAILABLE, FULL, NOT_OPEN, CLOSED]
+      enum: [AVAILABLE, NOT_OPEN, CLOSED]
 
     PublicSeminarSession:
       type: object
@@ -5181,7 +5616,6 @@ components:
         - bookingClosesAt
         - guestBookingEnabled
         - availability
-        - remainingCapacity
       properties:
         seminarId:
           type: string
@@ -5218,9 +5652,6 @@ components:
           description: Whether a contact with no active enrolled student in any campus may use the guest flow.
         availability:
           $ref: '#/components/schemas/PublicAvailability'
-        remainingCapacity:
-          type: integer
-          minimum: 0
       allOf:
         - if:
             properties:
@@ -5254,27 +5685,6 @@ components:
           $ref: '#/components/schemas/PageMeta'
       additionalProperties: false
 
-    SessionCapacity:
-      type: object
-      required: [capacity, reservedCount, checkedInCount, remainingCount, version]
-      properties:
-        capacity:
-          type: integer
-          minimum: 1
-        reservedCount:
-          type: integer
-          minimum: 0
-        checkedInCount:
-          type: integer
-          minimum: 0
-        remainingCount:
-          type: integer
-          minimum: 0
-        version:
-          type: integer
-          minimum: 1
-      additionalProperties: false
-
     AdminSeminarSession:
       type: object
       required:
@@ -5289,7 +5699,6 @@ components:
         - bookingClosesAt
         - status
         - guestBookingEnabled
-        - capacity
         - version
         - createdAt
         - updatedAt
@@ -5327,8 +5736,6 @@ components:
           $ref: '#/components/schemas/SeminarSessionStatus'
         guestBookingEnabled:
           type: boolean
-        capacity:
-          $ref: '#/components/schemas/SessionCapacity'
         operationsSummary:
           $ref: '#/components/schemas/SessionOperationsSummary'
         version:
@@ -5390,7 +5797,6 @@ components:
         - location
         - bookingOpensAt
         - bookingClosesAt
-        - capacity
       properties:
         scope:
           $ref: '#/components/schemas/SeminarSessionScope'
@@ -5415,10 +5821,6 @@ components:
         bookingClosesAt:
           type: string
           format: date-time
-        capacity:
-          type: integer
-          minimum: 1
-          maximum: 100000
         guestBookingEnabled:
           type: boolean
           default: false
@@ -5474,10 +5876,6 @@ components:
         status:
           type: string
           enum: [DRAFT, OPEN, CLOSED, CANCELLED]
-        capacity:
-          type: integer
-          minimum: 1
-          maximum: 100000
         guestBookingEnabled:
           type: boolean
         expectedVersion:
@@ -6523,6 +6921,7 @@ components:
         - uncheckedBookingCount
         - cancelledBookingCount
         - noShowBookingCount
+        - attendeeCount
       properties:
         activeBookingCount:
           type: integer
@@ -6544,6 +6943,31 @@ components:
           type: integer
           minimum: 0
           description: NO_SHOW family bookings, excluded from active and unchecked.
+        attendeeCount:
+          type: integer
+          minimum: 0
+          description: Active RESERVED/CHECKED_IN parents; MOTHER=1, FATHER=1, BOTH=2. Children never increase this count.
+      additionalProperties: false
+
+    AttendanceMonitoring:
+      type: object
+      description: |
+        Three active-participation monitoring counts. studentCount is the number of
+        student/guest rows attached to RESERVED or CHECKED_IN family bookings;
+        familyBookingCount de-duplicates those sibling rows by family booking; and
+        attendeeCount counts their parents with MOTHER=1, FATHER=1, and BOTH=2.
+        CANCELLED and NO_SHOW contribute zero to every monitoring field.
+      required: [studentCount, familyBookingCount, attendeeCount]
+      properties:
+        studentCount:
+          type: integer
+          minimum: 0
+        familyBookingCount:
+          type: integer
+          minimum: 0
+        attendeeCount:
+          type: integer
+          minimum: 0
       additionalProperties: false
 
     StatisticsUnitGroup:
@@ -6553,20 +6977,16 @@ components:
     SessionStatisticsSummary:
       type: object
       description: |
-        Overall family-booking totals plus the current classified enrolled-student
-        denominator. Guest-only family bookings are included in every booking
+        Overall family-booking totals. Guest-only family bookings are included in every booking
         count. This object, not a sum of units, is the authoritative overall total.
       required:
-        - eligibleCurrentStudentCount
         - activeBookingCount
         - reservedBookingCount
         - checkedInBookingCount
         - cancelledBookingCount
         - noShowBookingCount
+        - monitoring
       properties:
-        eligibleCurrentStudentCount:
-          type: integer
-          minimum: 0
         activeBookingCount:
           type: integer
           minimum: 0
@@ -6583,13 +7003,14 @@ components:
         noShowBookingCount:
           type: integer
           minimum: 0
+        monitoring:
+          $ref: '#/components/schemas/AttendanceMonitoring'
       additionalProperties: false
 
     SessionStatisticsUnit:
       type: object
       description: |
-        eligibleStudentCount always uses current eligible enrolled students. For
-        unitGroup=ALL, booking counts use every scoped family booking, including
+        For unitGroup=ALL, booking counts use every scoped family booking, including
         guest-only and unclassified-only families, and equal the matching summary
         booking counts. For concrete unit groups, booking counts remain distinct
         families linked to at least one eligible enrolled student in that unit;
@@ -6599,16 +7020,13 @@ components:
         CONCRETE: ELIGIBLE_ENROLLED_FAMILY_BOOKINGS
       required:
         - unitGroup
-        - eligibleStudentCount
         - activeBookingCount
         - reservedBookingCount
         - checkedInBookingCount
+        - monitoring
       properties:
         unitGroup:
           $ref: '#/components/schemas/StatisticsUnitGroup'
-        eligibleStudentCount:
-          type: integer
-          minimum: 0
         activeBookingCount:
           type: integer
           minimum: 0
@@ -6619,6 +7037,8 @@ components:
         checkedInBookingCount:
           type: integer
           minimum: 0
+        monitoring:
+          $ref: '#/components/schemas/AttendanceMonitoring'
       additionalProperties: false
 
     SessionStatisticsChannel:
@@ -6632,6 +7052,7 @@ components:
         - checkedInBookingCount
         - cancelledBookingCount
         - noShowBookingCount
+        - monitoring
       properties:
         channel:
           type: string
@@ -6659,6 +7080,8 @@ components:
         noShowBookingCount:
           type: integer
           minimum: 0
+        monitoring:
+          $ref: '#/components/schemas/AttendanceMonitoring'
       additionalProperties: false
 
     SessionStatisticsSurvey:
@@ -6683,7 +7106,7 @@ components:
       description: |
         Branch-aware statistics response. summary and channels are family-booking
         aggregates. The ALL unit repeats scoped reserved, checked-in, and active
-        family totals while retaining the eligible enrolled-student denominator;
+        family totals while retaining the raw eligible enrolled-student context count;
         concrete units are eligible enrolled-student projections and must not be
         summed to reconstruct the overall family total.
       required: [branch, summary, units, channels, survey]
@@ -6923,7 +7346,7 @@ components:
 
     SessionRosterPage:
       type: object
-      required: [items, page, facets]
+      required: [items, page, facets, monitoring]
       properties:
         items:
           type: array
@@ -6934,6 +7357,8 @@ components:
           $ref: '#/components/schemas/PageMeta'
         facets:
           $ref: '#/components/schemas/SessionRosterFacets'
+        monitoring:
+          $ref: '#/components/schemas/AttendanceMonitoring'
       additionalProperties: false
 
     FamilyBookingStudentSnapshot:
@@ -7026,9 +7451,10 @@ components:
       type: object
       description: |
         One family aggregate with one family-level seat count and QR lifecycle.
-        Full contact is returned only to an authenticated ADMIN or to the
-        contact-bound verified booking-proof owner and is forbidden from logs
-        and audit metadata.
+        Full contact is returned to authenticated ADMIN operations and the
+        existing OTP-authorized fresh-create result. Public lookup, read,
+        update, and cancellation use PublicMaskedFamilyBooking instead. Full
+        contact is forbidden from logs and audit metadata.
       required:
         - familyBookingId
         - seminarSessionId
@@ -7094,6 +7520,122 @@ components:
         cancelledAt:
           type: [string, 'null']
           format: date-time
+      additionalProperties: false
+
+    PublicMaskedFamilyBookingParticipant:
+      type: object
+      required: [participantType, maskedName, branch]
+      properties:
+        participantType:
+          $ref: '#/components/schemas/BookingParticipantType'
+        maskedName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: NFC name with every non-edge character hidden; one- and two-character names remain non-reversible.
+        branch:
+          $ref: '#/components/schemas/Branch'
+      additionalProperties: false
+
+    PublicMaskedFamilyBooking:
+      type: object
+      description: |
+        Public aggregate deliberately limited to masked contact and participant
+        identity. Full contact/name, student number, school, class, teacher,
+        qrToken, qrVersion, and child identifiers are forbidden.
+      required:
+        - familyBookingId
+        - seminarSessionId
+        - maskedContact
+        - attendanceParty
+        - bookingSource
+        - seatCount
+        - status
+        - participants
+        - qrStatus
+        - version
+        - createdAt
+        - updatedAt
+        - checkedInAt
+        - cancelledAt
+      properties:
+        familyBookingId:
+          type: string
+          format: uuid
+        seminarSessionId:
+          type: string
+          format: uuid
+        maskedContact:
+          type: string
+          pattern: '^[0-9]{3}-\*{4}-[0-9]{4}$'
+        attendanceParty:
+          $ref: '#/components/schemas/AttendanceParty'
+        bookingSource:
+          $ref: '#/components/schemas/BookingSource'
+        seatCount:
+          type: integer
+          enum: [1, 2]
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/FamilyBookingStatus'
+        participants:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/PublicMaskedFamilyBookingParticipant'
+        qrStatus:
+          $ref: '#/components/schemas/QrCredentialStatus'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        checkedInAt:
+          type: [string, 'null']
+          format: date-time
+        cancelledAt:
+          type: [string, 'null']
+          format: date-time
+      additionalProperties: false
+
+    PublicMaskedFamilyBookingList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PublicMaskedFamilyBooking'
+      additionalProperties: false
+
+    PublicFamilyBookingLookupRequest:
+      type: object
+      required: [contact]
+      properties:
+        contact:
+          type: string
+          minLength: 8
+          maxLength: 40
+          writeOnly: true
+          description: Full phone normalized server-side; suffix-only matching is forbidden.
+      additionalProperties: false
+
+    PublicFamilyBookingReadSessionRequest:
+      type: object
+      required: [contact]
+      properties:
+        contact:
+          type: string
+          minLength: 8
+          maxLength: 40
+          writeOnly: true
+          description: Full parent phone normalized server-side and checked against exactly the selected booking.
       additionalProperties: false
 
     BookingAccessExchangeRequest:
@@ -7204,12 +7746,12 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/FamilyBooking'
+            $ref: '#/components/schemas/PublicMaskedFamilyBooking'
       additionalProperties: false
 
     PublicSurveyResponseCreateRequest:
       type: object
-      required: [rating, photoAttached]
+      required: [rating]
       properties:
         rating:
           type: integer
@@ -7219,34 +7761,6 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-        photoAttached:
-          type: boolean
-        photoName:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 255
-          pattern: '^[^/\\]{1,255}$'
-          description: Basename metadata only; photo bytes are not uploaded by this contract.
-      allOf:
-        - if:
-            properties:
-              photoAttached:
-                const: true
-            required: [photoAttached]
-          then:
-            required: [photoName]
-            properties:
-              photoName:
-                type: string
-        - if:
-            properties:
-              photoAttached:
-                const: false
-            required: [photoAttached]
-          then:
-            properties:
-              photoName:
-                type: 'null'
       additionalProperties: false
 
     SurveyParticipantContext:
@@ -7335,8 +7849,6 @@ components:
         - participant
         - rating
         - comment
-        - photoAttached
-        - photoName
         - submittedAt
       properties:
         surveyResponseId:
@@ -7354,11 +7866,6 @@ components:
         comment:
           type: [string, 'null']
           maxLength: 2000
-        photoAttached:
-          type: boolean
-        photoName:
-          type: [string, 'null']
-          maxLength: 255
         submittedAt:
           type: string
           format: date-time
@@ -7372,8 +7879,6 @@ components:
         - seminarSessionId
         - rating
         - comment
-        - photoAttached
-        - photoName
         - submittedAt
         - replayed
       properties:
@@ -7393,11 +7898,6 @@ components:
         comment:
           type: [string, 'null']
           maxLength: 2000
-        photoAttached:
-          type: boolean
-        photoName:
-          type: [string, 'null']
-          maxLength: 255
         submittedAt:
           type: string
           format: date-time
@@ -8319,6 +8819,9 @@ components:
         - actor
         - cancellationType
         - reason
+        - scannerDeviceName
+        - scannerEntranceName
+        - scannerGateCode
         - metadata
         - occurredAt
       properties:
@@ -8342,6 +8845,18 @@ components:
         reason:
           type: [string, 'null']
           maxLength: 500
+        scannerDeviceName:
+          type: [string, 'null']
+          maxLength: 120
+          description: Immutable check-in snapshot; remains available after scanner hard deletion.
+        scannerEntranceName:
+          type: [string, 'null']
+          maxLength: 160
+          description: Immutable entrance/location snapshot; remains available after scanner hard deletion.
+        scannerGateCode:
+          type: [string, 'null']
+          maxLength: 100
+          description: Immutable gate snapshot; remains available after scanner hard deletion.
         metadata:
           $ref: '#/components/schemas/SafeAuditMetadata'
         occurredAt:
@@ -8377,6 +8892,9 @@ components:
         - result
         - familySeatCount
         - deviceId
+        - scannerDeviceName
+        - scannerEntranceName
+        - scannerGateCode
         - branch
         - gateCode
         - actor
@@ -8406,8 +8924,21 @@ components:
           type: [integer, 'null']
           enum: [1, 2, null]
         deviceId:
-          type: string
+          type: [string, 'null']
           format: uuid
+          description: Null after scanner hard deletion; immutable display snapshots remain populated for new events.
+        scannerDeviceName:
+          type: [string, 'null']
+          maxLength: 120
+          description: Immutable device-name snapshot retained independently of scannerDeviceId.
+        scannerEntranceName:
+          type: [string, 'null']
+          maxLength: 160
+          description: Immutable entrance/location snapshot retained independently of scannerDeviceId.
+        scannerGateCode:
+          type: [string, 'null']
+          maxLength: 100
+          description: Immutable gate snapshot retained independently of scannerDeviceId.
         branch:
           $ref: '#/components/schemas/Branch'
         gateCode:

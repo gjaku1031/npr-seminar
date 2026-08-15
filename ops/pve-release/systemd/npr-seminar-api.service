@@ -37,6 +37,7 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectProc=invisible
 ProtectSystem=strict
+ReadWritePaths=-/var/lib/npr-seminar/poster
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true

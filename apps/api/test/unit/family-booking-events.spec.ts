@@ -22,18 +22,56 @@ describe("family booking audit event response contract", () => {
     };
     const service = new FamilyBookingsManagementService(
       prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
     );
     const response = await service.bookingEvents("00000000-0000-4000-8000-000000000010");
     expect(response.items).toEqual([{
       sequence: "11", eventId: "00000000-0000-4000-8000-000000000011",
       familyBookingId: "00000000-0000-4000-8000-000000000010", type: "UPDATED",
       actor: { type: "ADMIN", subjectId: "00000000-0000-4000-8000-000000000012", displayName: null },
-      cancellationType: null, reason: "회차 변경", metadata: { fromSessionId: "old", toSessionId: "new" }, occurredAt,
+      cancellationType: null, reason: "회차 변경",
+      scannerDeviceName: null, scannerEntranceName: null, scannerGateCode: null,
+      metadata: { fromSessionId: "old", toSessionId: "new" }, occurredAt,
     }]);
     expect(response.items[0]).not.toHaveProperty("eventType");
     expect(response.items[0]).not.toHaveProperty("actorSubject");
     expect(response.items[0]).not.toHaveProperty("safeMetadata");
+  });
+
+  it("projects immutable scanner snapshots after the device relation is deleted", async () => {
+    const occurredAt = new Date("2026-07-19T03:21:00Z");
+    const scannerSnapshot = {
+      scannerDeviceName: "iPad 스캐너",
+      scannerEntranceName: "A 정문",
+      scannerGateCode: "CAMPUS_A-MAIN",
+    };
+    const prisma = {
+      familyBooking: { findUnique: async () => ({ id: 7n }) },
+      bookingEvent: { findMany: async () => [{
+        id: 12n, eventId: "00000000-0000-4000-8000-000000000012", familyBookingId: 7n,
+        eventType: "CHECKED_IN", actorSubject: "00000000-0000-4000-8000-000000000099",
+        cancellationType: null, safeMetadata: { source: "QR", ...scannerSnapshot }, occurredAt,
+      }] },
+      checkInEvent: { findMany: async () => [{
+        id: 13n, eventId: "00000000-0000-4000-8000-000000000013",
+        source: "QR", result: "CHECKED_IN", seatCount: 2, gateCode: "CAMPUS_A-MAIN",
+        safeMetadata: scannerSnapshot, occurredAt,
+        session: { publicId: "00000000-0000-4000-8000-000000000102" },
+        scannerDevice: null,
+      }] },
+    };
+    const service = new FamilyBookingsManagementService(
+      prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
+    );
+
+    const bookingEvents = await service.bookingEvents("00000000-0000-4000-8000-000000000010");
+    expect(bookingEvents.items[0]).toMatchObject(scannerSnapshot);
+    const checkInEvents = await service.checkInEvents("00000000-0000-4000-8000-000000000010");
+    expect(checkInEvents.items[0]).toMatchObject({
+      deviceId: null,
+      ...scannerSnapshot,
+    });
   });
 
   it("accepts only the three administrator cancellation types", async () => {

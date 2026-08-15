@@ -37,7 +37,7 @@ export type CheckInPanel =
    * 결과 미상 건이 상한만큼 쌓여 **새 QR** 을 보낼 수 없다.
    * 이미 스캔한 QR 의 재시도는 계속 가능하다 (기존 키를 그대로 쓴다).
    */
-  | { kind: "capacity" };
+  | { kind: "backlog" };
 
 export interface QrCheckInState {
   panel: CheckInPanel;
@@ -81,7 +81,7 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
             if (lastTokenRef.current === token) lastTokenRef.current = "";
           }, DUPLICATE_COOLDOWN_MS),
         );
-        setPanel({ kind: "capacity" });
+        setPanel({ kind: "backlog" });
         return;
       }
 
