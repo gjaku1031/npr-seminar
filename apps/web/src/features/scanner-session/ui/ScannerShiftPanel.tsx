@@ -21,12 +21,19 @@ import {
   type ScannerShiftState,
 } from "@/shared/api";
 import { fmtDateTime } from "@/shared/lib/format";
+import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 
 export interface ScannerShiftPanelProps {
   onLocked: (shift: ScannerShiftState) => void;
+  /**
+   * 잠금 요청을 보내기 **직전**, 실제 클릭 제스처의 콜스택 안에서 동기로 불린다.
+   * iPad/Safari 는 AudioContext 를 사용자 제스처 안에서 풀어야 하므로 여기서 결과음을 잠금 해제한다.
+   * await 이전에 호출해야 제스처 컨텍스트가 유지된다.
+   */
+  onBeforeLock?: () => void;
 }
 
-export function ScannerShiftPanel({ onLocked }: ScannerShiftPanelProps) {
+export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelProps) {
   const [sessions, setSessions] = useState<PublicSeminarSession[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -63,6 +70,9 @@ export function ScannerShiftPanel({ onLocked }: ScannerShiftPanelProps) {
   }, []);
 
   const lock = useCallback(async () => {
+    // 실제 클릭 제스처 안에서(await 이전) 결과음 AudioContext 를 먼저 푼다 — iPad/Safari 대응.
+    onBeforeLock?.();
+
     // 미확정 조작이 남아 있으면 그 회차가 유일한 진실이다 — 선택값이 아니라 첫 시도의 본문을 다시 보낸다.
     const sessionId = pendingSessionId ?? selectedId;
     if (!sessionId) return;
@@ -100,7 +110,7 @@ export function ScannerShiftPanel({ onLocked }: ScannerShiftPanelProps) {
     } finally {
       setLocking(false);
     }
-  }, [pendingSessionId, selectedId, lockKey, onLocked]);
+  }, [pendingSessionId, selectedId, lockKey, onLocked, onBeforeLock]);
 
   return (
     <div style={{ maxWidth: 520, margin: "0 auto", padding: "32px 20px", textAlign: "center" }}>
@@ -148,7 +158,7 @@ export function ScannerShiftPanel({ onLocked }: ScannerShiftPanelProps) {
           >
             {sessions.map((session) => (
               <option key={session.seminarSessionId} value={session.seminarSessionId} style={{ color: "#0A0F1A" }}>
-                {session.seminarTitle} · {fmtDateTime(new Date(session.startsAt))} · {session.location}
+                {session.seminarTitle} · {fmtDateTime(new Date(session.startsAt))} · {SEMINAR_LOCATION}
               </option>
             ))}
           </select>

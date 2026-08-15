@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { useHubSummary } from "@/features/admin-overview";
 import { BRANCH_LABELS } from "@/shared/api";
 import { fmtSessionDate } from "@/shared/lib/format";
-import { Icons, LauncherCard } from "@/shared/ui";
+import { BRAND_NAME_ROMAN, Icons, LauncherCard } from "@/shared/ui";
 
 export function HubView() {
   const router = useRouter();
@@ -26,7 +26,7 @@ export function HubView() {
   return (
     <div style={{ maxWidth: "var(--container-max)", margin: "0 auto", padding: "20px var(--container-pad) 70px" }}>
       <div style={{ padding: "26px 0 4px", animation: "ds-fade-up var(--dur-slow) var(--ease-out) both" }}>
-        <div style={{ fontSize: 12.5, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)" }}>NPR ADMISSION BRIEFING</div>
+        <div style={{ fontSize: 12.5, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)" }}>{BRAND_NAME_ROMAN} ADMISSION BRIEFING</div>
         <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "var(--tracking-display)", marginTop: 8 }}>입시설명회 운영 콘솔</h1>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
           {(summary?.sessions ?? []).map((option) => {
@@ -46,9 +46,9 @@ export function HubView() {
               </button>
             );
           })}
-          {/* 학부모 예약 앱은 이제 루트다 — 옛 /reserve 는 여기로 308 이동한다 */}
+          {/* 학부모 예약 플로우는 `/reserve` 다 (루트 `/` 는 포스터 진입면). */}
           <a
-            href="/"
+            href="/reserve"
             target="_blank"
             rel="noreferrer"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: "var(--radius-pill)", background: "var(--surface-brand-soft)", fontSize: 12.5, fontWeight: 700, color: "var(--violet-800)", textDecoration: "none" }}
@@ -77,7 +77,7 @@ export function HubView() {
           delay={140}
         />
         <LauncherCard icon={<Icons.clipboard size={18} />} title="간담회 예약" stat="준비 중" onClick={() => go("/counsel")} delay={210} />
-        <LauncherCard icon={<Icons.barChart size={18} />} title="통계" stat="회차별 예약률 · 참석률" onClick={() => go("/stats")} delay={280} />
+        <LauncherCard icon={<Icons.barChart size={18} />} title="통계" stat="학생 · 가족 · 실 참가자 현황" onClick={() => go("/stats")} delay={280} />
         <LauncherCard
           icon={<Icons.tablet size={18} />}
           title="QR 스캐너"

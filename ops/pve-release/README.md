@@ -12,6 +12,7 @@ contains no passwords, cookies, or source student payloads.
 - Runtime secrets: `/etc/npr-seminar/runtime.env`
 - TongTongTong secrets: `/etc/npr-seminar/secrets`
 - TongTongTong session and snapshots: `/var/lib/npr-seminar/tongtong`
+- Active and immutable poster assets: `/var/lib/npr-seminar/poster`
 
 PostgreSQL and Redis listen only on loopback. The `npr_app` database role is
 the HTTP API role. `npr_worker` can claim the SMS/Sheets outboxes, write their
@@ -195,7 +196,7 @@ sudo systemctl is-active npr-seminar-api.service npr-seminar-worker.service \
 
 `execute` takes the deployment lock, stops the API and worker, creates a
 PostgreSQL backup, clears only booking/check-in/QR/booking-delivery data,
-resets session capacity counters, closes every existing non-enrolled booking
+closes every existing non-enrolled booking
 toggle, and verifies zero remaining active QR credentials. Without the option
 it restores the prior service states. `--leave-services-stopped` additionally
 stops web and restores prior states only on failure; after success all three
@@ -205,6 +206,26 @@ the booking-access migration so the legacy active-QR ciphertext preflight is
 never bypassed. If the SQL transaction commits but post-reset verification
 cannot prove the expected zero state, services remain stopped regardless of
 the option; restore or investigate before any restart.
+
+### Capacity-ledger contract phase
+
+The runtime release that removes capacity/counter access must be deployed and
+healthy before the obsolete table is dropped. The destructive SQL has one
+canonical source at
+`ops/pve-release/migrations/post-capacity-code-cutover.sql`; it is deliberately
+outside the automatic Prisma migration chain because this deploy script runs
+migrations before switching away from old processes.
+
+In a later CI contract phase, after verifying every API and worker instance is
+on the ledger-free release, execute the file with the migration-role URL:
+
+```bash
+psql "$MIGRATION_DATABASE_URL" \
+  --set=ON_ERROR_STOP=1 \
+  --file=ops/pve-release/migrations/post-capacity-code-cutover.sql
+```
+
+Do not run it while rollback to a capacity-ledger runtime remains possible.
 
 After the DB/API release and worker are healthy, prepare the v4 workbook before
 enabling it. Preparation creates `예약집계`, initializes the blank `로그` header,
@@ -261,9 +282,10 @@ the deferred deploy. The v4 migration still forces every mapping to
 `activate-web` requires the exact deferred release marker, healthy API/worker
 loopback boundaries, and at least one mapping; it freshly re-runs `enable` for
 every mapping through the deployed client. Thus a newly public/shared workbook
-fails closed before web starts. It then verifies local web readiness and Funnel
-and removes the marker. If Sheets or web validation fails, web stays stopped
-and the marker is retained for retry. A failed deferred API/worker activation
+fails closed before web starts. It then verifies local web readiness, the
+Caddy-only upstream socket, and public HTTPS before removing the marker. If
+Sheets or web validation fails, web and its upstream socket stay stopped and
+the marker is retained for retry. A failed deferred API/worker activation
 restores the old code link but deliberately leaves every application service
 stopped; it never starts legacy code after the forward migration. Do not use
 `rollback` during this QR transition unless the target has been independently
@@ -307,8 +329,8 @@ The script performs these gates before reporting success:
    `TimeZone` to be exactly `UTC`;
 6. a PostgreSQL backup, forward-only Prisma migration, and exact worker grants;
 7. atomic `current` switch and separate systemd startup for API, worker, web;
-8. API readiness, Next root, same-origin API rewrite, loopback listener, and
-   tailnet HTTPS checks.
+8. API readiness, Next root, same-origin API rewrite, exact loopback and
+   Caddy-only listener boundaries, and public-domain HTTPS checks.
 
 `audit-timestamptz-offset.sql` is a read-only inventory and candidate report
 for rows written before the UTC correction. Its exact-minus-nine-hour flags are
@@ -334,14 +356,18 @@ sudo ops/pve-release/deploy-nest-release.sh rollback
 sudo ops/pve-release/deploy-nest-release.sh rollback 20260717T120000Z
 ```
 
-Inspect the three trust boundaries independently:
+Inspect the application and ingress trust boundaries independently:
 
 ```bash
 sudo systemctl status npr-seminar-api.service --no-pager
 sudo systemctl status npr-seminar-web.service --no-pager
 sudo systemctl status npr-seminar-worker.service --no-pager
+sudo systemctl status npr-seminar-caddy-upstream.socket \
+  npr-seminar-caddy-upstream.service --no-pager
 sudo journalctl -u npr-seminar-api.service -u npr-seminar-web.service \
-  -u npr-seminar-worker.service --since -15m --no-pager
+  -u npr-seminar-worker.service -u npr-seminar-caddy-upstream.socket \
+  -u npr-seminar-caddy-upstream.service --since -15m --no-pager
+sudo ss -H -ltn '( sport = :3000 or sport = :3001 or sport = :4000 or sport = :5432 or sport = :6379 )'
 ```
 
 ## First administrator
@@ -359,33 +385,55 @@ Retrieve that file over SSH, verify the first login, and securely remove it.
 The helper refuses to change an existing administrator unless `--rotate` is
 explicitly supplied.
 
-## Public HTTPS exposure through Tailscale Funnel
+## Public HTTPS exposure through GCP Caddy and WireGuard
 
-Nest, PostgreSQL, and Redis remain bound to loopback and must never receive a
-LAN, tailnet-IP, port-forward, or UFW listener. Next also binds to
-`127.0.0.1:3000`; Tailscale Funnel is the sole public ingress and TLS
-terminator. The deployment runs the current CLI form:
+The Caddy service on the GCP VM at public IP `34.158.196.85` is the only
+application ingress and TLS terminator for `https://survey.npredu.co.kr`.
+Traffic reaches `pve-release` through the dedicated WireGuard /30
+(`10.99.0.1` on GCP and `10.99.0.2` on `pve-release`). On `pve-release`, Next
+remains bound to `127.0.0.1:3000`, Nest to `127.0.0.1:4000`, PostgreSQL to
+`127.0.0.1:5432`, and Redis to `127.0.0.1:6379`. None of those application or
+datastore ports may gain a LAN, wildcard, router port-forward, or public
+listener.
 
-```bash
-sudo tailscale funnel --bg --yes --https=443 http://127.0.0.1:3000
-```
+The deployment installs and enables
+`npr-seminar-caddy-upstream.socket` and
+`npr-seminar-caddy-upstream.service`. The socket is the single deliberate
+non-loopback listener: it binds exactly to `10.10.10.165:3001`, and
+`systemd-socket-proxyd` forwards accepted connections to the loopback-only
+Next listener at `127.0.0.1:3000`. GCP Caddy uses
+`http://10.10.10.165:3001` as its WireGuard-routed upstream. Restrict access to
+port 3001 to the `10.99.0.1` WireGuard peer at the host firewall; never point
+Caddy at port 3000 or expose ports 4000, 5432, or 6379. The application path
+does not use a router port-forward or any secondary public-ingress mechanism.
 
-It obtains the node's MagicDNS name from `tailscale status --json`, requires
-`PUBLIC_BASE_URL` to equal `https://<that-name>`, rejects any non-loopback
-listener on ports 3000, 4000, 5432, or 6379, and verifies both `/` and a public
-API request through Funnel HTTPS. Missing MagicDNS, Funnel consent, a
-certificate, or public reachability is a deployment blocker rather than a
-reason to expose an HTTP port directly.
-
-`--bg` persists the Funnel configuration across host and Tailscale restarts;
-confirm it with `sudo tailscale funnel status`. This intentionally makes the
-Next application reachable from the public internet while every datastore and
-the Nest listener remain loopback-only.
-
-After a successful deployment the Mac/iPad URL is:
+Every normal deploy and rollback starts the local web service and the socket
+proxy, then requires exactly these listeners:
 
 ```text
-https://npr-survey.tailedbbb5.ts.net/
+10.10.10.165:3001  WireGuard-only Caddy upstream socket
+127.0.0.1:3000     Next
+127.0.0.1:4000     Nest
+127.0.0.1:5432     PostgreSQL
+127.0.0.1:6379     Redis
+```
+
+IPv6 loopback is also accepted for the four loopback-only ports, but wildcard
+or other addresses fail deployment. The deployment requires
+`PUBLIC_BASE_URL` in the durable runtime, API, and worker environments to equal
+`https://survey.npredu.co.kr` exactly (no alternate host or trailing slash),
+then verifies both `/` and a public API request through that HTTPS origin.
+Failure is a deployment blocker, not a reason to widen a listener.
+Before the first deployment on this ingress path, replace any legacy
+`PUBLIC_BASE_URL` value in `/etc/npr-seminar/runtime.env`; reconciliation
+preserves an existing value and intentionally rejects it instead of silently
+rewriting operator-owned durable configuration.
+
+`deploy --defer-web` keeps both port 3000 and port 3001 closed until
+`activate-web` succeeds. The public application URL is:
+
+```text
+https://survey.npredu.co.kr/
 ```
 
 ## TongTongTong safety contract

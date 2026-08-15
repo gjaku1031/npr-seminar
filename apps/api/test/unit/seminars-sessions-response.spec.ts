@@ -15,21 +15,21 @@ describe("admin seminar session list", () => {
       place: "세미나실",
       bookingOpensAt: now,
       bookingClosesAt: new Date(now.getTime() + 1_800_000),
+      guestBookingEnabled: false,
       status: "OPEN",
       version: 1n,
       createdAt: now,
       updatedAt: now,
-      capacity: { capacity: 100, reservedCount: 17, checkedInCount: 8, version: 2n },
     });
     const sessions = [
       session(11n, "00000000-0000-4000-8000-000000000111"),
       session(12n, "00000000-0000-4000-8000-000000000112"),
     ];
     const groupBy = vi.fn(async () => [
-      { sessionId: 11n, status: "RESERVED", _count: { _all: 2 } },
-      { sessionId: 11n, status: "CHECKED_IN", _count: { _all: 1 } },
-      { sessionId: 11n, status: "CANCELLED", _count: { _all: 3 } },
-      { sessionId: 11n, status: "NO_SHOW", _count: { _all: 4 } },
+      { sessionId: 11n, status: "RESERVED", attendanceParty: "BOTH", _count: { _all: 2 } },
+      { sessionId: 11n, status: "CHECKED_IN", attendanceParty: "MOTHER", _count: { _all: 1 } },
+      { sessionId: 11n, status: "CANCELLED", attendanceParty: "BOTH", _count: { _all: 3 } },
+      { sessionId: 11n, status: "NO_SHOW", attendanceParty: "MOTHER", _count: { _all: 4 } },
     ]);
     const service = new SeminarsService({
       seminar: { count: vi.fn(async () => 1) },
@@ -41,18 +41,18 @@ describe("admin seminar session list", () => {
 
     expect(groupBy).toHaveBeenCalledTimes(1);
     expect(groupBy).toHaveBeenCalledWith({
-      by: ["sessionId", "status"],
+      by: ["sessionId", "status", "attendanceParty"],
       where: { sessionId: { in: [11n, 12n] } },
       _count: { _all: true },
     });
     expect(response.items[0]).toMatchObject({
-      capacity: { capacity: 100, reservedCount: 17, checkedInCount: 8 },
       operationsSummary: {
         activeBookingCount: 3,
         checkedInBookingCount: 1,
         uncheckedBookingCount: 2,
         cancelledBookingCount: 3,
         noShowBookingCount: 4,
+        attendeeCount: 5,
       },
     });
     expect(response.items[1]!.operationsSummary).toEqual({
@@ -61,7 +61,41 @@ describe("admin seminar session list", () => {
       uncheckedBookingCount: 0,
       cancelledBookingCount: 0,
       noShowBookingCount: 0,
+      attendeeCount: 0,
     });
     expect(response.page).toEqual({ page: 1, pageSize: 2, totalItems: 2, totalPages: 1 });
+  });
+
+  it("keeps public booking availability governed by status and booking window only", async () => {
+    const now = new Date();
+    const service = new SeminarsService({
+      seminarSession: {
+        findMany: vi.fn(async () => [{
+          id: 11n,
+          publicId: "00000000-0000-4000-8000-000000000111",
+          seminar: {
+            publicId: "00000000-0000-4000-8000-000000000100",
+            title: "2026 대학교 입시 설명회",
+          },
+          scope: "ALL",
+          branch: null,
+          startsAt: new Date(now.getTime() + 3_600_000),
+          endsAt: new Date(now.getTime() + 7_200_000),
+          place: "서울시 교통회관 (올림픽로 319)",
+          bookingOpensAt: new Date(now.getTime() - 3_600_000),
+          bookingClosesAt: new Date(now.getTime() + 1_800_000),
+          guestBookingEnabled: false,
+        }]),
+      },
+    } as never, {} as never);
+
+    const response = await service.listPublic();
+
+    expect(response.items[0]).toEqual(expect.objectContaining({
+      location: "서울시 교통회관 (올림픽로 319)",
+      availability: "AVAILABLE",
+    }));
+    expect(response.items[0]).not.toHaveProperty("capacity");
+    expect(response.items[0]).not.toHaveProperty("remainingCapacity");
   });
 });

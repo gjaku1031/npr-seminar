@@ -370,6 +370,7 @@
     background-color: var(--surface-page);
     color: var(--text-body);
   }
+
   ::selection {
     background: var(--selection-bg);
     color: var(--ink-900);

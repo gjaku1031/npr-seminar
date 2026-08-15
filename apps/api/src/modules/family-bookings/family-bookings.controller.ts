@@ -16,6 +16,9 @@ import { SameOriginGuard } from "../../common/auth/same-origin.guard.js";
 import { SensitiveResponse } from "../../common/http/sensitive-response.decorator.js";
 import type { Request } from "express";
 import { GUEST_GRADES, type GuestGrade } from "./family-bookings.service.js";
+import { FamilyBookingLookupService } from "./family-booking-lookup.service.js";
+import { BookingProofRequiredGuard } from "./booking-proof-required.guard.js";
+import { BookingAccessService } from "./booking-access.service.js";
 
 class GuestParticipantDto {
   @IsString() @Length(1, 100) public name!: string;
@@ -36,6 +39,8 @@ class PublicUpdateDto {
   @IsOptional() @IsIn(["MOTHER", "FATHER", "BOTH"]) public attendanceParty?: AttendanceParty;
 }
 class CancelDto { @IsInt() @Min(1) public expectedVersion!: number; @IsOptional() @IsString() @MaxLength(500) public reason?: string | null; }
+class PublicLookupDto { @IsString() @Length(8, 40) public contact!: string; }
+class PublicReadSessionDto { @IsString() @Length(8, 40) public contact!: string; }
 export class AdminCreateDto {
   @IsUUID() public seminarSessionId!: string;
   @IsIn(["MOTHER", "FATHER", "BOTH"]) public attendanceParty!: AttendanceParty;
@@ -77,7 +82,12 @@ export function adminCreateAuditReason(
 
 @Controller("api/v1")
 export class FamilyBookingsController {
-  public constructor(private readonly createService: FamilyBookingsService, private readonly management: FamilyBookingsManagementService) {}
+  public constructor(
+    private readonly createService: FamilyBookingsService,
+    private readonly management: FamilyBookingsManagementService,
+    private readonly lookupService: FamilyBookingLookupService,
+    private readonly bookingAccess: BookingAccessService,
+  ) {}
 
   @Post("public/family-bookings")
   @UseGuards(SameOriginGuard)
@@ -94,28 +104,48 @@ export class FamilyBookingsController {
   @Get("public/family-bookings")
   @SensitiveResponse()
   public publicList(@Headers("x-booking-proof") proof = "") { return this.management.listAuthorized(proof); }
+  @Post("public/family-bookings/lookup")
+  @HttpCode(200)
+  @UseGuards(SameOriginGuard)
+  @SensitiveResponse()
+  public publicLookup(@Req() request: Request, @Body() body: PublicLookupDto) {
+    return this.lookupService.lookup(request, body.contact);
+  }
+  @Post("public/family-bookings/:familyBookingId/read-session")
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  @SensitiveResponse()
+  public publicReadSession(
+    @Req() request: Request,
+    @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string,
+    @Body() body: PublicReadSessionDto,
+    @Headers("idempotency-key") key?: string,
+  ) {
+    return this.bookingAccess.establishContactReadSession(request, id, body.contact, this.key(key));
+  }
   @Get("public/family-bookings/:familyBookingId")
   @SensitiveResponse()
   public publicGet(@Req() request: Request, @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Headers("x-booking-proof") proof = "") { return this.management.getAuthorized(id, proof, request); }
   @Patch("public/family-bookings/:familyBookingId")
-  @UseGuards(CsrfGuard)
+  @UseGuards(BookingProofRequiredGuard, CsrfGuard)
   @SensitiveResponse()
-  public publicUpdate(@Req() request: Request, @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: PublicUpdateDto, @Headers("x-booking-proof") proof = "", @Headers("idempotency-key") key?: string) {
-    return this.management.update(id, { ...body, reason: "PUBLIC_SELF_SERVICE" }, null, this.key(key), proof, request);
+  public publicUpdate(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: PublicUpdateDto, @Headers("x-booking-proof") proof = "", @Headers("idempotency-key") key?: string) {
+    const requiredProof = this.proof(proof);
+    return this.management.update(id, { ...body, reason: "PUBLIC_SELF_SERVICE" }, null, this.key(key), requiredProof);
   }
   @Post("public/family-bookings/:familyBookingId/cancel")
-  @HttpCode(200) @UseGuards(CsrfGuard)
+  @HttpCode(200) @UseGuards(BookingProofRequiredGuard, CsrfGuard)
   @SensitiveResponse()
-  public publicCancel(@Req() request: Request, @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: CancelDto, @Headers("x-booking-proof") proof = "", @Headers("idempotency-key") key?: string) {
+  public publicCancel(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: CancelDto, @Headers("x-booking-proof") proof = "", @Headers("idempotency-key") key?: string) {
+    const requiredProof = this.proof(proof);
     return this.management.cancel(
       id,
       body.expectedVersion,
       "SELF_SERVICE",
       null,
       this.key(key),
-      proof,
+      requiredProof,
       body.reason?.trim() || "PUBLIC_SELF_SERVICE",
-      request,
     );
   }
   @Get("public/family-bookings/:familyBookingId/qr")
@@ -167,4 +197,10 @@ export class FamilyBookingsController {
   public checkIns(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Query() query: CursorQuery) { return this.management.checkInEvents(id, query.afterSequence, query.limit); }
 
   private key(value?: string): string { if (value === undefined || value.length < 8 || value.length > 200) throw new DomainError(400, "IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key is required."); return value; }
+  private proof(value: string): string {
+    if (value.trim().length === 0) {
+      throw new DomainError(401, "BOOKING_PROOF_INVALID", "The booking proof is invalid or expired.");
+    }
+    return value;
+  }
 }

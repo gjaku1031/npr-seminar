@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { brandSeminarTitle } from "@/shared/ui/brand";
 import "./globals.css";
 
 /* 디자인 시스템 폰트 (핸드오프 assets/fonts) — 디스플레이 NanumSquareRound · 본문 Pretendard */
@@ -22,8 +23,8 @@ const nanumSquareRound = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "npr 입시설명회 — 운영 콘솔",
-  description: "npr 입시설명회 예약 · 현장 운영 통합 시스템",
+  title: `${brandSeminarTitle()} — 운영 콘솔`,
+  description: `${brandSeminarTitle()} 예약 · 현장 운영 통합 시스템`,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

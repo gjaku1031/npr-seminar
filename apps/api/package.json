@@ -23,6 +23,8 @@
     "db:generate": "bash ./scripts/with-prisma-client-lock.sh",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "node dist/commands/bootstrap-admin.js",
+    "db:seed:qa": "node dist/commands/seed-synthetic-qa.js",
+    "db:reset:qa": "node dist/commands/reset-synthetic-qa.js",
     "db:studio": "prisma studio",
     "migrate:deploy": "prisma migrate deploy",
     "snapshot:dry-run": "node dist/commands/offline-snapshot.js dry-run",

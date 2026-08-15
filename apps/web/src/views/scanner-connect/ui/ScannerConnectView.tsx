@@ -32,6 +32,7 @@ import {
   subscribeToHydration,
 } from "@/features/check-in";
 import {
+  CheckInResultOverlay,
   CheckInResultPanel,
   PairingCodeInput,
   panelSoundKind,
@@ -82,9 +83,31 @@ export function ScannerConnectView() {
     if (kind) playSound(kind);
   }, [checkIn.panel, playSound]);
 
-  // 수동 조회·검증·정원·처리 실패는 로컬 오류 상태에 머물러 공용 패널을 거치지 않는다.
+  // 수동 조회·검증·처리 실패는 로컬 오류 상태에 머물러 공용 패널을 거치지 않는다.
   // 이 콜백으로 그런 실패마다 오류음을 한 번 울린다(값 인자 없음 — 민감 정보 차단).
   const handleManualError = useCallback(() => playSound("error"), [playSound]);
+
+  // 이미 페어링 + 회차 잠금까지 끝난 채로 진입하면(예: 새로고침) 페어링·회차 시작 클릭이 없어
+  // 결과음 AudioContext 가 잠긴 채 남는다. 그럴 때 다음 사용자 제스처(포인터·키) **한 번의 콜스택
+  // 안에서** 잠금을 푼다 — unlock 을 효과에서가 아니라 실제 이벤트 콜백에서 호출한다.
+  // 한 번 풀리면 두 리스너를 즉시 떼어 반복 실행·전역 리스너 누수를 막는다. "소리 켜기" 버튼은
+  // 그대로 대체 수단으로 남는다.
+  const soundReady = sound.ready;
+  const unlockSound = sound.unlock;
+  useEffect(() => {
+    if (!paired || !locked || soundReady) return;
+    const handle = () => {
+      unlockSound();
+      window.removeEventListener("pointerdown", handle, true);
+      window.removeEventListener("keydown", handle, true);
+    };
+    window.addEventListener("pointerdown", handle, { capture: true });
+    window.addEventListener("keydown", handle, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", handle, true);
+      window.removeEventListener("keydown", handle, true);
+    };
+  }, [paired, locked, soundReady, unlockSound]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [unpairing, setUnpairing] = useState(false);
@@ -116,6 +139,16 @@ export function ScannerConnectView() {
     // 결과 미상 복구 중 이미 페어링돼 있었음이 확인된 경우 — 서버 왕복 없이 채택한다.
     onReconciled: session.adopt,
   });
+
+  // 페어링을 시작하는 이 제스처(Enter·"연결하기") 안에서 결과음 AudioContext 를 푼다 —
+  // iPad/Safari 는 소리를 실제 클릭 콜스택에서만 풀 수 있어 효과가 아니라 핸들러에서 부른다.
+  // unlock 은 멱등(이미 running 이면 무해)이고, claim.submit 의 멱등 재시도 의미도 건드리지 않는다.
+  // (unlockSound 는 위 제스처-잠금해제 효과와 같은 sound.unlock 참조다.)
+  const claimSubmit = claim.submit;
+  const handleClaimSubmit = useCallback(() => {
+    unlockSound();
+    void claimSubmit();
+  }, [unlockSound, claimSubmit]);
 
   /**
    * 해제 성공 확정 — 로컬 스캐너 UI 를 전부 비우고 코드 입력으로 돌아간다.
@@ -221,7 +254,7 @@ export function ScannerConnectView() {
             <PairingCodeInput
               value={claim.code}
               onChange={claim.setCode}
-              onSubmit={() => void claim.submit()}
+              onSubmit={handleClaimSubmit}
               // 결과 미상 구간에는 코드를 못 바꾼다 — 같은 코드·같은 키로만 재시도해야 한다.
               disabled={claim.claiming || claim.codeLocked}
               error={claim.error}
@@ -230,7 +263,7 @@ export function ScannerConnectView() {
 
             <button
               type="button"
-              onClick={() => void claim.submit()}
+              onClick={handleClaimSubmit}
               disabled={claim.claiming || claim.code.length === 0}
               style={{
                 marginTop: 18,
@@ -320,18 +353,24 @@ export function ScannerConnectView() {
 
       {/* 회차 잠금이 없으면 스캔을 열지 않는다 — 계약상 체크인이 거부된다 */}
       {!locked ? (
-        /* 최초 회차 획득 경로는 그대로 유지한다 (계약에 있는 POST /scanner/shifts/current). */
-        <ScannerShiftPanel onLocked={session.setShift} />
+        /* 최초 회차 획득 경로는 그대로 유지한다 (계약에 있는 POST /scanner/shifts/current).
+           '이 회차로 스캔 시작' 클릭 제스처 안에서 결과음 AudioContext 를 푼다(iPad/Safari). */
+        <ScannerShiftPanel onLocked={session.setShift} onBeforeLock={sound.unlock} />
       ) : (
         <div className="npr-connect-scan">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <QrCameraScanner onScan={checkIn.handleScan} preferRearCamera={prefersRearCamera(deviceType)} />
-            <CheckInResultPanel panel={checkIn.panel} />
+            {/* idle 빈 패널은 두지 않는다 — 카메라 공간을 우선한다. 처리 중만 카메라 아래 inline 으로 보인다.
+                최종 결과(outcome/error/backlog)는 아래 CheckInResultOverlay 가 큰 오버레이로 띄운다. */}
+            {checkIn.panel.kind === "processing" && <CheckInResultPanel panel={checkIn.panel} />}
           </div>
 
           <ScannerManualPanel enabled={locked} onOutcome={checkIn.showOutcome} onError={handleManualError} />
         </div>
       )}
+
+      {/* QR·수동 체크인의 최종 결과를 공용 오버레이로 표시하고 3000ms 뒤 자동으로 닫는다. */}
+      <CheckInResultOverlay panel={checkIn.panel} onDismiss={checkIn.reset} />
 
       <UnpairDeviceDialog
         open={settingsOpen}

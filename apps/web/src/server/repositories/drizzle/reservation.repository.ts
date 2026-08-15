@@ -163,16 +163,6 @@ export const drizzleReservationRepository: ReservationRepository = {
     return rows.length > 0;
   },
 
-  async countActive(sessionId) {
-    const [{ count }] = await getDb()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(reservations)
-      .where(
-        and(eq(reservations.sessionId, sessionId), inArray(reservations.status, [...ACTIVE_STATUSES])),
-      );
-    return count;
-  },
-
   async create(draft) {
     const now = new Date();
     const rows = await getDb()

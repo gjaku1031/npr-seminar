@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { BookingAccessView } from "@/views/booking-access";
+import { brandSeminarTitle } from "@/shared/ui/brand";
 
 export const metadata: Metadata = {
-  title: "npr 입시설명회 — 예약 관리",
+  title: `${brandSeminarTitle()} — 예약 관리`,
   // 개인 링크가 검색·미리보기로 새지 않게 한다.
   robots: { index: false, follow: false },
 };

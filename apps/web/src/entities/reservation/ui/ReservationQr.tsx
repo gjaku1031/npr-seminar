@@ -108,7 +108,7 @@ export function ReservationQr({
       const a = document.createElement("a");
       a.href = href;
       // 파일명은 호출부가 준 고정 라벨만 — 토큰·식별자를 파일명에 넣지 않는다.
-      a.download = `${downloadName ?? "npr-qr"}.png`;
+      a.download = `${downloadName ?? "neulpureun-qr"}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -153,8 +153,8 @@ export function ReservationQr({
     const ok = await copyManagementUrl(url, { primary, fallback });
     setCopyFeedback(
       ok
-        ? { tone: "success", message: "예약 관리 링크를 복사했어요." }
-        : { tone: "error", message: "복사에 실패했어요. 다시 시도해 주세요." },
+        ? { tone: "success", message: "예약 관리 링크를 복사했습니다." }
+        : { tone: "error", message: "복사에 실패했습니다. 다시 시도해 주세요." },
     );
   };
 

@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSeminarSessions, useUpcomingSession } from "@/features/admin-overview";
 import { BRANCH_LABELS } from "@/shared/api";
-import { Card, EmptyState, Icons, Toast } from "@/shared/ui";
+import { Button, Card, EmptyState, Icons, Toast } from "@/shared/ui";
 import {
   defaultErrorMessage,
   isDefinitiveFailure,
@@ -31,14 +31,16 @@ import {
   useScannerDevices,
   type PairingFormValue,
 } from "@/features/scanner-pairing";
+import { SCANNER_GRID_COLUMNS } from "../lib/scanner-grid";
 
 /** 계약 PairingCodeMetadata.ttlSeconds 는 상수 300 — 발급 시각을 만료 시각에서 되돌려 구한다. */
 const PAIRING_TTL_MS = 300_000;
 
+// 4열 그리드 — 기기 수 상한이 없어 5대째부터 다음 줄로 흐른다(scanner-grid.test 로 잠금).
 const GRID_STYLES = `
   .npr-scanner-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(${SCANNER_GRID_COLUMNS}, minmax(0, 1fr));
     gap: 14px;
     margin-top: 24px;
     align-items: stretch;
@@ -160,7 +162,7 @@ export function ScannerView() {
       setPendingDeleteId(null);
       removeDevice(target.deviceId);
       setDeleteTarget(null);
-      setToast(`${target.deviceName} 기기를 삭제했어요. 다시 사용하려면 새 코드가 필요해요.`);
+      setToast(`${target.deviceName} 기기를 삭제했습니다. 다시 사용하려면 새 코드가 필요합니다.`);
       reload();
     },
     [deleteKey, removeDevice, reload],
@@ -201,8 +203,8 @@ export function ScannerView() {
       setPendingDeleteId(target.deviceId);
       setDeleteError(
         reconciliation === "still-present"
-          ? "삭제가 적용되지 않았어요. 같은 요청으로 다시 시도해 주세요."
-          : "삭제 결과를 확인하지 못했어요. 같은 요청으로 다시 시도해 주세요.",
+          ? "삭제가 적용되지 않았습니다. 같은 요청으로 다시 시도해 주세요."
+          : "삭제 결과를 확인하지 못했습니다. 같은 요청으로 다시 시도해 주세요.",
       );
     } finally {
       setDeleting(false);
@@ -230,8 +232,20 @@ export function ScannerView() {
         </div>
         <h1 style={{ fontSize: "var(--text-h1)", fontWeight: 800 }}>태블릿 스캐너</h1>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--text-muted)" }}>
-          연결 코드를 발급해 iPad를 스캐너로 등록하고 연결 상태를 실시간으로 확인해요.
+          연결 코드를 발급해 iPad를 스캐너로 등록하고 연결 상태를 실시간으로 확인합니다. 이 화면은
+          기기를 모니터링·페어링만 하고, 실제 스캔은 스캐너 기기에서 진행합니다.
         </p>
+        {/* 이 관리자 화면은 스캔을 하지 못한다(SCANNER 세션이 없다). iPad 연결 화면(/scanner/connect)을 새 창으로 연다. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Icons.camera size={15} />}
+          iconRight={<Icons.arrowRight size={14} />}
+          onClick={() => window.open("/scanner/connect", "_blank", "noopener,noreferrer")}
+          style={{ marginTop: 14 }}
+        >
+          iPad 연결 화면 열기
+        </Button>
       </div>
 
       {listError && (
@@ -240,14 +254,14 @@ export function ScannerView() {
           style={{ marginTop: 18, border: "1px solid var(--status-danger-soft)" }}
         >
           <p role="alert" style={{ margin: 0, fontSize: 13.5, color: "var(--status-danger)" }}>
-            기기 목록을 불러오지 못했어요. {listError}
+            기기 목록을 불러오지 못했습니다. {listError}
           </p>
         </Card>
       )}
 
       {loading && devices.length === 0 ? (
         <div style={{ marginTop: 24 }}>
-          <EmptyState>기기 목록을 불러오는 중이에요.</EmptyState>
+          <EmptyState>기기 목록을 불러오는 중입니다.</EmptyState>
         </div>
       ) : (
         <div className="npr-scanner-grid">
@@ -281,7 +295,7 @@ export function ScannerView() {
         </div>
       )}
 
-      {/* 스캔 대상 요약 — 예약·입장 수는 계약이 준 회차 정원 원장(서버 집계) 그대로다. */}
+      {/* 스캔 대상 요약 — 정원·좌석 집계는 노출하지 않고 현재 회차만 확인한다. */}
       {target !== null && (
         <Card
           variant="accent"
@@ -302,12 +316,6 @@ export function ScannerView() {
           <span>
             다음 스캔 대상: {target.seminarTitle} ·{" "}
             {target.session.branch === null ? "전체" : BRANCH_LABELS[target.session.branch]}
-          </span>
-          {/* 원장은 좌석 수다 — 가족 예약 건수가 아니라서 '건/명'이 아니라 '석'으로 말한다. */}
-          <span style={{ fontFeatureSettings: '"tnum"' }}>
-            예약 좌석 {target.session.capacity.reservedCount}석 · 입장 좌석{" "}
-            {target.session.capacity.checkedInCount}석 · 미입장 좌석{" "}
-            {Math.max(0, target.session.capacity.reservedCount - target.session.capacity.checkedInCount)}석
           </span>
         </Card>
       )}

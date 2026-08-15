@@ -106,6 +106,7 @@ const emptyPage: SessionRosterPage = {
   items: [],
   page: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
   facets: { teachers: [], unmatchedUnitCount: 0 },
+  monitoring: { studentCount: 0, familyBookingCount: 0, attendeeCount: 0 },
 };
 
 /* ── 요청 인코딩 ─────────────────────────────────────────────────────────── */

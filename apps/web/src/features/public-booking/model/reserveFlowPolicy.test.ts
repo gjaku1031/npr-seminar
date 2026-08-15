@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type {
   Branch,
-  FamilyBookingStudentSnapshot,
+  PublicMaskedFamilyBookingParticipant,
   PublicSeminarSession,
 } from "../../../shared/api/contract";
 import {
@@ -37,7 +37,6 @@ function session(overrides: Partial<PublicSeminarSession> = {}): PublicSeminarSe
     bookingClosesAt: "2026-08-20T00:00:00.000Z",
     guestBookingEnabled: false,
     availability: "AVAILABLE",
-    remainingCapacity: 10,
     ...overrides,
   };
 }
@@ -108,7 +107,7 @@ describe("campusSessionCount", () => {
 
 describe("isSessionBookableForType", () => {
   it("availability 가 AVAILABLE 이 아니면 불가", () => {
-    assert.equal(isSessionBookableForType(session({ availability: "FULL", guestBookingEnabled: true }), "GUEST"), false);
+    assert.equal(isSessionBookableForType(session({ availability: "CLOSED", guestBookingEnabled: true }), "GUEST"), false);
   });
 
   it("GUEST 는 flag 도 필요하다", () => {
@@ -121,34 +120,34 @@ describe("isSessionBookableForType", () => {
   });
 });
 
-function student(
-  overrides: Partial<FamilyBookingStudentSnapshot> = {},
-): Pick<FamilyBookingStudentSnapshot, "participantType" | "branch"> {
+function participant(
+  overrides: Partial<PublicMaskedFamilyBookingParticipant> = {},
+): Pick<PublicMaskedFamilyBookingParticipant, "participantType" | "branch"> {
   return { participantType: "ENROLLED", branch: "SONGPA", ...overrides };
 }
 
 function booking(overrides: Partial<MoveSourceBooking> = {}): MoveSourceBooking {
-  return { seminarSessionId: "current", students: [student()], ...overrides };
+  return { seminarSessionId: "current", participants: [participant()], ...overrides };
 }
 
 describe("bookingParticipantType — 스냅샷에서 유형 파생", () => {
   it("전원 GUEST 면 GUEST", () => {
-    assert.equal(bookingParticipantType([student({ participantType: "GUEST" })]), "GUEST");
+    assert.equal(bookingParticipantType([participant({ participantType: "GUEST" })]), "GUEST");
   });
 
   it("전원 ENROLLED 면 ENROLLED", () => {
-    assert.equal(bookingParticipantType([student(), student()]), "ENROLLED");
+    assert.equal(bookingParticipantType([participant(), participant()]), "ENROLLED");
   });
 
   it("GUEST 가 하나라도 섞이면 GUEST(방어적)", () => {
-    assert.equal(bookingParticipantType([student(), student({ participantType: "GUEST" })]), "GUEST");
+    assert.equal(bookingParticipantType([participant(), participant({ participantType: "GUEST" })]), "GUEST");
   });
 });
 
 describe("moveTargetSessions — 회차 이동 후보", () => {
   const guestBooking = booking({
     seminarSessionId: "current",
-    students: [student({ participantType: "GUEST", branch: "SONGPA" })],
+    participants: [participant({ participantType: "GUEST", branch: "SONGPA" })],
   });
 
   it("GUEST 예약은 guestBookingEnabled=false 대상을 제외한다", () => {
@@ -167,7 +166,7 @@ describe("moveTargetSessions — 회차 이동 후보", () => {
   it("ENROLLED 예약은 guestBookingEnabled=false 인 호환 대상도 포함한다(플래그 영향 없음)", () => {
     const enrolledBooking = booking({
       seminarSessionId: "current",
-      students: [student({ participantType: "ENROLLED", branch: "SONGPA" })],
+      participants: [participant({ participantType: "ENROLLED", branch: "SONGPA" })],
     });
     const off = session({ seminarSessionId: "off", branch: "SONGPA", guestBookingEnabled: false });
     const ids = moveTargetSessions([off], enrolledBooking).map((s) => s.seminarSessionId);
@@ -177,12 +176,12 @@ describe("moveTargetSessions — 회차 이동 후보", () => {
   it("현재 회차·비AVAILABLE·다른 캠퍼스 대상은 유형과 무관하게 빠진다", () => {
     const targets = [
       session({ seminarSessionId: "current", branch: "SONGPA", guestBookingEnabled: true }),
-      session({ seminarSessionId: "full", branch: "SONGPA", guestBookingEnabled: true, availability: "FULL" }),
+      session({ seminarSessionId: "closed", branch: "SONGPA", guestBookingEnabled: true, availability: "CLOSED" }),
       session({ seminarSessionId: "other", branch: "WIRYE", guestBookingEnabled: true }),
       session({ seminarSessionId: "ok", branch: "SONGPA", guestBookingEnabled: true }),
     ];
     const ids = moveTargetSessions(targets, guestBooking).map((s) => s.seminarSessionId);
-    assert.deepEqual(ids, ["ok"]); // current(자기)·full(비AVAILABLE)·other(다른 캠퍼스) 제외
+    assert.deepEqual(ids, ["ok"]); // current(자기)·closed(비AVAILABLE)·other(다른 캠퍼스) 제외
   });
 
   it("scope=ALL 회차는 캠퍼스가 달라도 호환으로 본다", () => {
@@ -197,7 +196,7 @@ describe("manageErrorMessageForCode — 정확한 code 매핑", () => {
     assert.equal(manageErrorMessageForCode("GUEST_BOOKING_DISABLED"), GUEST_BOOKING_DISABLED_MESSAGE);
     assert.equal(
       manageErrorMessageForCode("GUEST_BOOKING_DISABLED"),
-      "이 회차는 비재원생 예약이 닫혀 있어요. 다른 회차를 선택해 주세요.",
+      "이 회차는 비재원생 예약이 닫혀 있습니다. 다른 회차를 선택해 주세요.",
     );
   });
 

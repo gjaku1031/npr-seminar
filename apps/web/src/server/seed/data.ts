@@ -13,7 +13,7 @@ import type { Campus } from "@/shared/config/campus";
 
 /**
  * 시드 데이터셋 — v4.0 와이어프레임(ui_kits/npr-admin/data.js v3) 포팅.
- * 캠퍼스 3곳 · 담임 6명 · 반 18개 · 재원생 30명 · 단일 설명회(8/21 11:00 · 정원 800) ·
+ * 캠퍼스 3곳 · 담임 6명 · 반 18개 · 재원생 30명 · 단일 설명회(8/21 11:00) ·
  * 예약 17건(입장 5 · 미체크 10 · 취소 2) · 설문 6건 · 스캐너 4대 · 템플릿 4종.
  *
  * memory 스토어(repositories/memory/store.ts)와 DB 시드 스크립트(scripts/seed.ts)가
@@ -146,15 +146,14 @@ function seedSessions(): Session[] {
       date: new Date("2026-08-21T00:00:00+09:00"),
       round: 1,
       time: "11:00",
-      place: "송파 교통회관 2층 대강당",
-      capacity: 800,
+      place: "서울시 교통회관 (올림픽로 319)",
       desc: "수시·정시 전략과 학부모 대입 로드맵.",
       attendField: true,
       active: true,
       ended: false,
       banner: "violet",
       notice: "",
-      surveySms: "[npr] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기·사진 남기기: {설문링크}",
+      surveySms: "[늘푸른수학원] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기 남기기: {설문링크}",
     },
   ];
 }
@@ -307,15 +306,15 @@ function seedDevices(): Device[] {
   ];
 }
 
-/** 만족도 설문 6건 — 캠퍼스·단위·반·담임·별점·후기·사진 (명세 §6.5) */
+/** 만족도 설문 6건 — 캠퍼스·단위·반·담임·별점·후기 (명세 §6.5) */
 function seedSurveys(): SurveyResponse[] {
   const rows: Array<Omit<SurveyResponse, "id" | "sessionId" | "createdAt">> = [
-    { campus: "송파캠퍼스", unit: "고등", student: "이서연", className: "고1A", teacherName: "김민서", phone: "010-3213-6111", rating: 5, comment: "입시 전략이 구체적이라 좋았어요. 특히 수시 최저지원 라인 설명과 학과별 합격 데이터가 인상적이었고, 상담 연계까지 바로 안내받을 수 있어 만족스러웠습니다.", photo: true, photoName: "현장사진_01.jpg" },
-    { campus: "위례캠퍼스", unit: "고등", student: "강민준", className: "고1B", teacherName: "오세라", phone: "010-3265-6155", rating: 4, comment: "주차 안내가 조금 아쉬웠습니다.", photo: false },
-    { campus: "송파캠퍼스", unit: "중등1", student: "박도윤", className: "1A", teacherName: "박준영", phone: "010-3226-6122", rating: 5, comment: "", photo: false },
-    { campus: "광진캠퍼스", unit: "초등", student: "전유나", className: "6C", teacherName: "박준영", phone: "010-3408-6276", rating: 4, comment: "자료를 미리 받고 싶어요.", photo: true, photoName: "현장사진_02.jpg" },
-    { campus: "송파캠퍼스", unit: "과학", student: "조은우", className: "과고1A", teacherName: "한지원", phone: "010-3278-6166", rating: 3, comment: "", photo: false },
-    { campus: "위례캠퍼스", unit: "특목", student: "서다인", className: "중2S", teacherName: "남기태", phone: "010-3343-6221", rating: 5, comment: "상담 연계가 특히 유용했어요.", photo: true, photoName: "현장사진_03.jpg" },
+    { campus: "송파캠퍼스", unit: "고등", student: "이서연", className: "고1A", teacherName: "김민서", phone: "010-3213-6111", rating: 5, comment: "입시 전략이 구체적이라 좋았어요. 특히 수시 최저지원 라인 설명과 학과별 합격 데이터가 인상적이었고, 상담 연계까지 바로 안내받을 수 있어 만족스러웠습니다." },
+    { campus: "위례캠퍼스", unit: "고등", student: "강민준", className: "고1B", teacherName: "오세라", phone: "010-3265-6155", rating: 4, comment: "주차 안내가 조금 아쉬웠습니다." },
+    { campus: "송파캠퍼스", unit: "중등1", student: "박도윤", className: "1A", teacherName: "박준영", phone: "010-3226-6122", rating: 5, comment: "" },
+    { campus: "광진캠퍼스", unit: "초등", student: "전유나", className: "6C", teacherName: "박준영", phone: "010-3408-6276", rating: 4, comment: "자료를 미리 받고 싶어요." },
+    { campus: "송파캠퍼스", unit: "과학", student: "조은우", className: "과고1A", teacherName: "한지원", phone: "010-3278-6166", rating: 3, comment: "" },
+    { campus: "위례캠퍼스", unit: "특목", student: "서다인", className: "중2S", teacherName: "남기태", phone: "010-3343-6221", rating: 5, comment: "상담 연계가 특히 유용했어요." },
   ];
   return rows.map((r, i) => ({
     ...r,
@@ -340,10 +339,10 @@ export function seedDataset(): SeedDataset {
     sessions,
     reservations,
     smsTemplates: [
-      { id: TEMPLATE(1), name: "예약 확정 + QR", body: "[npr] {학생명} 학부모님, {설명회명} 예약이 확정되었습니다.\n일시: {일시}\n장소: {장소}\n입장 QR: {QR링크}" },
-      { id: TEMPLATE(2), name: "전일 리마인드", body: "[npr] 내일 {일시} {설명회명}이 진행됩니다. 입장 QR을 준비해 주세요. {QR링크}" },
-      { id: TEMPLATE(3), name: "만족도 설문 요청", body: "[npr] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기·사진 남기기: {설문링크}" },
-      { id: TEMPLATE(4), name: "취소 안내", body: "[npr] {설명회명} 예약이 취소되었습니다. 문의: {문의전화}" },
+      { id: TEMPLATE(1), name: "예약 확정 + QR", body: "[늘푸른수학원] {학생명} 학부모님, {설명회명} 예약이 확정되었습니다.\n일시: {일시}\n장소: {장소}\n입장 QR: {QR링크}" },
+      { id: TEMPLATE(2), name: "전일 리마인드", body: "[늘푸른수학원] 내일 {일시} {설명회명}이 진행됩니다. 입장 QR을 준비해 주세요. {QR링크}" },
+      { id: TEMPLATE(3), name: "만족도 설문 요청", body: "[늘푸른수학원] {학생명} 학부모님, 오늘 설명회는 어떠셨나요? 별점·후기 남기기: {설문링크}" },
+      { id: TEMPLATE(4), name: "취소 안내", body: "[늘푸른수학원] {설명회명} 예약이 취소되었습니다. 문의: {문의전화}" },
     ],
     smsLogs: [
       { id: uid("99999999", 1), when: at("07-15", "18:00:00"), to: 11, template: "전일 리마인드", session: "2026 대학교 입시 설명회", campus: "송파캠퍼스", ok: 11, fail: 0, auto: true },

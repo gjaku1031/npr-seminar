@@ -1,0 +1,16 @@
+[Unit]
+Description=NPR Seminar QA front door proxy to web 3100
+Requires=npr-seminar-qa-frontdoor.socket
+After=npr-seminar-qa-web.service
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3100
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+RestrictSUIDSGID=true

@@ -23,6 +23,8 @@ import { SheetWorkerService } from "../../src/modules/google-sheets/sheet-worker
 import { QrService } from "../../src/modules/qr/qr.service.js";
 import { SmsMessagePolicy } from "../../src/modules/sms/sms-message-policy.service.js";
 import { SmsOutboxService } from "../../src/modules/sms/sms-outbox.service.js";
+import { SmsTemplateCatalog } from "../../src/modules/sms/sms-template-catalog.service.js";
+import { SmsTemplateRenderer } from "../../src/modules/sms/sms-template-renderer.service.js";
 import { SurveysService } from "../../src/modules/surveys/surveys.service.js";
 import { QrTokenProtector } from "../../src/modules/family-bookings/qr-token-protector.service.js";
 
@@ -77,11 +79,12 @@ describe("family booking lifecycle", () => {
     proofService = new BookingProofService(prisma);
     const idempotency = new IdempotencyService(prisma);
     const sms = new SmsOutboxService(protector, new SmsMessagePolicy());
+    const smsTemplates = new SmsTemplateCatalog(new SmsTemplateRenderer());
     sheetOutbox = new SheetOutboxService(protector);
     const qrTokenProtector = new QrTokenProtector(environment);
     const bookingAccess = {} as never;
-    bookings = new FamilyBookingsService(prisma, protector, crypto, qrTokenProtector, proofService, sms, sheetOutbox, environment);
-    management = new FamilyBookingsManagementService(prisma, idempotency, crypto, sms, sheetOutbox, proofService, protector, bookingAccess, qrTokenProtector);
+    bookings = new FamilyBookingsService(prisma, protector, crypto, qrTokenProtector, proofService, sms, smsTemplates, sheetOutbox, environment);
+    management = new FamilyBookingsManagementService(prisma, idempotency, crypto, sms, smsTemplates, sheetOutbox, proofService, protector, bookingAccess, qrTokenProtector, environment);
     qr = new QrService(prisma, crypto, proofService, bookingAccess, qrTokenProtector);
     checkIns = new CheckInsService(prisma, crypto, sheetOutbox);
     surveys = new SurveysService(prisma, idempotency, proofService, protector);
@@ -98,7 +101,6 @@ describe("family booking lifecycle", () => {
       startsAt: new Date(Date.now() + 86_400_000), endsAt: new Date(Date.now() + 90_000_000),
       bookingOpensAt: new Date(Date.now() - 3_600_000), bookingClosesAt: new Date(Date.now() + 80_000_000), status: "OPEN",
       guestBookingEnabled: true,
-      capacity: { create: { capacity: 20 } },
     } });
     if (withSheet) await prisma.sheetMapping.create({ data: {
       seminarSessionPublicId: created.publicId, spreadsheetId: `integration-${created.publicId}`,
@@ -119,10 +121,17 @@ describe("family booking lifecycle", () => {
     return raw;
   }
 
-  async function student(phone: string, side: "MOTHER" | "FATHER") {
+  async function student(
+    phone: string,
+    side: "MOTHER" | "FATHER",
+    options: { readonly branchId?: bigint; readonly name?: string } = {},
+  ) {
     const contact = protector.protect(phone);
     return prisma.student.create({ data: {
-      sourceStudentNo: `ST-${randomUUID()}`, branchId, name: "재원 학생", className: "중3A",
+      sourceStudentNo: `ST-${randomUUID()}`,
+      branchId: options.branchId ?? branchId,
+      name: options.name ?? "재원 학생",
+      className: "중3A",
       sourceHash: bytes(createHash("sha256").update(randomUUID()).digest()), firstSeenRunId: runId, lastSeenRunId: runId,
       ...(side === "MOTHER" ? {
         motherPhoneCiphertext: bytes(contact.ciphertext), motherPhoneDigest: bytes(contact.digest), motherPhoneLast4: contact.last4,
@@ -192,8 +201,12 @@ describe("family booking lifecycle", () => {
     const manageProof = await proof(phone, "BOOKING_MANAGE");
     const owned = await management.listAuthorized(manageProof);
     expect(owned.items.map((item) => item.familyBookingId)).toContain(created.result.familyBookingId);
-    expect(owned.items[0]).toMatchObject({ contact: phone });
-    expect(owned.items[0]).not.toHaveProperty("maskedContact");
+    expect(owned.items[0]).toMatchObject({
+      maskedContact: "010-****-1001",
+      participants: [{ participantType: "GUEST", maskedName: "비****생", branch: "SONGPA" }],
+    });
+    expect(owned.items[0]).not.toHaveProperty("contact");
+    expect(owned.items[0]).not.toHaveProperty("students");
     expect((await management.listAuthorized(await proof("01029999999", "BOOKING_MANAGE"))).items).toHaveLength(0);
     await expect(guestBooking(phone, created.target, `duplicate-${randomUUID()}`)).rejects.toMatchObject({ code: "ACTIVE_FAMILY_BOOKING_EXISTS" });
 
@@ -216,7 +229,6 @@ describe("family booking lifecycle", () => {
       bookingClosesAt: new Date(Date.now() + 80_000_000),
       guestBookingEnabled: true,
       status: "OPEN",
-      capacity: { create: { capacity: 20 } },
     } });
 
     await expect(guestBooking("01020001002", hiddenSession)).rejects.toMatchObject({
@@ -270,6 +282,59 @@ describe("family booking lifecycle", () => {
     });
   });
 
+  it("builds cancellation SMS content and sender branch from only the pre-cancel active participants", async () => {
+    const phone = "01020002503";
+    const target = await session();
+    const historicStudent = await student(phone, "MOTHER", { name: "과거 학생" });
+    const created = await bookings.create({
+      sessionId: target.publicId,
+      bookingProof: await proof(phone, "FAMILY_BOOKING"),
+      attendanceParty: "MOTHER",
+      participantType: "ENROLLED",
+      studentIds: [historicStudent.publicId],
+    }, `cancel-audience-create-${randomUUID()}`);
+    const wiryeBranch = await prisma.branch.findUniqueOrThrow({ where: { code: "WIRYE" } });
+    const activeStudent = await student(phone, "MOTHER", {
+      branchId: wiryeBranch.id,
+      name: "현재 학생",
+    });
+    const actorSubject = randomUUID();
+    const updated = await management.update(created.familyBookingId, {
+      expectedVersion: 1,
+      studentIds: [activeStudent.publicId],
+      reason: "현재 참가자로 교체",
+    }, actorSubject, `cancel-audience-update-${randomUUID()}`);
+    const template = await prisma.smsTemplate.findFirstOrThrow({
+      where: { purpose: "BOOKING_CANCELLED", active: true, isDefault: true },
+    });
+    await prisma.smsTemplate.update({
+      where: { id: template.id },
+      data: { body: "[test] {학생명}|{문의전화}" },
+    });
+
+    try {
+      await management.cancel(
+        created.familyBookingId,
+        updated.version,
+        "OTHER",
+        actorSubject,
+        `cancel-audience-cancel-${randomUUID()}`,
+      );
+      const delivery = await prisma.smsOutbox.findFirstOrThrow({
+        where: { familyBookingPublicId: created.familyBookingId, source: "BOOKING_CANCELLED" },
+      });
+      const message = protector.decryptSmsPayload(delivery.messageCiphertext);
+      expect(delivery.branchCode).toBe("WIRYE");
+      expect(message).toBe("[test] 현재 학생|02-425-2652");
+      expect(message).not.toContain("과거 학생");
+    } finally {
+      await prisma.smsTemplate.update({
+        where: { id: template.id },
+        data: { body: template.body },
+      });
+    }
+  });
+
   it("classifies rollback-era cancellation inserts without weakening append-only audit events", async () => {
     const created = await guestBooking("01020002502");
     const booking = await prisma.familyBooking.findUniqueOrThrow({
@@ -301,7 +366,7 @@ describe("family booking lifecycle", () => {
     })).rejects.toThrow();
   });
 
-  it("rotates QR secret-safely, moves session with FK/capacity/Sheets intact, then cancels", async () => {
+  it("rotates QR secret-safely, moves session with FK/Sheets intact, then cancels", async () => {
     const phone = "01020003001";
     const source = await session(true);
     const target = await session(true);
@@ -327,17 +392,25 @@ describe("family booking lifecycle", () => {
     const beforeAccess = await prisma.bookingAccessCredential.findFirstOrThrow({
       where: { familyBooking: { publicId: created.result.familyBookingId }, status: "ACTIVE" },
     });
+    const moveProof = await proof(phone, "BOOKING_MANAGE");
     await expect(management.update(created.result.familyBookingId, {
       expectedVersion: current.version, seminarSessionId: target.publicId, reason: "비재원 비활성 회차 변경",
-    }, null, `move-disabled-${randomUUID()}`, await proof(phone, "BOOKING_MANAGE"))).rejects.toMatchObject({
+    }, null, `move-disabled-${randomUUID()}`, moveProof)).rejects.toMatchObject({
       code: "GUEST_BOOKING_DISABLED",
     });
+    expect((await prisma.otpProofAudit.findUniqueOrThrow({
+      where: { proofDigest: bytes(createHash("sha256").update(moveProof).digest()) },
+    })).status).toBe("VERIFIED");
     await prisma.seminarSession.update({ where: { id: target.id }, data: { guestBookingEnabled: true } });
     const moved = await management.update(created.result.familyBookingId, {
       expectedVersion: current.version, seminarSessionId: target.publicId, reason: "회차 변경",
-    }, null, `move-${randomUUID()}`, await proof(phone, "BOOKING_MANAGE"));
+    }, null, `move-${randomUUID()}`, moveProof);
+    expect((await prisma.otpProofAudit.findUniqueOrThrow({
+      where: { proofDigest: bytes(createHash("sha256").update(moveProof).digest()) },
+    })).status).toBe("CONSUMED");
     expect(moved.seminarSessionId).toBe(target.publicId);
-    expect(moved).toMatchObject({ contact: phone });
+    expect(moved).toMatchObject({ maskedContact: "010-****-3001" });
+    expect(moved).not.toHaveProperty("contact");
     const storedMove = await prisma.idempotencyRecord.findFirstOrThrow({
       where: { scope: "FAMILY_BOOKING_UPDATE" }, orderBy: { id: "desc" },
     });
@@ -357,27 +430,35 @@ describe("family booking lifecycle", () => {
     expect(afterAccess.expiresAt.getTime()).toBeGreaterThanOrEqual(targetEndsAt.getTime() + 30 * 24 * 60 * 60_000);
     const persisted = await prisma.familyBooking.findUniqueOrThrow({ where: { publicId: created.result.familyBookingId }, include: { students: true } });
     expect(persisted.students.every((link) => link.sessionId === target.id)).toBe(true);
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: source.id } })).reservedCount).toBe(0);
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: target.id } })).reservedCount).toBe(1);
+    expect(await prisma.familyBooking.count({
+      where: { sessionId: source.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+    })).toBe(0);
+    expect(await prisma.familyBooking.count({
+      where: { sessionId: target.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+    })).toBe(1);
     expect(await prisma.sheetOutbox.count({ where: { familyBookingPublicId: created.result.familyBookingId, eventType: "UPDATED" } })).toBe(2);
 
     const cancelled = await management.cancel(created.result.familyBookingId, moved.version, "SELF_SERVICE", null, `cancel-${randomUUID()}`, await proof(phone, "BOOKING_MANAGE"), "직접 취소");
-    expect(cancelled).toMatchObject({ status: "CANCELLED", contact: phone });
-    expect(cancelled.students).toHaveLength(1);
-    expect(cancelled.students[0]).toMatchObject({ participantType: "GUEST", name: "비재원 학생" });
-    expect((await management.get(created.result.familyBookingId)).students).toEqual(cancelled.students);
+    expect(cancelled).toMatchObject({
+      status: "CANCELLED",
+      maskedContact: "010-****-3001",
+      participants: [{ participantType: "GUEST", maskedName: "비****생", branch: "SONGPA" }],
+    });
+    expect(cancelled).not.toHaveProperty("contact");
+    expect(cancelled).not.toHaveProperty("students");
+    expect((await management.get(created.result.familyBookingId)).students[0]).toMatchObject({ name: "비재원 학생" });
     expect((await management.getAuthorized(
       created.result.familyBookingId,
       await proof(phone, "BOOKING_MANAGE"),
-    )).students).toEqual(cancelled.students);
+    )).participants).toEqual(cancelled.participants);
     const cancelledList = await management.list({
       sessionId: target.publicId, status: "CANCELLED", page: 1, pageSize: 20,
     });
-    expect(cancelledList.items.find((item) => item.familyBookingId === created.result.familyBookingId)?.students)
-      .toEqual(cancelled.students);
+    expect(cancelledList.items.find((item) => item.familyBookingId === created.result.familyBookingId)?.students[0])
+      .toMatchObject({ name: "비재원 학생" });
     const ownedAfterCancellation = await management.listAuthorized(await proof(phone, "BOOKING_MANAGE"));
-    expect(ownedAfterCancellation.items.find((item) => item.familyBookingId === created.result.familyBookingId)?.students)
-      .toEqual(cancelled.students);
+    expect(ownedAfterCancellation.items.find((item) => item.familyBookingId === created.result.familyBookingId)?.participants)
+      .toEqual(cancelled.participants);
     const eventMetadata = await prisma.bookingEvent.findMany({
       where: { familyBooking: { publicId: created.result.familyBookingId } },
       select: { eventType: true, cancellationType: true, safeMetadata: true },
@@ -387,7 +468,9 @@ describe("family booking lifecycle", () => {
       cancellationType: "SELF_SERVICE",
       safeMetadata: { reason: "직접 취소" },
     });
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: target.id } })).reservedCount).toBe(0);
+    expect(await prisma.familyBooking.count({
+      where: { sessionId: target.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+    })).toBe(0);
   });
 
   it("drains durable guest create/update/cancel deliveries and reconciles an expired worker lease", async () => {
@@ -540,7 +623,7 @@ describe("family booking lifecycle", () => {
     expect(JSON.stringify(safeMetadata)).not.toContain(phone);
   });
 
-  it("uses both current enrolled parent phones and the canonical primary teacher in A:K", async () => {
+  it("uses both current enrolled parent phones, current class columns, and the canonical primary teacher", async () => {
     const motherPhone = "01020003701";
     const fatherPhone = "01020003702";
     const target = await session(true);
@@ -573,7 +656,8 @@ describe("family booking lifecycle", () => {
     expect(plans[0]?.row).toMatchObject({
       sourceStudentNo: enrolled.sourceStudentNo,
       studentName: enrolled.name,
-      className: enrolled.className,
+      mathClassNames: enrolled.className,
+      scienceClassNames: "",
       schoolName: enrolled.schoolName,
       grade: enrolled.grade,
       primaryTeacher: "김담임",
@@ -640,6 +724,7 @@ describe("family booking lifecycle", () => {
       assignmentTeacherName: "수학강사",
       scienceOnly: false,
     });
+    await assignment(math.student.id, "과2내신[토10]", "과학강사2");
     const scienceBooking = await bookings.create({
       sessionId: target.publicId,
       bookingProof: await proof(sciencePhone, "FAMILY_BOOKING"),
@@ -723,12 +808,10 @@ describe("family booking lifecycle", () => {
     await surveys.submit(scienceBooking.familyBookingId, {
       rating: 5,
       comment: "과학 정책",
-      photoAttached: false,
     }, await proof(sciencePhone, "BOOKING_MANAGE"), `science-survey-${randomUUID()}`);
     await surveys.submit(mathBooking.familyBookingId, {
       rating: 4,
       comment: "수학 정책",
-      photoAttached: false,
     }, await proof(mathPhone, "BOOKING_MANAGE"), `math-survey-${randomUUID()}`);
     const surveyPage = await surveys.listSession(target.publicId, 1, 50);
     expect(surveyPage.items.find((item) => item.familyBookingId === scienceBooking.familyBookingId)?.participant.teacherName)
@@ -768,8 +851,12 @@ describe("family booking lifecycle", () => {
     const mathPlans = plans.filter((plan) => plan.row.sourceStudentNo === math.student.sourceStudentNo);
     expect(sciencePlans).toHaveLength(2);
     expect(sciencePlans.every((plan) => plan.row.primaryTeacher === "")).toBe(true);
+    expect(sciencePlans.every((plan) => plan.row.mathClassNames === ""
+      && plan.row.scienceClassNames === "과고2역학SKY[일5]")).toBe(true);
     expect(mathPlans).toHaveLength(2);
     expect(mathPlans.every((plan) => plan.row.primaryTeacher === "수학담임")).toBe(true);
+    expect(mathPlans.every((plan) => plan.row.mathClassNames === "고2수학[월수]"
+      && plan.row.scienceClassNames === "과2내신[토10]")).toBe(true);
 
     const storedAssignments = await prisma.studentClassAssignment.findMany({
       where: { id: { in: [science.sourceAssignment.id, math.sourceAssignment.id] } },
@@ -789,9 +876,13 @@ describe("family booking lifecycle", () => {
       management.cancel(created.result.familyBookingId, 1, "SELF_SERVICE", null, `race-cancel-${randomUUID()}`, await proof(phone, "BOOKING_MANAGE"), "경합 취소"),
     ]);
     expect(race.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
-    for (const capacity of await prisma.sessionCapacity.findMany({ where: { sessionId: { in: [source.id, target.id] } } })) {
-      expect(capacity.reservedCount).toBeGreaterThanOrEqual(0);
-    }
+    expect(await prisma.familyBooking.count({
+      where: {
+        publicId: created.result.familyBookingId,
+        sessionId: { in: [source.id, target.id] },
+        status: { in: ["RESERVED", "CHECKED_IN"] },
+      },
+    })).toBeLessThanOrEqual(1);
 
     const surveyPhone = "01020004002";
     const surveyBooking = await guestBooking(surveyPhone);
@@ -799,11 +890,11 @@ describe("family booking lifecycle", () => {
     const surveyKey = `survey-${randomUUID()}`;
     const surveyProof = await proof(surveyPhone, "BOOKING_MANAGE");
     const submitted = await surveys.submit(surveyBooking.result.familyBookingId, {
-      rating: 5, comment: "좋았습니다", photoAttached: true, photoName: "review.jpg",
+      rating: 5, comment: "좋았습니다",
     }, surveyProof, surveyKey);
-    expect(submitted).toMatchObject({ rating: 5, replayed: false, photoName: "review.jpg" });
+    expect(submitted).toMatchObject({ rating: 5, replayed: false });
     expect(await surveys.submit(surveyBooking.result.familyBookingId, {
-      rating: 5, comment: "좋았습니다", photoAttached: true, photoName: "review.jpg",
+      rating: 5, comment: "좋았습니다",
     }, surveyProof, surveyKey)).toMatchObject({ replayed: true });
     const listed = await surveys.listSession(surveyBooking.target.publicId, 1, 50);
     expect(listed.summary).toMatchObject({ averageRating: 5, responseCount: 1 });
@@ -821,8 +912,6 @@ describe("family booking lifecycle", () => {
         participantCount: 1,
         additionalParticipantCount: 0,
       },
-      photoAttached: true,
-      photoName: "review.jpg",
     });
 
     const siblingPhone = "01020004004";
@@ -854,7 +943,6 @@ describe("family booking lifecycle", () => {
     await surveys.submit(siblingBooking.familyBookingId, {
       rating: 4,
       comment: "형제 설문",
-      photoAttached: false,
     }, await proof(siblingPhone, "BOOKING_MANAGE"), `survey-siblings-${randomUUID()}`);
     const siblingSurvey = await surveys.listSession(siblingSession.publicId, 1, 50);
     expect(siblingSurvey.items[0]).toMatchObject({
@@ -870,9 +958,9 @@ describe("family booking lifecycle", () => {
         participantCount: 2,
         additionalParticipantCount: 1,
       },
-      photoAttached: false,
-      photoName: null,
     });
+    expect(siblingSurvey.items[0]).not.toHaveProperty("photoAttached");
+    expect(siblingSurvey.items[0]).not.toHaveProperty("photoName");
     expect(siblingSurvey.items[0]).not.toHaveProperty("photoUrl");
 
     const checkPhone = "01020004003";

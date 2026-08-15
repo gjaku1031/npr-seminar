@@ -15,7 +15,7 @@ export interface DuplicateKey {
 /**
  * ★ DB 교체 격리지점 (설계 §6) ★ — 예약 계약. 시스템의 중심.
  * 모바일·콘솔 드랍다운·수동 추가·현장 경로가 모두 이 계약을 통과하므로,
- * 서버 불변식(중복·정원)이 여기 위(서비스)에서 일괄 적용된다.
+ * 서버 불변식(중복·예약 가능 기간)이 여기 위(서비스)에서 일괄 적용된다.
  *
  * v4.0: checkIn에 스캐너 번호 기록, 생성·취소에 행위자 기준 로그 적재,
  * 예약 명단 드랍다운의 참석 학부모 지정(updateReservedBy)·`-` 제거(remove) 추가 (명세 §4.5).
@@ -38,13 +38,11 @@ export interface ReservationRepository {
 
   /** 중복 예약 존재 여부 — 유효(reserved·entered) 건만 (설계 §6.4) */
   existsActive(key: DuplicateKey): Promise<boolean>;
-  /** 유효 예약 수 — 정원 판정 기준 (설계 §6.4) */
-  countActive(sessionId: string): Promise<number>;
 
   /**
    * 단건 생성. 예약번호는 구현이 세션 회차 기준으로 채번하고,
    * 생성 로그(행위자 기준 라벨)를 함께 적재한다 (명세 §11).
-   * ⚠️ 정원·중복 검사는 서비스가 선행하지만, 동시성 하에서는 최종 방어가 필요하다 —
+   * ⚠️ 중복 검사는 서비스가 선행하지만, 동시성 하에서는 최종 방어가 필요하다 —
    *    구현은 code 유니크 제약과 함께 원자적으로 처리해야 한다 (설계 §6.4).
    */
   create(draft: ReservationDraft): Promise<Reservation>;

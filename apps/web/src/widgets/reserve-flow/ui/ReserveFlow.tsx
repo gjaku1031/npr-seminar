@@ -22,13 +22,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Calendar, Check, MapPin, MessageSquare, Smartphone } from "lucide-react";
 import { ReservationQr } from "@/entities/reservation";
-import { Badge, Button, Input, KV, Select } from "@/shared/ui";
-import { fmtDateTime } from "@/shared/lib/format";
+import { Badge, BRAND_NAME, BRAND_NAME_ROMAN, BRAND_QR_DOWNLOAD_BASENAME, brandSeminarTitle, Button, Input, KV, Select } from "@/shared/ui";
+import { fmtDateTime, fmtSessionCardDateTime } from "@/shared/lib/format";
 import { fmtPhone } from "@/shared/lib/phone";
+import { maskName, maskPhone } from "@/shared/lib/mask";
+import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 import {
   ATTENDANCE_PARTY_LABELS,
+  attendancePartySummary,
   AVAILABILITY_LABELS,
-  BRANCH_LABELS,
   BRANCH_OPTIONS,
   createPublicFamilyBooking,
   defaultErrorMessage,
@@ -49,6 +51,7 @@ import {
   campusSessionCount,
   guestEntryState,
   isSessionBookableForType,
+  publicBranchLabel,
   sessionsForType,
   useBookingProof,
   useOtpFlow,
@@ -63,12 +66,6 @@ import { ReservationTypeStep } from "./ReservationTypeStep";
 type Step = "type" | "campus" | "list" | "auth" | "children" | "guest" | "done" | "manage";
 
 const ATTENDANCE_OPTIONS: AttendanceParty[] = ["MOTHER", "FATHER", "BOTH"];
-
-/**
- * 사용자가 직접 내보내는 QR PNG 의 파일명 (확장자는 ReservationQr 가 붙인다).
- * 모든 사용자가 같은 고정 문구를 쓴다 — 예약 id·QR 토큰·연락처·학생 이름을 절대 넣지 않는다.
- */
-const QR_DOWNLOAD_BASENAME = "npr-admission-qr";
 
 interface FreshTicket {
   booking: FamilyBooking;
@@ -85,15 +82,28 @@ interface CreateCta {
 }
 
 function sessionMeta(session: PublicSeminarSession): string {
-  return `${fmtDateTime(new Date(session.startsAt))} · ${session.location}`;
+  return `${fmtDateTime(new Date(session.startsAt))} · ${SEMINAR_LOCATION}`;
 }
 
-export function ReserveFlow() {
-  const [step, setStep] = useState<Step>("type");
+/** 초기 진입 모드 — 루트 포스터의 두 액션이 `/reserve` 검색어(`mode`)로 이걸 정한다. */
+export type ReserveInitialMode = "reserve" | "manage";
+
+export interface ReserveFlowProps {
+  /**
+   * `manage` 면 첫 화면을 예약 조회·변경·취소 패널로 연다("이미 예약하셨나요?" 진입).
+   * 그 밖(기본 `reserve`)은 지금처럼 예약 유형 선택부터 시작한다. 플로우 내부 동작은 그대로다.
+   */
+  initialMode?: ReserveInitialMode;
+}
+
+export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) {
+  const [step, setStep] = useState<Step>(initialMode === "manage" ? "manage" : "type");
   const [participantType, setParticipantType] = useState<ParticipantType | null>(null);
   const [branch, setBranch] = useState<Branch | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [attendance, setAttendance] = useState<AttendanceParty>("MOTHER");
+  // 개인정보 수집·이용 동의 — 예약 커밋 전 필수. API 본문에는 싣지 않고 UI 게이트로만 쓴다.
+  const [consent, setConsent] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const { sessions, loading: sessionsLoading, error: sessionsError, reload } = usePublicSessions();
@@ -162,7 +172,7 @@ export function ReserveFlow() {
         if (session?.guestBookingEnabled) {
           setStep("guest");
         } else {
-          setCreateError("이 회차의 비재원생 예약이 마감됐어요. 회차를 다시 선택해 주세요.");
+          setCreateError("이 회차의 비재원생 예약이 마감됐습니다. 회차를 다시 선택해 주세요.");
           reload();
           setStep("list");
         }
@@ -178,6 +188,7 @@ export function ReserveFlow() {
     setGuest({ name: "", schoolName: "", grade: "" });
     setCreateError(null);
     setCreateCta(null);
+    setConsent(false);
     createKey.reset();
   }, [proof, otp, createKey]);
 
@@ -213,12 +224,12 @@ export function ReserveFlow() {
         case "GUEST_BOOKING_DISABLED":
           setCreateError(null);
           setCreateCta(null);
-          flash("이 회차의 비재원생 예약이 마감됐어요.");
+          flash("이 회차의 비재원생 예약이 마감됐습니다.");
           reload();
           setStep("list");
           return;
         case "ENROLLED_CONTACT_MUST_USE_ENROLLED_FLOW":
-          setCreateError("입력하신 연락처는 재원생 학부모 연락처예요. 재원생 예약으로 진행해 주세요.");
+          setCreateError("입력하신 연락처는 재원생 학부모 연락처입니다. 재원생 예약으로 진행해 주세요.");
           setCreateCta({
             label: "재원생 예약으로 다시 시작",
             run: () => {
@@ -229,23 +240,22 @@ export function ReserveFlow() {
           });
           return;
         case "ENROLLED_STUDENT_NOT_FOUND":
-          setCreateError("이 캠퍼스에 연결된 재원생이 없어요. 처음부터 다시 선택해 주세요.");
+          setCreateError("이 캠퍼스에 연결된 재원생이 없습니다. 처음부터 다시 선택해 주세요.");
           setCreateCta({ label: "처음부터 다시", run: reset });
           return;
         case "ACTIVE_FAMILY_BOOKING_EXISTS":
-          setCreateError("이미 같은 연락처로 예약이 있어요.");
+          setCreateError("이미 같은 연락처로 예약이 있습니다.");
           setCreateCta({ label: "예약 조회", run: () => { invalidateAuth(); setStep("manage"); } });
           return;
         case "SESSION_BRANCH_MISMATCH":
-          setCreateError("선택한 캠퍼스와 회차가 맞지 않아요. 회차를 다시 선택해 주세요.");
+          setCreateError("선택한 캠퍼스와 회차가 맞지 않습니다. 회차를 다시 선택해 주세요.");
           setCreateCta({ label: "회차 다시 선택", run: () => { invalidateAuth(); setStep("list"); } });
           return;
-        case "CAPACITY_EXCEEDED":
         case "SESSION_NOT_BOOKABLE":
         case "BOOKING_WINDOW_CLOSED":
           setCreateError(null);
           setCreateCta(null);
-          flash("이 회차는 예약이 마감됐어요.");
+          flash("이 회차는 예약이 마감됐습니다.");
           reload();
           setStep("list");
           return;
@@ -255,7 +265,7 @@ export function ReserveFlow() {
       // proof 만료 계열 — 인증부터 다시.
       if (caught.status === 401 || caught.status === 403) {
         invalidateAuth();
-        flash("본인 확인이 만료됐어요. 다시 인증해 주세요.");
+        flash("본인 확인이 만료됐습니다. 다시 인증해 주세요.");
         setStep("auth");
         return;
       }
@@ -271,7 +281,7 @@ export function ReserveFlow() {
 
     // GUEST 는 생성 직전 flag 를 다시 확인한다. 최종 권위는 POST 응답이다.
     if (participantType === "GUEST" && !session.guestBookingEnabled) {
-      setCreateError("이 회차의 비재원생 예약이 마감됐어요. 회차를 다시 선택해 주세요.");
+      setCreateError("이 회차의 비재원생 예약이 마감됐습니다. 회차를 다시 선택해 주세요.");
       setCreateCta({ label: "회차 다시 선택", run: () => { reload(); setStep("list"); } });
       return;
     }
@@ -317,7 +327,7 @@ export function ReserveFlow() {
               booking: result.booking,
               qrToken: null,
               qrNotice:
-                "예약은 정상적으로 완료됐어요. 예약 확인 링크(예약 조회)에서 기존 QR을 확인할 수 있어요.",
+                "예약이 정상적으로 완료됐습니다. 예약 확인 링크(예약 조회)에서 기존 QR을 확인하실 수 있습니다.",
             },
       );
       setStep("done");
@@ -347,7 +357,7 @@ export function ReserveFlow() {
   if (step === "campus")
     return (
       <div data-screen-label="모바일 — 캠퍼스 선택" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
-        <FlowHeader back={() => { setParticipantType(null); setBranch(null); invalidateAuth(); setStep("type"); }} title="npr 입시설명회" />
+        <FlowHeader back={() => { setParticipantType(null); setBranch(null); invalidateAuth(); setStep("type"); }} title={brandSeminarTitle()} />
         <div style={{ padding: "10px 18px 30px" }}>
           <div style={{ padding: "20px 4px 18px" }}>
             <div style={{ fontSize: 11, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)" }}>STEP 2 · CAMPUS</div>
@@ -356,12 +366,12 @@ export function ReserveFlow() {
               <br />
               선택해 주세요
             </h2>
-            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 6 }}>예약하실 캠퍼스를 먼저 골라 주세요.</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 6 }}>예약하실 캠퍼스를 먼저 선택해 주세요.</div>
           </div>
 
           {sessionsError && (
             <div style={{ marginBottom: 14 }}>
-              <ErrorNote message={`설명회 목록을 불러오지 못했어요. ${sessionsError}`} />
+              <ErrorNote message={`설명회 목록을 불러오지 못했습니다. ${sessionsError}`} />
               <Button variant="secondary" fullWidth onClick={reload} style={{ marginTop: 10 }}>
                 다시 시도
               </Button>
@@ -382,7 +392,8 @@ export function ReserveFlow() {
                     <MapPin size={20} aria-hidden="true" />
                   </span>
                   <span style={{ flex: 1 }}>
-                    <span style={{ display: "block", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--text-strong)" }}>{option.label}</span>
+                    {/* 공개 예약 사용자 문구는 풀 라벨(…캠퍼스). 전역 BRANCH_LABELS/BRANCH_OPTIONS 는 관리자 화면용이라 그대로 둔다. */}
+                    <span style={{ display: "block", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--text-strong)" }}>{publicBranchLabel(option.value)}</span>
                     <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
                       {sessionsLoading ? "불러오는 중…" : `진행 설명회 ${count}개`}
                     </span>
@@ -403,12 +414,12 @@ export function ReserveFlow() {
   if (step === "list")
     return (
       <div data-screen-label="모바일 — 설명회 선택" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
-        <FlowHeader back={() => { setBranch(null); setSessionId(null); invalidateAuth(); setStep("campus"); }} title="npr 입시설명회" />
+        <FlowHeader back={() => { setBranch(null); setSessionId(null); invalidateAuth(); setStep("campus"); }} title={brandSeminarTitle()} />
         <div style={{ padding: "10px 18px 30px" }}>
           <div style={{ padding: "20px 4px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 11, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)" }}>STEP 3 · RESERVATION</span>
-              {branch && <Badge tone="brand" size="sm">{BRANCH_LABELS[branch]}</Badge>}
+              {branch && <Badge tone="brand" size="sm">{publicBranchLabel(branch)}</Badge>}
               <Badge tone="neutral" size="sm">{participantType === "GUEST" ? "비재원생" : "재원생"}</Badge>
             </div>
             <h2 style={{ fontSize: 24, fontWeight: 800, marginTop: 6, lineHeight: 1.3 }}>
@@ -425,12 +436,12 @@ export function ReserveFlow() {
           )}
 
           {sessionsLoading && (
-            <p style={{ padding: "24px 4px", fontSize: 13, color: "var(--text-faint)" }}>설명회를 불러오는 중이에요.</p>
+            <p style={{ padding: "24px 4px", fontSize: 13, color: "var(--text-faint)" }}>설명회를 불러오는 중입니다.</p>
           )}
 
           {sessionsError && !sessionsLoading && (
             <>
-              <ErrorNote message={`설명회 목록을 불러오지 못했어요. ${sessionsError}`} />
+              <ErrorNote message={`설명회 목록을 불러오지 못했습니다. ${sessionsError}`} />
               <Button variant="secondary" fullWidth onClick={reload} style={{ marginTop: 10 }}>
                 다시 시도
               </Button>
@@ -440,8 +451,8 @@ export function ReserveFlow() {
           {!sessionsLoading && !sessionsError && visible.length === 0 && (
             <p style={{ padding: "24px 4px", fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.6 }}>
               {participantType === "GUEST"
-                ? "지금 이 캠퍼스에서 비재원생이 예약할 수 있는 설명회가 없어요."
-                : "지금 이 캠퍼스에서 예약할 수 있는 설명회가 없어요."}
+                ? "지금 이 캠퍼스에서 비재원생이 예약할 수 있는 설명회가 없습니다."
+                : "지금 이 캠퍼스에서 예약할 수 있는 설명회가 없습니다."}
             </p>
           )}
 
@@ -465,10 +476,9 @@ export function ReserveFlow() {
                       <Calendar size={12} aria-hidden="true" /> {fmtDateTime(new Date(s.startsAt))}
                     </span>
                     <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
-                      <MapPin size={12} aria-hidden="true" /> {s.location}
+                      <MapPin size={12} aria-hidden="true" /> {SEMINAR_LOCATION}
                     </span>
                   </span>
-                  {/* 잔여석 숫자는 숨긴다 — 가능 여부만 서버 판정으로 보여 준다(정원 로직은 유지). */}
                   <span style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
                     {bookable ? (
                       <Badge tone="accent" size="sm">{AVAILABILITY_LABELS.AVAILABLE}</Badge>
@@ -503,8 +513,8 @@ export function ReserveFlow() {
             otp={otp}
             hint={
               participantType === "GUEST"
-                ? "예약 확인 문자를 받으실 학부모 연락처예요. 모/부 번호 모두 가능해요."
-                : "재원생 학부모 연락처예요. 모/부 번호 모두 가능하고, 이 연락처의 자녀가 자동으로 연결돼요."
+                ? "예약 확인 문자를 받으실 학부모 연락처입니다. 모/부 번호 모두 가능합니다."
+                : "재원생 학부모 연락처입니다. 모/부 번호 모두 가능하며, 이 연락처의 자녀가 자동으로 연결됩니다."
             }
           />
           {createError && (
@@ -534,7 +544,7 @@ export function ReserveFlow() {
           </div>
 
           {students === null && !studentsError && (
-            <p style={{ padding: "18px 4px", fontSize: 13, color: "var(--text-faint)" }}>자녀 정보를 불러오는 중이에요.</p>
+            <p style={{ padding: "18px 4px", fontSize: 13, color: "var(--text-faint)" }}>자녀 정보를 불러오는 중입니다.</p>
           )}
 
           <ErrorNote message={studentsError} />
@@ -543,7 +553,7 @@ export function ReserveFlow() {
             <>
               <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: "var(--radius-md)", background: "var(--surface-accent-soft)", color: "var(--mint-700)", fontSize: 12.5, display: "flex", gap: 8, alignItems: "center", lineHeight: 1.45 }}>
                 <Check size={15} aria-hidden="true" style={{ flexShrink: 0 }} />
-                이 연락처의 자녀 <b>{students.length}명 자동 연결됨</b> — 형제·자매는 하나의 가족 예약으로 묶여요.
+                이 연락처의 자녀 <b>{students.length}명 자동 연결됨</b> — 형제·자매는 하나의 가족 예약으로 묶입니다.
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
@@ -556,7 +566,7 @@ export function ReserveFlow() {
                     <span style={{ flex: 1 }}>
                       <span style={{ display: "block", fontWeight: 800, fontSize: 15.5, color: "var(--text-strong)" }}>{s.name}</span>
                       <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
-                        {[BRANCH_LABELS[s.branch], s.schoolName, s.grade].filter(Boolean).join(" · ")}
+                        {[publicBranchLabel(s.branch), s.schoolName, s.grade].filter(Boolean).join(" · ")}
                       </span>
                     </span>
                     <Badge tone="accent" size="sm">자동 연결</Badge>
@@ -565,12 +575,14 @@ export function ReserveFlow() {
               </div>
 
               <AttendancePicker value={attendance} onChange={setAttendance} />
+
+              <PrivacyConsent checked={consent} onChange={setConsent} />
             </>
           )}
 
           {students && students.length === 0 && (
             <div style={{ marginTop: 12, padding: "14px 16px", borderRadius: "var(--radius-md)", background: "var(--surface-accent-soft)", color: "var(--mint-700)", fontSize: 13, lineHeight: 1.6 }}>
-              이 캠퍼스에 이 연락처로 연결된 재원생이 없어요. 자녀가 아직 NPR에 다니지 않는다면 비재원생 예약을 이용해 주세요.
+              이 캠퍼스에 이 연락처로 연결된 재원생이 없습니다. 자녀가 아직 {BRAND_NAME}에 다니지 않는다면 비재원생 예약을 이용해 주세요.
             </div>
           )}
 
@@ -591,7 +603,7 @@ export function ReserveFlow() {
               처음부터 다시 선택
             </Button>
           ) : (
-            <Button size="lg" fullWidth disabled={!students || students.length === 0 || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
+            <Button size="lg" fullWidth disabled={!students || students.length === 0 || !consent || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
               {/* 좌석은 참석 학부모 인원 기준 — 자녀 수(students.length)가 아니라 seatCountFor 로 센다. */}
               {creating ? "예약 중…" : students ? `${seatCountFor(attendance)}명 예약하기` : "불러오는 중…"}
             </Button>
@@ -628,10 +640,12 @@ export function ReserveFlow() {
           />
 
           <div style={{ fontSize: 12.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
-            캠퍼스 <b>{BRANCH_LABELS[branch]}</b> 로 등록돼요. 확인된 연락처로 예약이 만들어져요.
+            <b>{publicBranchLabel(branch)}</b>로 등록됩니다. 확인된 연락처로 예약이 만들어집니다.
           </div>
 
           <AttendancePicker value={attendance} onChange={setAttendance} />
+
+          <PrivacyConsent checked={consent} onChange={setConsent} />
 
           {createError && <ErrorNote message={createError} />}
           {createError && createCta && (
@@ -641,7 +655,7 @@ export function ReserveFlow() {
           )}
         </div>
         <BottomBar>
-          <Button size="lg" fullWidth disabled={!formValid || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
+          <Button size="lg" fullWidth disabled={!formValid || !consent || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
             {/* 재원생과 동일한 좌석(참석 학부모 인원) 기준 CTA — 자녀 수와 무관하다. */}
             {creating ? "예약 중…" : `${seatCountFor(attendance)}명 예약하기`}
           </Button>
@@ -670,7 +684,7 @@ function ManageLink({ onManage }: { onManage: () => void }) {
         onClick={onManage}
         style={{ background: "none", border: "none", fontSize: 13.5, fontWeight: 700, color: "var(--violet-800)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer", fontFamily: "var(--font-body)", padding: 8 }}
       >
-        이미 예약했나요? 예약 조회 · 변경 · 취소
+        이미 예약하셨나요? 예약 조회 · 변경 · 취소
       </button>
     </div>
   );
@@ -707,17 +721,55 @@ function AttendancePicker({
               <span style={{ width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: on ? "var(--violet-900)" : "transparent", border: on ? "1.5px solid var(--violet-900)" : "1.5px solid var(--border-soft)", boxSizing: "border-box" }}>
                 {on && <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: "#fff" }} />}
               </span>
-              <span aria-hidden="true">
-                {ATTENDANCE_PARTY_LABELS[option]} · {seats}명
-              </span>
+              <span aria-hidden="true">{attendancePartySummary(option)}</span>
             </button>
           );
         })}
       </div>
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-faint)", lineHeight: 1.55 }}>
-        좌석은 참석 학부모 인원만큼만 배정돼요. 자녀(학생)는 참석 인원에 포함되지 않아 자녀 수만큼 좌석이 늘지 않아요.
+        좌석은 참석 학부모 인원만큼만 배정됩니다. 자녀(학생)는 참석 인원에 포함되지 않아 자녀 수만큼 좌석이 늘지 않습니다.
       </p>
     </fieldset>
+  );
+}
+
+/* ── 개인정보 수집·이용 동의 (필수) — 예약 커밋 게이트. API 본문엔 싣지 않는다 ── */
+function PrivacyConsent({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        gap: 10,
+        alignItems: "flex-start",
+        marginTop: 16,
+        padding: "14px 16px",
+        borderRadius: "var(--radius-md)",
+        background: "var(--surface-sunken)",
+        border: "1px solid var(--border-hairline)",
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label="개인정보 수집·이용에 동의합니다 (필수)"
+        style={{ width: 18, height: 18, marginTop: 1, accentColor: "var(--violet-800)", flexShrink: 0 }}
+      />
+      <span style={{ fontSize: 12.5, color: "var(--text-body)", lineHeight: 1.55 }}>
+        <b style={{ color: "var(--text-strong)" }}>[필수] 개인정보 수집·이용 동의</b>
+        <span style={{ display: "block", marginTop: 4, color: "var(--text-muted)" }}>
+          설명회 예약 확인과 안내 문자 발송을 위해 학부모 연락처와 참석 정보, 학생 정보(이름·학교·학년)를
+          수집·이용합니다. 동의하셔야 예약을 진행할 수 있습니다.
+        </span>
+      </span>
+    </label>
   );
 }
 
@@ -747,7 +799,7 @@ export function OtpFields({ otp, hint }: { otp: ReturnType<typeof useOtpFlow>; h
         <div style={{ marginTop: 16 }}>
           {/* 서버가 201 을 준 뒤에만 이 문구가 뜬다 */}
           <p role="status" aria-live="polite" style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--mint-700)", lineHeight: 1.55 }}>
-            인증번호 6자리를 문자로 보냈어요. 5분 안에 입력해 주세요.
+            인증번호 6자리를 문자로 보냈습니다. 5분 안에 입력해 주세요.
           </p>
           <Input
             label="인증번호 6자리"
@@ -765,7 +817,7 @@ export function OtpFields({ otp, hint }: { otp: ReturnType<typeof useOtpFlow>; h
               onClick={otp.restart}
               style={{ background: "none", border: "none", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer", fontFamily: "var(--font-body)", padding: 8 }}
             >
-              번호를 잘못 입력했어요
+              번호를 잘못 입력했습니다
             </button>
           </div>
         </div>
@@ -796,13 +848,13 @@ function Ticket({
           <Check size={24} strokeWidth={2.6} aria-hidden="true" />
         </span>
         <h2 role="status" aria-live="polite" style={{ fontSize: 23, fontWeight: 800, marginTop: 14, textAlign: "center" }}>
-          예약이 확정됐어요!
+          예약이 확정됐습니다!
         </h2>
 
         {/* QR 224px 가 390px 폭에 들어가도록 세로로 쌓는다 */}
         <div style={{ width: "100%", maxWidth: 340, marginTop: 20, borderRadius: "var(--radius-lg)", background: "var(--surface-card)", boxShadow: "var(--shadow-raised)", overflow: "hidden", animation: "ds-fade-up var(--dur-hero) var(--ease-spring) 200ms both" }}>
           <div style={{ background: "var(--surface-brand)", color: "var(--text-on-brand)", padding: "16px 20px" }}>
-            <div style={{ fontSize: 10.5, letterSpacing: "var(--tracking-caps)", color: "var(--mint-400)", fontWeight: 700 }}>NPR ADMISSION QR</div>
+            <div style={{ fontSize: 10.5, letterSpacing: "var(--tracking-caps)", color: "var(--mint-400)", fontWeight: 700 }}>{BRAND_NAME_ROMAN} ADMISSION QR</div>
             <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, marginTop: 4, lineHeight: 1.35 }}>
               {session?.seminarTitle ?? "예약 완료"}
             </div>
@@ -810,7 +862,7 @@ function Ticket({
 
           <div style={{ padding: "18px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
             {ticket.qrToken ? (
-              <ReservationQr qrToken={ticket.qrToken} downloadName={QR_DOWNLOAD_BASENAME} familyBookingId={booking.familyBookingId} />
+              <ReservationQr qrToken={ticket.qrToken} downloadName={BRAND_QR_DOWNLOAD_BASENAME} familyBookingId={booking.familyBookingId} />
             ) : (
               <p role="status" aria-live="polite" style={{ margin: 0, padding: "16px 14px", borderRadius: "var(--radius-md)", background: "var(--surface-accent-soft)", color: "var(--mint-700)", fontSize: 12.5, lineHeight: 1.6, textAlign: "center" }}>
                 {ticket.qrNotice}
@@ -818,16 +870,17 @@ function Ticket({
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 9, width: "100%" }}>
-              <KV k="참가자" v={booking.students.map((s) => s.name).join(", ")} />
-              <KV k="참석 학부모" v={`${ATTENDANCE_PARTY_LABELS[booking.attendanceParty]} · ${booking.seatCount}석`} />
-              {session && <KV k="일시" v={sessionMeta(session)} />}
-              <KV k="연락처" v={fmtPhone(booking.contact)} />
+              {/* 공개 화면 표시 마스킹 — API 원본(booking)은 그대로 두고 표시할 때만 가린다. */}
+              <KV k="참석자명" v={booking.students.map((s) => maskName(s.name)).join(", ")} />
+              <KV k="참석 학부모" v={attendancePartySummary(booking.attendanceParty)} />
+              {session && <KV k="일시" v={`${fmtSessionCardDateTime(new Date(session.startsAt))} · ${SEMINAR_LOCATION}`} />}
+              <KV k="연락처" v={maskPhone(fmtPhone(booking.contact))} />
             </div>
           </div>
 
           <div style={{ padding: "14px 20px 18px", background: "var(--surface-accent-soft)", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12.5, color: "var(--mint-700)", lineHeight: 1.55 }}>
             <MessageSquare size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>입장 시 태블릿에 이 QR을 보여주세요.</span>
+            <span>입장 시 태블릿에 이 QR을 보여 주세요.</span>
           </div>
         </div>
 

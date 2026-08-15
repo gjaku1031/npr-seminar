@@ -11,17 +11,20 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { afterEach } from "node:test";
 import {
   classifySmsSendFailure,
-  isLastActiveTemplate,
   isSmsSendDisabled,
   primarySample,
+  removeSmsTemplate,
   smsContentErrorMessage,
   smsOutcomeOf,
   smsReadinessWarning,
   smsSuccessRate,
   toSmsLogRows,
+  type UpdateSmsTemplateInput,
 } from "./admin-sms";
+import { resetCsrfToken } from "./client";
 import { ApiError } from "./problem";
 import type {
   SmsBatchSummary,
@@ -30,6 +33,7 @@ import type {
   SmsMessageSummary,
   SmsTargetPreview,
   SmsTemplate,
+  SmsTemplateRemovalResult,
 } from "./contract";
 
 /* ── 픽스처 ──────────────────────────────────────────────────────────────── */
@@ -411,28 +415,129 @@ const template = (overrides: Partial<SmsTemplate> = {}): SmsTemplate => ({
   title: null,
   body: "[npr] 안내",
   active: true,
+  isDefault: false,
   version: "1",
   createdAt: "2026-07-17T01:00:00.000Z",
   updatedAt: "2026-07-17T01:00:00.000Z",
   ...overrides,
 });
 
-describe("isLastActiveTemplate", () => {
-  it("활성이 하나뿐이면 그것이 마지막이다", () => {
-    const templates = [template({ templateId: "t1" }), template({ templateId: "t2", active: false })];
+/* ── 템플릿 제거 (계약 DELETE · SmsTemplateRemovalResult) ──────────────────── */
 
-    assert.equal(isLastActiveTemplate(templates, "t1"), true);
+describe("removeSmsTemplate", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    resetCsrfToken();
   });
 
-  it("활성이 둘이면 지울 수 있다", () => {
-    const templates = [template({ templateId: "t1" }), template({ templateId: "t2" })];
+  const TEMPLATE_ID = "22222222-2222-4222-8222-222222222222";
 
-    assert.equal(isLastActiveTemplate(templates, "t1"), false);
+  /** CSRF 부트스트랩과 DELETE 를 함께 처리하면서 DELETE 요청의 method·url·헤더를 붙잡는다. */
+  function serveRemove(result: SmsTemplateRemovalResult): {
+    methods: Array<string | undefined>;
+    urls: string[];
+    ifMatch: Array<string | null>;
+    idempotencyKey: Array<string | null>;
+  } {
+    const methods: Array<string | undefined> = [];
+    const urls: string[] = [];
+    const ifMatch: Array<string | null> = [];
+    const idempotencyKey: Array<string | null> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/auth/csrf")) {
+        return new Response(JSON.stringify({ csrfToken: "t", expiresAt: "2999-01-01T00:00:00.000Z" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const headers = new Headers(init?.headers);
+      methods.push(init?.method);
+      urls.push(url);
+      ifMatch.push(headers.get("if-match"));
+      idempotencyKey.push(headers.get("idempotency-key"));
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    return { methods, urls, ifMatch, idempotencyKey };
+  }
+
+  it("현재 version 을 If-Match 로, 조작 키를 Idempotency-Key 로 싣고 DELETE 를 보낸다", async () => {
+    const result: SmsTemplateRemovalResult = {
+      templateId: TEMPLATE_ID,
+      disposition: "DELETED",
+      usageCount: 0,
+      archivedTemplate: null,
+    };
+    const captured = serveRemove(result);
+
+    const returned = await removeSmsTemplate(TEMPLATE_ID, "7", { idempotencyKey: "op-remove-1" });
+
+    // 응답은 그대로 통과시킨다 — 여기서 모양을 바꾸지 않는다.
+    assert.deepEqual(returned, result);
+    assert.equal(captured.methods[0], "DELETE");
+    const url = new URL(captured.urls[0]!, "https://example.test");
+    assert.equal(url.pathname, `/api/v1/admin/sms/templates/${TEMPLATE_ID}`);
+    assert.equal(captured.ifMatch[0], "7");
+    assert.equal(captured.idempotencyKey[0], "op-remove-1");
   });
 
-  it("보관된 템플릿은 마지막 활성이 아니다", () => {
-    const templates = [template({ templateId: "t1" }), template({ templateId: "t2", active: false })];
+  it("보관 결과(ARCHIVED)의 archivedTemplate 를 그대로 돌려준다", async () => {
+    const archivedTemplate = template({ templateId: TEMPLATE_ID, active: false, isDefault: false, version: "2" });
+    const result: SmsTemplateRemovalResult = {
+      templateId: TEMPLATE_ID,
+      disposition: "ARCHIVED",
+      usageCount: 3,
+      archivedTemplate,
+    };
+    serveRemove(result);
 
-    assert.equal(isLastActiveTemplate(templates, "t2"), false);
+    const returned = await removeSmsTemplate(TEMPLATE_ID, "1", { idempotencyKey: "op-remove-2" });
+
+    assert.equal(returned.disposition, "ARCHIVED");
+    assert.equal(returned.usageCount, 3);
+    assert.deepEqual(returned.archivedTemplate, archivedTemplate);
+  });
+});
+
+/* ── 기본 템플릿 (계약 SmsTemplate.isDefault · 재지정) ─────────────────────── */
+
+describe("SmsTemplate isDefault", () => {
+  it("기본 재지정 입력은 isDefault:true 와 낙관적 잠금 version 을 함께 싣는다", () => {
+    // 서버가 같은 용도의 이전 기본을 동시에 내리고 version 을 올리므로, 성공 뒤에는 목록을 다시 읽는다.
+    const input: UpdateSmsTemplateInput = { isDefault: true, version: "3" };
+
+    assert.equal(input.isDefault, true);
+    assert.equal(input.version, "3");
+  });
+});
+
+/* ── BOOKING_UPDATED (계약 SmsPurpose 확장) ──────────────────────────────── */
+
+describe("BOOKING_UPDATED source", () => {
+  it("예약 변경 자동 발송 단건을 로그 한 줄로 옮긴다 — 새 purpose 도 어댑터가 그대로 통과시킨다", () => {
+    const rows = toSmsLogRows(
+      list({
+        items: [
+          message({
+            messageId: "m-upd",
+            batchId: null,
+            source: "BOOKING_UPDATED",
+            templateId: null,
+            templateName: null,
+            audience: null,
+            status: "SENT",
+          }),
+        ],
+      }),
+    );
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].source, "BOOKING_UPDATED");
+    assert.equal(rows[0].batched, false);
+    assert.equal(rows[0].successCount, 1);
   });
 });

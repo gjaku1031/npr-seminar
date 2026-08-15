@@ -200,6 +200,11 @@ describe("scanner pairing and unpair concurrency", () => {
         scannerDeviceId: device.id,
         gateCode: device.gateCode,
         actorSubject: device.publicId,
+        safeMetadata: {
+          scannerDeviceName: device.name,
+          scannerEntranceName: "송파 정문",
+          scannerGateCode: device.gateCode,
+        },
       },
     });
     await expect(prisma.scannerPairingAudit.delete({ where: { id: audit.id } })).rejects.toThrow(/append-only relation/);
@@ -226,6 +231,22 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await prisma.scannerPairingAudit.findUnique({ where: { id: audit.id } })).toBeNull();
     const retained = await prisma.checkInEvent.findUniqueOrThrow({ where: { id: checkIn.id } });
     expect(retained.scannerDeviceId).toBeNull();
+    const auditService = new CheckInsService(
+      prisma,
+      new BookingCryptoService(),
+      new SheetOutboxService(phoneProtector),
+    );
+    const auditEvents = await auditService.listEvents({
+      sessionId: session.publicId,
+      afterSequence: (checkIn.id - 1n).toString(),
+      limit: 10,
+    });
+    expect(auditEvents.items.find((event) => event.eventId === checkIn.eventId)).toMatchObject({
+      deviceId: null,
+      scannerDeviceName: "Admin Delete",
+      scannerEntranceName: "송파 정문",
+      scannerGateCode: "DELETE-ADMIN",
+    });
     await expect(prisma.checkInEvent.update({
       where: { id: checkIn.id },
       data: { safeMetadata: { directMutation: true } },
@@ -354,6 +375,31 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await prisma.authAudit.count({ where: { adminUserId: after.id, eventType: "ADMIN_BOOTSTRAP" } })).toBe(2);
   });
 
+  it("allows admin/admin only behind the explicit isolated-QA bootstrap flag", async () => {
+    await expect(bootstrapAdmin(prisma, {
+      username: "admin", displayName: "QA Admin", password: "admin", rotate: true,
+    })).rejects.toThrow("The bootstrap password does not meet policy");
+
+    const previousAppEnv = process.env.APP_ENV;
+    process.env.APP_ENV = "staging";
+    try {
+      const created = await bootstrapAdmin(prisma, {
+        username: "admin", displayName: "QA Admin", password: "admin", rotate: true,
+        allowInsecureQaCredential: true,
+      });
+      const stored = await prisma.adminUser.findUniqueOrThrow({ where: { publicId: created.adminUserId } });
+      expect(await verify(stored.passwordHash, "admin")).toBe(true);
+
+      await expect(bootstrapAdmin(prisma, {
+        username: "another-admin", displayName: "QA Admin", password: "admin", rotate: true,
+        allowInsecureQaCredential: true,
+      })).rejects.toThrow("The bootstrap password does not meet policy");
+    } finally {
+      if (previousAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = previousAppEnv;
+    }
+  });
+
   it("projects first QR and manual check-ins to Sheets and returns scanner display fields", async () => {
     const branch = await prisma.branch.findUniqueOrThrow({ where: { code: "SONGPA" } });
     const session = await prisma.seminarSession.findUniqueOrThrow({ where: { publicId: "00000000-0000-4000-8000-000000000102" } });
@@ -391,7 +437,6 @@ describe("scanner pairing and unpair concurrency", () => {
         familyBookingId: booking.id, tokenDigest: bytes(issued.digest), version: 1, status: "ACTIVE",
         expiresAt: new Date(Date.now() + 3_600_000),
       } });
-      await prisma.sessionCapacity.update({ where: { sessionId: session.id }, data: { reservedCount: { increment: 1 } } });
       return { booking, rawToken: issued.rawToken };
     };
 
@@ -409,8 +454,8 @@ describe("scanner pairing and unpair concurrency", () => {
       result.attendanceParty === "MOTHER" && result.representativeStudentName === "학생1002")).toBe(true);
     expect(await prisma.sheetOutbox.count({ where: { familyBookingPublicId: qr.booking.publicId, eventType: "CHECKED_IN" } })).toBe(1);
     expect(await prisma.bookingEvent.count({ where: { familyBookingId: qr.booking.id, eventType: "CHECKED_IN" } })).toBe(1);
-    const capacity = await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: session.id } });
-    expect(capacity.checkedInCount).toBeGreaterThanOrEqual(2);
+    expect(await prisma.familyBooking.count({ where: { sessionId: session.id, status: "CHECKED_IN" } }))
+      .toBeGreaterThanOrEqual(2);
   });
 
   it("deduplicates the same SMS domain event under concurrent transactions", async () => {

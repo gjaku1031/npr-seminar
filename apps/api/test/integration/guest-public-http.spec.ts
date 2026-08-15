@@ -17,6 +17,7 @@ import { RedisService } from "../../src/common/redis/redis.service.js";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../src/common/auth/session-cookie.js";
 import { bootstrapAdmin } from "../../src/commands/bootstrap-admin.js";
 import { type EnqueueSmsInput, SmsOutboxService } from "../../src/modules/sms/sms-outbox.service.js";
+import { StudentsService } from "../../src/modules/students/students.service.js";
 
 const apiDirectory = resolve(import.meta.dirname, "../..");
 const publicOrigin = "http://public.test";
@@ -284,7 +285,6 @@ describe("public guest booking HTTP lifecycle", () => {
         bookingClosesAt: new Date(Date.now() + 80_000_000),
         status: "OPEN",
         guestBookingEnabled: true,
-        capacity: { create: { capacity: 20 } },
       },
     });
     const source = await createSession(`guest-source-${randomUUID()}`, "ALL");
@@ -369,7 +369,7 @@ describe("public guest booking HTTP lifecycle", () => {
       body: { code: "ENROLLED_CONTACT_MUST_USE_ENROLLED_FLOW" },
     });
 
-    await prisma.student.create({ data: {
+    const siblingStudent = await prisma.student.create({ data: {
       sourceStudentNo: `XOR-SIBLING-${randomUUID()}`,
       branchId: songpa.id,
       name: "XOR 형제자매",
@@ -398,8 +398,14 @@ describe("public guest booking HTTP lifecycle", () => {
       status: 201,
       body: { booking: { attendanceParty: "MOTHER", seatCount: 1 } },
     });
+    const enrolledFamilyBookingId = (enrolledCreated.body as {
+      booking: { familyBookingId: string };
+    }).booking.familyBookingId;
     expect((enrolledCreated.body as { booking: { students: readonly unknown[] } }).booking.students).toHaveLength(2);
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: enrolledTarget.id } })).reservedCount).toBe(1);
+    expect((await prisma.familyBooking.aggregate({
+      where: { sessionId: enrolledTarget.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+      _sum: { seatCount: true },
+    }))._sum.seatCount).toBe(1);
 
     const invalidBranch = await call("POST", "/api/v1/public/family-bookings", {
       ...commonGuest,
@@ -452,7 +458,10 @@ describe("public guest booking HTTP lifecycle", () => {
     expect(createdBody.booking.students[0]).toMatchObject({ participantType: "GUEST", studentId: null, branch: "SONGPA" });
     expect(createdBody.booking.students[0].sourceStudentNo).toMatch(/^비재원-\d{6}$/u);
     expect(createdBody.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: source.id } })).reservedCount).toBe(2);
+    expect((await prisma.familyBooking.aggregate({
+      where: { sessionId: source.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+      _sum: { seatCount: true },
+    }))._sum.seatCount).toBe(2);
 
     const secondaryProof = await issueProof(otpJar, otpCsrf, secondaryContact, "FAMILY_BOOKING", "SONGPA");
     const secondaryCreated = await call("POST", "/api/v1/public/family-bookings", {
@@ -486,7 +495,17 @@ describe("public guest booking HTTP lifecycle", () => {
     const detail = await call("GET", `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`, undefined, {
       headers: { "x-booking-proof": detailAndQrProof },
     });
-    expect(detail).toMatchObject({ status: 200, body: { familyBookingId: createdBody.booking.familyBookingId, contact: primaryContact, seatCount: 2 } });
+    expect(detail).toMatchObject({
+      status: 200,
+      body: {
+        familyBookingId: createdBody.booking.familyBookingId,
+        maskedContact: "010-****-1001",
+        seatCount: 2,
+        participants: [{ participantType: "GUEST", maskedName: "비******1", branch: "SONGPA" }],
+      },
+    });
+    expect(detail.body).not.toHaveProperty("contact");
+    expect(detail.body).not.toHaveProperty("students");
     const firstRecoveredQr = await call(
       "GET",
       `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}/qr`,
@@ -525,6 +544,17 @@ describe("public guest booking HTTP lifecycle", () => {
     });
     expect(unchangedQrPass.status).toBe(200);
 
+    const missingMutationProof = await call("PATCH", `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`, {
+      expectedVersion: createdBody.booking.version,
+      seminarSessionId: target.publicId,
+    }, {
+      jar: otpJar,
+      csrfToken: otpCsrf,
+      headers: { "idempotency-key": `guest-update-missing-proof-${randomUUID()}` },
+    });
+    expect(missingMutationProof).toMatchObject({ status: 401, body: { code: "BOOKING_PROOF_INVALID" } });
+    expect((await prisma.familyBooking.findUniqueOrThrow({ where: { id: mainBooking.id } })).version).toBe(1n);
+
     const updateProof = await issueProof(otpJar, otpCsrf, primaryContact, "BOOKING_MANAGE");
     const updated = await call("PATCH", `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`, {
       expectedVersion: createdBody.booking.version,
@@ -538,8 +568,14 @@ describe("public guest booking HTTP lifecycle", () => {
       status: 200,
       body: { seminarSessionId: target.publicId, attendanceParty: "BOTH", seatCount: 2, version: 2 },
     });
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: source.id } })).reservedCount).toBe(1);
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: target.id } })).reservedCount).toBe(2);
+    expect((await prisma.familyBooking.aggregate({
+      where: { sessionId: source.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+      _sum: { seatCount: true },
+    }))._sum.seatCount).toBe(1);
+    expect((await prisma.familyBooking.aggregate({
+      where: { sessionId: target.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+      _sum: { seatCount: true },
+    }))._sum.seatCount).toBe(2);
 
     const secondaryManageProof = await issueProof(otpJar, otpCsrf, secondaryContact, "BOOKING_MANAGE");
     const forbiddenDetail = await call("GET", `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`, undefined, {
@@ -555,9 +591,108 @@ describe("public guest booking HTTP lifecycle", () => {
       headers: { "x-booking-proof": secondaryManageProof, "idempotency-key": `guest-cancel-${randomUUID()}` },
     });
     expect(secondaryCancelled).toMatchObject({ status: 200, body: { status: "CANCELLED" } });
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: source.id } })).reservedCount).toBe(0);
+    expect(await prisma.familyBooking.count({
+      where: { sessionId: source.id, status: { in: ["RESERVED", "CHECKED_IN"] } },
+    })).toBe(0);
     const secondaryDb = await prisma.familyBooking.findUniqueOrThrow({ where: { publicId: secondaryBody.booking.familyBookingId } });
     expect(await prisma.qrCredential.count({ where: { familyBookingId: secondaryDb.id, status: "ACTIVE" } })).toBe(0);
+
+    const phoneLookup = await call("POST", "/api/v1/public/family-bookings/lookup", {
+      contact: "010-7000-1001",
+    });
+    expect(phoneLookup).toMatchObject({
+      status: 200,
+      body: {
+        items: [expect.objectContaining({
+          familyBookingId: createdBody.booking.familyBookingId,
+          maskedContact: "010-****-1001",
+          participants: [{ participantType: "GUEST", maskedName: "비******1", branch: "SONGPA" }],
+        })],
+      },
+    });
+    expect(JSON.stringify(phoneLookup.body)).not.toContain(primaryContact);
+    expect(JSON.stringify(phoneLookup.body)).not.toContain("비재원 학생");
+    expect(JSON.stringify(phoneLookup.body)).not.toContain(createdBody.qrToken);
+
+    const contactReadJar = new CookieJar();
+    const contactReadCsrf = await csrf(contactReadJar);
+    const contactReadSession = await call(
+      "POST",
+      `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}/read-session`,
+      { contact: "010-7000-1001" },
+      {
+        jar: contactReadJar,
+        csrfToken: contactReadCsrf,
+        headers: { "idempotency-key": `contact-read-${randomUUID()}` },
+      },
+    );
+    expect(contactReadSession).toMatchObject({
+      status: 200,
+      body: {
+        familyBookingId: createdBody.booking.familyBookingId,
+        csrfToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+        expiresAt: expect.any(String),
+      },
+    });
+    const contactReadDetail = await call(
+      "GET",
+      `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`,
+      undefined,
+      { jar: contactReadJar },
+    );
+    expect(contactReadDetail).toMatchObject({
+      status: 200,
+      body: {
+        familyBookingId: createdBody.booking.familyBookingId,
+        maskedContact: "010-****-1001",
+      },
+    });
+    const contactReadQr = await call(
+      "GET",
+      `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}/qr`,
+      undefined,
+      { jar: contactReadJar },
+    );
+    expect(contactReadQr).toMatchObject({
+      status: 200,
+      body: {
+        familyBookingId: createdBody.booking.familyBookingId,
+        qrToken: createdBody.qrToken,
+      },
+    });
+    const sessionOnlyMutation = await call(
+      "PATCH",
+      `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`,
+      { expectedVersion: 2, attendanceParty: "MOTHER" },
+      {
+        jar: contactReadJar,
+        csrfToken: (contactReadSession.body as { csrfToken: string }).csrfToken,
+        headers: { "idempotency-key": `contact-read-mutation-${randomUUID()}` },
+      },
+    );
+    expect(sessionOnlyMutation).toMatchObject({ status: 401, body: { code: "BOOKING_PROOF_INVALID" } });
+
+    const invalidContactReadJar = new CookieJar();
+    const invalidContactReadCsrf = await csrf(invalidContactReadJar);
+    const invalidContactRead = await call(
+      "POST",
+      `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}/read-session`,
+      { contact: "010-2999-9999" },
+      {
+        jar: invalidContactReadJar,
+        csrfToken: invalidContactReadCsrf,
+        headers: { "idempotency-key": `contact-read-invalid-${randomUUID()}` },
+      },
+    );
+    expect(invalidContactRead).toMatchObject({
+      status: 401,
+      body: { code: "BOOKING_READ_SESSION_INVALID" },
+    });
+
+    const noMatchLookup = await call("POST", "/api/v1/public/family-bookings/lookup", {
+      contact: "010-2999-9999",
+    });
+    expect(noMatchLookup).toEqual({ status: 200, body: { items: [] } });
 
     const adminPassword = "Npr!GuestHttp#2026";
     await bootstrapAdmin(prisma, {
@@ -598,6 +733,44 @@ describe("public guest booking HTTP lifecycle", () => {
         facets: { teachers: [] },
       },
     });
+    for (const enrolledStudent of [seededStudent, siblingStudent]) {
+      const directlyProjected = await app!.get(StudentsService).list({
+        query: enrolledStudent.sourceStudentNo,
+        sourceActive: true,
+        seminarSessionId: enrolledTarget.publicId,
+        page: 1,
+        pageSize: 50,
+      });
+      expect(directlyProjected.items[0]).toMatchObject({
+        studentId: enrolledStudent.publicId,
+        hasReservation: true,
+        reservation: { familyBookingId: enrolledFamilyBookingId, status: "RESERVED" },
+      });
+      const projectedReservation = await call(
+        "GET",
+        `/api/v1/admin/students?query=${encodeURIComponent(enrolledStudent.sourceStudentNo)}`
+          + `&seminarSessionId=${encodeURIComponent(enrolledTarget.publicId)}`,
+        undefined,
+        { jar: adminJar },
+      );
+      expect(projectedReservation).toMatchObject({
+        status: 200,
+        body: {
+          items: [{
+            studentId: enrolledStudent.publicId,
+            hasReservation: true,
+            reservation: {
+              status: "RESERVED",
+              hasReservation: true,
+              familyBookingId: enrolledFamilyBookingId,
+              attendanceParty: "MOTHER",
+              bookingSource: "WEB_APP",
+            },
+          }],
+          page: { totalItems: 1 },
+        },
+      });
+    }
     const adminCsrf = await csrf(adminJar);
     const pairing = await call("POST", "/api/v1/admin/scanner-devices/pairing-codes", {
       branch: "SONGPA",
@@ -643,7 +816,10 @@ describe("public guest booking HTTP lifecycle", () => {
       status: 200,
       body: { result: "CHECKED_IN", familyBookingId: createdBody.booking.familyBookingId, familySeatCount: 2 },
     });
-    expect((await prisma.sessionCapacity.findUniqueOrThrow({ where: { sessionId: target.id } })).checkedInCount).toBe(2);
+    expect((await prisma.familyBooking.aggregate({
+      where: { sessionId: target.id, status: "CHECKED_IN" },
+      _sum: { seatCount: true },
+    }))._sum.seatCount).toBe(2);
 
     const checkedInManageProof = await issueProof(otpJar, otpCsrf, primaryContact, "BOOKING_MANAGE");
     const checkedInDetail = await call("GET", `/api/v1/public/family-bookings/${createdBody.booking.familyBookingId}`, undefined, {

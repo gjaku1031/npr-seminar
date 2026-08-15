@@ -8,6 +8,7 @@ import type { Prisma } from "../../generated/prisma/client.js";
 import { SmsMessagePolicy, type SmsPayloadClassification } from "./sms-message-policy.service.js";
 import { SmsOutboxService, type SmsBranch, type SmsSource } from "./sms-outbox.service.js";
 import { SmsTemplateRenderer } from "./sms-template-renderer.service.js";
+import type { SmsTemplatePurpose } from "./sms-template-renderer.service.js";
 
 export type SmsAudience =
   | "BOOKED_FAMILIES"
@@ -30,6 +31,7 @@ interface ResolvedPayload {
   readonly templateId: string | null;
   readonly templateName: string;
   readonly templateVersion: string | null;
+  readonly purpose: SmsTemplatePurpose | null;
 }
 
 interface PreparedTarget {
@@ -60,6 +62,27 @@ interface BatchAggregateRow {
   readonly processing_count: number;
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+export interface SmsTemplateView {
+  readonly templateId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly purpose: string;
+  readonly title: string | null;
+  readonly body: string;
+  readonly active: boolean;
+  readonly isDefault: boolean;
+  readonly version: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export interface SmsTemplateRemovalResult {
+  readonly templateId: string;
+  readonly disposition: "DELETED" | "ARCHIVED";
+  readonly usageCount: number;
+  readonly archivedTemplate: SmsTemplateView | null;
 }
 
 const TEMPLATE_LOCK_NAME = "npr:sms-templates";
@@ -107,21 +130,32 @@ export class SmsAdminService {
   }
 
   public createTemplate(
-    input: { key: string; name: string; purpose: SmsSource; title?: string; body: string },
+    input: { key: string; name: string; purpose: SmsSource; title?: string; body: string; isDefault?: boolean },
     actor: string,
     key: string,
   ) {
-    const classification = this.validateTemplatePayload(input.body, input.title ?? null);
+    const classification = this.validateTemplatePayload(input.body, input.title ?? null, input.purpose);
     return this.idempotency.execute("SMS_TEMPLATE_CREATE", key, input, async (transaction) => {
       await this.lockTemplates(transaction);
       const duplicate = await transaction.smsTemplate.findUnique({ where: { key: input.key }, select: { id: true } });
       if (duplicate !== null) this.fail(409, "SMS_TEMPLATE_KEY_CONFLICT");
+      const defaultCount = await transaction.smsTemplate.count({
+        where: { purpose: input.purpose, active: true, isDefault: true },
+      });
+      const isDefault = input.isDefault === true || defaultCount === 0;
+      if (input.isDefault === true) {
+        await transaction.smsTemplate.updateMany({
+          where: { purpose: input.purpose, isDefault: true },
+          data: { isDefault: false, version: { increment: 1 }, updatedBy: actor },
+        });
+      }
       const row = await transaction.smsTemplate.create({ data: {
         key: input.key,
         name: input.name,
         purpose: input.purpose,
         title: input.title ?? null,
         body: input.body,
+        isDefault,
         createdBy: actor,
         updatedBy: actor,
       } });
@@ -131,7 +165,7 @@ export class SmsAdminService {
 
   public updateTemplate(
     templateId: string,
-    input: { name?: string; purpose?: SmsSource; title?: string | null; body?: string; active?: boolean; version: string },
+    input: { name?: string; purpose?: SmsSource; title?: string | null; body?: string; active?: boolean; isDefault?: boolean; version: string },
     actor: string,
     key: string,
   ) {
@@ -142,10 +176,27 @@ export class SmsAdminService {
       if (current.version.toString() !== input.version) this.fail(409, "SMS_TEMPLATE_VERSION_CONFLICT");
       const nextBody = input.body ?? current.body;
       const nextTitle = input.title === undefined ? current.title : input.title;
-      this.validateTemplatePayload(nextBody, nextTitle);
-      if (current.active && input.active === false) {
-        const activeCount = await transaction.smsTemplate.count({ where: { active: true } });
-        if (activeCount <= 1) this.fail(409, "SMS_LAST_ACTIVE_TEMPLATE_REQUIRED");
+      const nextPurpose = input.purpose ?? current.purpose;
+      this.validateTemplatePayload(nextBody, nextTitle, nextPurpose as SmsTemplatePurpose);
+      const nextActive = input.active ?? current.active;
+      if (current.isDefault && (
+        nextPurpose !== current.purpose || !nextActive || input.isDefault === false
+      )) {
+        this.fail(409, "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED");
+      }
+      let nextDefault = input.isDefault ?? current.isDefault;
+      if (input.isDefault === true) {
+        if (!nextActive) this.fail(409, "SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE");
+        await transaction.smsTemplate.updateMany({
+          where: { purpose: nextPurpose, isDefault: true, NOT: { id: current.id } },
+          data: { isDefault: false, version: { increment: 1 }, updatedBy: actor },
+        });
+        nextDefault = true;
+      } else if (nextActive && !nextDefault) {
+        const defaultCount = await transaction.smsTemplate.count({
+          where: { purpose: nextPurpose, active: true, isDefault: true, NOT: { id: current.id } },
+        });
+        if (defaultCount === 0) nextDefault = true;
       }
       const row = await transaction.smsTemplate.update({
         where: { id: current.id },
@@ -155,6 +206,7 @@ export class SmsAdminService {
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.body === undefined ? {} : { body: input.body }),
           ...(input.active === undefined ? {} : { active: input.active }),
+          isDefault: nextDefault,
           version: { increment: 1 },
           updatedBy: actor,
         },
@@ -163,8 +215,59 @@ export class SmsAdminService {
     });
   }
 
-  public archiveTemplate(templateId: string, version: string, actor: string, key: string) {
-    return this.updateTemplate(templateId, { active: false, version }, actor, key);
+  public removeTemplate(
+    templateId: string,
+    version: string,
+    actor: string,
+    key: string,
+  ): Promise<SmsTemplateRemovalResult> {
+    if (!/^\d{1,20}$/u.test(version)) this.fail(400, "SMS_TEMPLATE_VERSION_REQUIRED");
+    return this.idempotency.execute(
+      "SMS_TEMPLATE_REMOVE",
+      key,
+      { templateId, version },
+      async (transaction) => {
+        // Every create, update, default reassignment, and removal takes the same
+        // transaction-scoped lock. This makes the default check, history check,
+        // and delete/archive decision one serializable template lifecycle step.
+        await this.lockTemplates(transaction);
+        const current = await transaction.smsTemplate.findUnique({ where: { publicId: templateId } });
+        if (current === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
+        if (current.version.toString() !== version) this.fail(409, "SMS_TEMPLATE_VERSION_CONFLICT");
+        if (current.isDefault) this.fail(409, "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED");
+
+        const usageCount = await transaction.smsOutbox.count({
+          where: { safeMetadata: { path: ["templateId"], equals: current.publicId } },
+        });
+        if (usageCount === 0) {
+          await transaction.smsTemplate.delete({ where: { id: current.id } });
+          return {
+            templateId: current.publicId,
+            disposition: "DELETED" as const,
+            usageCount,
+            archivedTemplate: null,
+          };
+        }
+
+        const archived = current.active
+          ? await transaction.smsTemplate.update({
+            where: { id: current.id },
+            data: {
+              active: false,
+              isDefault: false,
+              version: { increment: 1 },
+              updatedBy: actor,
+            },
+          })
+          : current;
+        return {
+          templateId: archived.publicId,
+          disposition: "ARCHIVED" as const,
+          usageCount,
+          archivedTemplate: this.mapTemplate(archived),
+        };
+      },
+    );
   }
 
   public async preview(input: TargetRequest) {
@@ -229,6 +332,8 @@ export class SmsAdminService {
             batchId,
             templateId: prepared.payload.templateId,
             templateName: prepared.payload.templateName,
+            templateVersion: prepared.payload.templateVersion,
+            templatePurpose: prepared.payload.purpose,
             audience: input.audience,
             seminarSessionId: input.seminarSessionId,
             branch: input.branch,
@@ -297,7 +402,7 @@ export class SmsAdminService {
 
   private async prepare(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
     const payload = await this.payload(input, transaction);
-    this.validateTemplatePayload(payload.messageTemplate, payload.titleTemplate);
+    this.validateTemplatePayload(payload.messageTemplate, payload.titleTemplate, payload.purpose ?? undefined);
     const targetSet = await this.targets(input, transaction);
     const rows: PreparedTarget[] = targetSet.rows.map((row) => {
       const context = {
@@ -308,8 +413,8 @@ export class SmsAdminService {
         bookingUrl: this.bookingUrl(row.publicId),
         inquiryPhone: INQUIRY_PHONE[input.branch],
       };
-      const message = this.renderer.render(payload.messageTemplate, context, "message");
-      const title = payload.titleTemplate === null ? null : this.renderer.render(payload.titleTemplate, context, "title");
+      const message = this.renderer.render(payload.messageTemplate, context, "message", payload.purpose ?? undefined);
+      const title = payload.titleTemplate === null ? null : this.renderer.render(payload.titleTemplate, context, "title", payload.purpose ?? undefined);
       return { ...row, message, title, classification: this.policy.classify(message, title) };
     });
     const digest = createHash("sha256");
@@ -360,6 +465,7 @@ export class SmsAdminService {
         templateId: template.publicId,
         templateName: template.name,
         templateVersion: template.version.toString(),
+        purpose: template.purpose as SmsTemplatePurpose,
       };
     }
     if (input.message === undefined) this.fail(400, "SMS_CONTENT_SOURCE_INVALID");
@@ -369,6 +475,7 @@ export class SmsAdminService {
       templateId: null,
       templateName: "직접 입력",
       templateVersion: null,
+      purpose: null,
     };
   }
 
@@ -531,9 +638,9 @@ export class SmsAdminService {
     return "PARTIAL";
   }
 
-  private validateTemplatePayload(body: string, title: string | null): SmsPayloadClassification {
-    this.renderer.validate(body, "message");
-    if (title !== null) this.renderer.validate(title, "title");
+  private validateTemplatePayload(body: string, title: string | null, purpose?: SmsTemplatePurpose): SmsPayloadClassification {
+    this.renderer.validate(body, "message", purpose);
+    if (title !== null) this.renderer.validate(title, "title", purpose);
     const bodyClassification = this.policy.classify(body);
     const titleBytes = title === null || title.length === 0
       ? null
@@ -578,10 +685,11 @@ export class SmsAdminService {
     title: string | null;
     body: string;
     active: boolean;
+    isDefault: boolean;
     version: bigint;
     createdAt: Date;
     updatedAt: Date;
-  }) {
+  }): SmsTemplateView {
     return {
       templateId: row.publicId,
       key: row.key,
@@ -590,6 +698,7 @@ export class SmsAdminService {
       title: row.title,
       body: row.body,
       active: row.active,
+      isDefault: row.isDefault,
       version: row.version.toString(),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

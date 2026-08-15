@@ -140,6 +140,7 @@ EXPECTED_SYNC_CONFLICTS = {
 EXPECTED_SMS_PURPOSES = {
     "OTP",
     "BOOKING_CONFIRMED",
+    "BOOKING_UPDATED",
     "BOOKING_CANCELLED",
     "FIRST_CHECK_IN",
     "ADMIN_GROUP",
@@ -486,11 +487,17 @@ def validate_operations(document: Mapping[str, Any]) -> tuple[int, int, int]:
             if not isinstance(request_body, Mapping):
                 fail(f"{label}: requestBody must resolve to a mapping")
             content = request_body.get("content")
-            if not isinstance(content, Mapping) or set(content) != {"application/json"}:
-                fail(f"{label}: state-changing request bodies must be application/json only")
-            media = content["application/json"]
+            request_media_type = operation.get("x-request-media-type", "application/json")
+            if request_media_type == "multipart/form-data":
+                if operation_id != "replaceCurrentPoster":
+                    fail(f"{label}: multipart mutation is not in the poster-upload allowlist")
+            elif request_media_type != "application/json":
+                fail(f"{label}: unsupported state-changing request media type")
+            if not isinstance(content, Mapping) or set(content) != {request_media_type}:
+                fail(f"{label}: request body must contain exactly {request_media_type}")
+            media = content[request_media_type]
             if not isinstance(media, Mapping) or "schema" not in media:
-                fail(f"{label}: application/json request body needs a schema")
+                fail(f"{label}: {request_media_type} request body needs a schema")
 
         responses = operation.get("responses")
         if not isinstance(responses, Mapping) or not responses:
@@ -525,7 +532,7 @@ def validate_operations(document: Mapping[str, Any]) -> tuple[int, int, int]:
 
         if method == "delete":
             hard_delete = operation.get("x-hard-delete")
-            if hard_delete not in {"forbidden", "required"}:
+            if hard_delete not in {"forbidden", "required", "conditional-unused"}:
                 fail(f"{label}: DELETE must explicitly declare its persistence lifecycle")
             if hard_delete == "required" and (
                 not isinstance(operation.get("x-delete-dependencies"), Mapping)
@@ -537,6 +544,13 @@ def validate_operations(document: Mapping[str, Any]) -> tuple[int, int, int]:
                 "unpairCurrentScanner",
             }:
                 fail(f"{label}: hard DELETE is not in the explicit scanner lifecycle allowlist")
+            if hard_delete == "conditional-unused" and operation_id != "archiveSmsTemplate":
+                fail(f"{label}: conditional hard DELETE is not in the SMS template lifecycle allowlist")
+            if hard_delete == "conditional-unused" and (
+                not isinstance(operation.get("x-delete-dependencies"), Mapping)
+                or not operation.get("x-delete-missing")
+            ):
+                fail(f"{label}: conditional DELETE must contract history and missing-row semantics")
 
     missing = CRITICAL_OPERATION_IDS - set(operation_ids)
     if missing:
@@ -704,6 +718,19 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
             "$ref": "#/components/schemas/AuditSequence"
         }:
             fail(f"{event_schema_name}.sequence must reference AuditSequence")
+    scanner_snapshot_fields = {
+        "scannerDeviceName",
+        "scannerEntranceName",
+        "scannerGateCode",
+    }
+    for event_schema_name in ("BookingAuditEvent", "CheckInAuditEvent"):
+        event_schema = schema(document, event_schema_name)
+        if not scanner_snapshot_fields.issubset(set(event_schema.get("required", []))):
+            fail(f"{event_schema_name} must require nullable immutable scanner snapshots")
+        for field in scanner_snapshot_fields:
+            field_type = schema_properties(document, event_schema_name).get(field, {}).get("type")
+            if not isinstance(field_type, list) or set(field_type) != {"string", "null"}:
+                fail(f"{event_schema_name}.{field} must be a nullable string")
     event_page_sequence = schema_properties(document, "EventPageMeta").get(
         "nextAfterSequence", {}
     )
@@ -792,6 +819,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "x-required-roles"
     ) != ["ADMIN"]:
         fail("admin session roster must require ADMIN cookie authentication")
+    if roster_operation.get("x-monitoring-statuses") != ["RESERVED", "CHECKED_IN"]:
+        fail("admin session roster monitoring must include only active bookings")
     roster_parameters = merged_parameters(document, roster_path_item, roster_operation)
     roster_parameter_names = {
         (parameter.get("in"), parameter.get("name"))
@@ -883,6 +912,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "uncheckedBookingCount",
         "cancelledBookingCount",
         "noShowBookingCount",
+        "attendeeCount",
     }
     operations_schema = schema(document, "SessionOperationsSummary")
     if (
@@ -890,7 +920,20 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         or set(schema_properties(document, "SessionOperationsSummary"))
         != expected_operations_fields
     ):
-        fail("SessionOperationsSummary must expose all five POC family states")
+        fail("SessionOperationsSummary must expose all five POC family states and attendeeCount")
+
+    attendance_monitoring_fields = {
+        "studentCount",
+        "familyBookingCount",
+        "attendeeCount",
+    }
+    attendance_monitoring = schema(document, "AttendanceMonitoring")
+    if (
+        set(attendance_monitoring.get("required", [])) != attendance_monitoring_fields
+        or set(schema_properties(document, "AttendanceMonitoring"))
+        != attendance_monitoring_fields
+    ):
+        fail("AttendanceMonitoring must expose student, family, and attendee counts")
 
     statistics_path, statistics_method, statistics_operation, statistics_path_item = (
         operation_by_id(document, "getAdminSessionStatistics")
@@ -938,6 +981,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
             "MOBILE": ["WEB_APP"],
             "MANUAL": ["PHONE", "TEACHER", "ON_SITE"],
         }
+        or statistics_operation.get("x-monitoring-statuses")
+        != ["RESERVED", "CHECKED_IN"]
     ):
         fail("session statistics family, unit, guest, or channel semantics have drifted")
     if (
@@ -978,19 +1023,19 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     ):
         fail("SessionStatistics must return eight unit rows and two channel rows")
     expected_statistics_fields = {
-        "eligibleCurrentStudentCount",
         "activeBookingCount",
         "reservedBookingCount",
         "checkedInBookingCount",
         "cancelledBookingCount",
         "noShowBookingCount",
+        "monitoring",
     }
     expected_unit_fields = {
         "unitGroup",
-        "eligibleStudentCount",
         "activeBookingCount",
         "reservedBookingCount",
         "checkedInBookingCount",
+        "monitoring",
     }
     expected_channel_fields = {
         "channel",
@@ -1000,6 +1045,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "checkedInBookingCount",
         "cancelledBookingCount",
         "noShowBookingCount",
+        "monitoring",
     }
     for schema_name, expected_fields in (
         ("SessionStatisticsSummary", expected_statistics_fields),
@@ -1054,6 +1100,13 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         or roster_teacher_facets.get("x-science-only-policy") != "EXCLUDED"
     ):
         fail("SessionRosterFacets.teachers must exclude science-only and no-math rows")
+    roster_page = schema(document, "SessionRosterPage")
+    if (
+        set(roster_page.get("required", [])) != {"items", "page", "facets", "monitoring"}
+        or schema_properties(document, "SessionRosterPage").get("monitoring")
+        != {"$ref": "#/components/schemas/AttendanceMonitoring"}
+    ):
+        fail("SessionRosterPage must require AttendanceMonitoring")
 
     if set(schema(document, "SeminarSessionScope").get("enum", [])) != {
         "ALL",
@@ -1103,12 +1156,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     )
 
     seed = document.get("info", {}).get("x-current-seed-seminar-session", {})
-    if (
-        seed.get("scope") != "ALL"
-        or seed.get("branch") is not None
-        or seed.get("capacity") != 800
-    ):
-        fail("current seed seminar session must be ALL, branch=null, capacity=800")
+    if seed.get("scope") != "ALL" or seed.get("branch") is not None:
+        fail("current seed seminar session must be ALL and branch=null")
 
     for operation_id, expected_scope in (
         ("createPublicFamilyBooking", PUBLIC_BOOKING_CREATE_SCOPE_AUTHORIZATION),
@@ -1836,7 +1885,39 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     if set(schema(document, "OwnedFamilyBookingList").get("required", [])) != {"items"}:
         fail("owned family booking list response must require items")
 
-    survey_path, survey_method, survey_operation, _ = operation_by_id(
+    read_session_path, read_session_method, read_session_operation, read_session_path_item = operation_by_id(
+        document, "establishFamilyBookingContactReadSession"
+    )
+    if (read_session_path, read_session_method) != (
+        "/api/v1/public/family-bookings/{familyBookingId}/read-session",
+        "post",
+    ):
+        fail("contact-owned booking read session has the wrong route")
+    if read_session_operation.get("x-mutation-kind") != "durable":
+        fail("contact-owned booking read session must be a durable session mutation")
+    if read_session_operation.get("x-idempotency") != "required":
+        fail("contact-owned booking read session must require idempotency")
+    if read_session_operation.get("x-requires-csrf") is not True:
+        fail("contact-owned booking read session must require CSRF")
+    if read_session_operation.get("x-requires-same-origin") is not True:
+        fail("contact-owned booking read session must require same-origin validation")
+    if read_session_operation.get("x-access-session-authorization") != "read-and-existing-qr-only":
+        fail("contact-owned booking session must be explicitly read/QR-only")
+    read_session_parameters = merged_parameters(
+        document, read_session_path_item, read_session_operation
+    )
+    for header_name in ("Idempotency-Key", "X-CSRF-Token", "Origin"):
+        if not has_required_header(read_session_parameters, header_name):
+            fail(f"contact-owned booking read session must require {header_name}")
+    read_session_request = schema(document, "PublicFamilyBookingReadSessionRequest")
+    if set(read_session_request.get("required", [])) != {"contact"}:
+        fail("contact-owned booking read session must require only contact")
+    if set(schema_properties(document, "PublicFamilyBookingReadSessionRequest")) != {"contact"}:
+        fail("contact-owned booking read session request must not accept authority hints")
+    if not {"401", "429"}.issubset(read_session_operation.get("responses", {})):
+        fail("contact-owned booking read session must contract generic invalid and rate-limited responses")
+
+    survey_path, survey_method, survey_operation, survey_path_item = operation_by_id(
         document, "submitFamilyBookingSurveyResponse"
     )
     if (survey_path, survey_method) != (
@@ -1850,11 +1931,42 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         fail("public survey submission must require BOOKING_MANAGE")
     if "201" not in survey_operation.get("responses", {}):
         fail("public survey submission must return 201")
+    # The survey response is a durable BOOKING_MANAGE mutation. It must sit behind
+    # the same syntactic booking-proof + session-bound CSRF (including same-origin)
+    # gate as the public family-booking update and cancel, and consume the proof on
+    # the first successful management mutation. Lock every leg so a future edit
+    # cannot silently drop CSRF, the Origin/same-origin check, idempotency, or the
+    # proof-consumption contract for this exact endpoint.
+    survey_parameters = merged_parameters(document, survey_path_item, survey_operation)
+    if survey_operation.get("x-mutation-kind") != "durable":
+        fail("public survey submission must be a durable mutation")
+    if survey_operation.get("x-idempotency") != "required":
+        fail("public survey submission must require idempotency")
+    if not has_required_header(survey_parameters, "Idempotency-Key"):
+        fail("public survey submission must require Idempotency-Key")
+    if survey_operation.get("x-proof-consumption") != (
+        "consumed-by-first-successful-management-mutation"
+    ):
+        fail("public survey submission must consume the proof on first successful mutation")
+    if survey_operation.get("x-access-session-authorization") != "forbidden":
+        fail("public survey submission must forbid access-session authorization")
+    if survey_operation.get("x-requires-csrf") is not True:
+        fail("public survey submission must require session-bound CSRF")
+    if not has_required_header(survey_parameters, "X-CSRF-Token"):
+        fail("public survey submission must require X-CSRF-Token")
+    if survey_operation.get("x-requires-same-origin") is not True:
+        fail("public survey submission must require same-origin validation")
+    if not has_required_header(survey_parameters, "Origin"):
+        fail("public survey submission must require the Origin header")
     survey_request = schema(document, "PublicSurveyResponseCreateRequest")
-    if set(survey_request.get("required", [])) != {"rating", "photoAttached"}:
-        fail("public survey request must require rating and photoAttached")
+    if set(survey_request.get("required", [])) != {"rating"}:
+        fail("public survey request must require rating")
+    if {"photoAttached", "photoName"} & set(schema_properties(document, "PublicSurveyResponseCreateRequest")):
+        fail("public survey request must not expose mock photo metadata")
     survey_response = schema(document, "SurveyResponse")
     survey_fields = set(schema_properties(document, "SurveyResponse"))
+    if {"photoAttached", "photoName"} & survey_fields:
+        fail("SurveyResponse must not expose mock photo metadata")
     if "participant" not in set(survey_response.get("required", [])) or survey_fields & {
         "contact",
         "maskedContact",
@@ -1945,7 +2057,21 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     if not has_required_header(archive_parameters, "If-Match"):
         fail(f"DELETE {archive_path} must require If-Match version")
     if "200" not in archive_operation.get("responses", {}):
-        fail("template archival must return the inactive resource with 200")
+        fail("template removal must return the conditional lifecycle result with 200")
+    if (
+        archive_operation.get("x-hard-delete") != "conditional-unused"
+        or archive_operation.get("x-delete-missing") != "not-found-except-idempotency-replay"
+        or archive_operation.get("x-delete-dependencies") != {
+            "smsOutboxSnapshots": "preserve",
+            "activeDefault": "reassign-before-removal",
+        }
+    ):
+        fail("template removal must contract unused deletion, history archival, and default reassignment")
+    removal_schema = schema(document, "SmsTemplateRemovalResult")
+    if set(removal_schema.get("required", [])) != {
+        "templateId", "disposition", "usageCount", "archivedTemplate"
+    }:
+        fail("SmsTemplateRemovalResult must expose the deterministic lifecycle outcome")
 
     if set(schema(document, "SmsPurpose").get("enum", [])) != EXPECTED_SMS_PURPOSES:
         fail("SmsPurpose does not match the durable source enum")
@@ -2037,8 +2163,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         fail("Google Sheets inbound synchronization must remain forbidden")
     if sheet_projection.get("delivery") != "DURABLE_TRANSACTIONAL_OUTBOX":
         fail("Google Sheets projection must use a durable transactional outbox")
-    if sheet_projection.get("schemaVersion") != 3:
-        fail("Google Sheets projection must match runtime schema version 3")
+    if sheet_projection.get("schemaVersion") != 4:
+        fail("Google Sheets projection must match runtime schema version 4")
     if set(sheet_projection.get("events", [])) != {
         "CREATED",
         "UPDATED",
@@ -2051,13 +2177,33 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     if sheet_projection.get("reservationSheet") != {
         "title": "예약명단",
         "sheetId": 1777564107,
-        "businessRange": "A:L",
-        "reservedBlankRange": "M:AC",
-        "studentKeyColumn": "B",
+        "businessRange": "A:M",
+        "reservedBlankRange": "N:AC",
+        "sourceStudentNoDisplayColumn": "B",
+        "rowIdentity": "FAMILY_BOOKING_STUDENT_ID_ONLY",
         "valueInputMode": "RAW",
         "postWriteExactVerification": True,
     }:
-        fail("Google Sheets reservation sheet metadata does not match runtime v3")
+        fail("Google Sheets reservation sheet metadata does not match runtime v4")
+    if sheet_projection.get("familySummarySheet") != {
+        "title": "예약집계",
+        "sheetId": 202607180,
+        "businessRange": "A:M",
+        "reservedBlankRange": "N:Y",
+        "valueInputMode": "RAW",
+        "postWriteExactVerification": True,
+    }:
+        fail("Google Sheets family summary metadata does not match runtime v4")
+    if sheet_projection.get("bookingLogSheet") != {
+        "title": "로그",
+        "sheetId": 1415280656,
+        "businessRange": "A:M",
+        "reservedBlankRange": "N:Y",
+        "valueInputMode": "RAW",
+        "appendOnly": True,
+        "postWriteExactVerification": True,
+    }:
+        fail("Google Sheets booking log metadata does not match runtime v4")
     marker_columns = sheet_projection.get("technicalMarkerColumns", {})
     expected_markers = {
         "reservationRoster": {
@@ -2070,22 +2216,73 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
             "bootstrap": "INITIALIZE_IF_BLANK_IDEMPOTENTLY",
             "conflictingHeader": "BLOCK_WITH_SCHEMA_DRIFT",
         },
+        "familySummary": {
+            "sheetTitle": "예약집계",
+            "column": "Z",
+            "header": "__NPR_FAMILY_BOOKING_ID",
+            "value": "familyBookingId",
+            "hidden": True,
+            "protected": True,
+            "bootstrap": "INITIALIZE_IF_BLANK_IDEMPOTENTLY",
+            "conflictingHeader": "BLOCK_WITH_SCHEMA_DRIFT",
+        },
+        "bookingLog": {
+            "sheetTitle": "로그",
+            "column": "Z",
+            "header": "__NPR_BOOKING_EVENT_ID",
+            "value": "eventId",
+            "hidden": True,
+            "protected": True,
+            "bootstrap": "INITIALIZE_IF_BLANK_IDEMPOTENTLY",
+            "conflictingHeader": "BLOCK_WITH_SCHEMA_DRIFT",
+        },
     }
     if marker_columns != expected_markers:
         fail("Google Sheets hidden/protected idempotency marker columns changed")
     expected_visible_headers = {
-        "reservationRosterAtoL": [
+        "reservationRosterAtoM": [
             "예약일시",
             "학번",
             "캠퍼스",
             "학생명",
-            "반명",
+            "수학반",
+            "과학반",
             "학교",
             "학년",
             "담임",
             "학부모HP (모)",
             "학부모HP (부)",
             "예약상태",
+            "로그",
+        ],
+        "familySummaryAtoM": [
+            "예약일시",
+            "가족예약ID",
+            "캠퍼스",
+            "학생명 목록",
+            "참석자",
+            "예약건수",
+            "예약인원",
+            "입장건수",
+            "입장인원",
+            "상태",
+            "예약경로",
+            "체크인시각",
+            "최신로그",
+        ],
+        "bookingLogAtoM": [
+            "이벤트일시",
+            "이벤트",
+            "가족예약ID",
+            "캠퍼스",
+            "학생수",
+            "학생명",
+            "참석자",
+            "예약인원",
+            "입장인원",
+            "예약상태",
+            "예약경로",
+            "처리자",
             "로그",
         ],
     }
@@ -2096,7 +2293,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "WIRYE": "위례",
         "GWANGJIN": "광진",
     }:
-        fail("Google Sheets campus projection values do not match runtime v3")
+        fail("Google Sheets campus projection values do not match runtime v4")
     if sheet_projection.get("reservationStateValues") != {
         "reservedMother": "예약 (모)",
         "reservedFather": "예약 (부)",
@@ -2105,9 +2302,11 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "checkedIn": "입장 완료",
         "noShow": "미참석",
     }:
-        fail("Google Sheets reservation state values do not match runtime v3")
+        fail("Google Sheets reservation state values do not match runtime v4")
     if sheet_projection.get("markerUniqueness") != {
         "reservationRoster": "EXACTLY_ONE_PER_FAMILY_BOOKING_STUDENT_ID",
+        "familySummary": "EXACTLY_ONE_PER_FAMILY_BOOKING_ID",
+        "bookingLog": "EXACTLY_ONE_PER_BOOKING_EVENT_ID",
         "staleDuplicatePolicy": "KEEP_ONE_MATCHING_PROJECTION_AND_CLEAR_OTHER_TECHNICAL_MARKERS",
     }:
         fail("Google Sheets marker uniqueness policy changed")

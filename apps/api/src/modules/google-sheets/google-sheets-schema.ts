@@ -15,7 +15,7 @@ export const FAMILY_SUMMARY_TECHNICAL_MARKER_HEADER = "__NPR_FAMILY_BOOKING_ID";
 export const BOOKING_LOG_TECHNICAL_MARKER_HEADER = "__NPR_BOOKING_EVENT_ID";
 
 export const SHEET_BUSINESS_HEADERS = [
-  "예약일시", "학번", "캠퍼스", "학생명", "반명", "학교", "학년", "담임",
+  "예약일시", "학번", "캠퍼스", "학생명", "수학반", "과학반", "학교", "학년", "담임",
   "학부모HP (모)", "학부모HP (부)", "예약상태", "로그",
 ] as const;
 export const FAMILY_SUMMARY_BUSINESS_HEADERS = [
@@ -27,7 +27,7 @@ export const BOOKING_LOG_BUSINESS_HEADERS = [
   "예약인원", "입장인원", "예약상태", "예약경로", "처리자", "로그",
 ] as const;
 
-export const SHEET_RESERVED_BLANK_COLUMN_COUNT = 17;
+export const SHEET_RESERVED_BLANK_COLUMN_COUNT = 16;
 export const FAMILY_SUMMARY_RESERVED_BLANK_COLUMN_COUNT = 12;
 export const BOOKING_LOG_RESERVED_BLANK_COLUMN_COUNT = 12;
 

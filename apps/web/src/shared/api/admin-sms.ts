@@ -27,6 +27,7 @@ import type {
   SmsTemplate,
   SmsTemplateCreated,
   SmsTemplateList,
+  SmsTemplateRemovalResult,
 } from "./contract";
 
 /* ── 게이트웨이 준비 상태 ────────────────────────────────────────────────── */
@@ -104,8 +105,10 @@ export function smsContentErrorMessage(error: unknown): string | null {
 
 export const SMS_TEMPLATE_VERSION_CONFLICT_CODE = "SMS_TEMPLATE_VERSION_CONFLICT";
 export const SMS_TEMPLATE_KEY_CONFLICT_CODE = "SMS_TEMPLATE_KEY_CONFLICT";
-/** 서버가 마지막 활성 템플릿 보관을 거절할 때의 코드 (명세 §5.1). */
-export const SMS_LAST_ACTIVE_TEMPLATE_REQUIRED_CODE = "SMS_LAST_ACTIVE_TEMPLATE_REQUIRED";
+/** 현재 기본 템플릿을 보관하려면 먼저 다른 템플릿을 기본으로 지정해야 한다. */
+export const SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE = "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED";
+/** 비활성 템플릿은 기본으로 지정할 수 없다. */
+export const SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE = "SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE";
 
 export async function listSmsTemplates(signal?: AbortSignal): Promise<SmsTemplate[]> {
   const list = await apiRequest<SmsTemplateList>("/admin/sms/templates", { method: "GET", signal });
@@ -118,6 +121,8 @@ export interface CreateSmsTemplateInput {
   purpose: SmsPurpose;
   title?: string;
   body: string;
+  /** 이 용도의 활성 기본 템플릿으로 만든다. */
+  isDefault?: boolean;
 }
 
 /** durable 변경 — `idempotencyKey` 는 조작을 소유한 훅이 넘긴다 (여기서 만들지 않는다). */
@@ -140,6 +145,8 @@ export interface UpdateSmsTemplateInput {
   title?: string | null;
   body?: string;
   active?: boolean;
+  /** true 면 같은 용도의 활성 기본을 이 템플릿으로 옮긴다(서버가 이전 기본을 동시에 내린다). */
+  isDefault?: boolean;
   /** 현재 버전 문자열. 다르면 서버가 409 로 거절한다. */
   version: string;
 }
@@ -158,29 +165,24 @@ export async function updateSmsTemplate(
 }
 
 /**
- * 보관(archive) — 행을 지우지 않고 active:false 로 내린다 (계약 x-hard-delete: forbidden).
+ * 템플릿 제거 — 계약 DELETE /admin/sms/templates/{templateId}.
  *
- * 계약의 DELETE 는 버전을 If-Match 헤더로 받는데, 어댑터 코어가 임의 헤더를 열어 주지 않는다
- * (시크릿 헤더 하나만 허용). 같은 전이를 PATCH `{active:false, version}` 로 보낸다 —
- * 서버의 archiveTemplate 이 그대로 updateTemplate 에 위임하므로 결과·검증·409 가 동일하다.
+ * 현재 version 을 `If-Match` 헤더로 싣고(낙관적 잠금), durable 변경이라 Idempotency-Key 도 넘긴다.
+ * 서버가 결과를 정한다: 사용 이력이 없으면 하드 삭제(`disposition:"DELETED"`, archivedTemplate:null),
+ * 이력이 있으면 inactive 로 보관(`disposition:"ARCHIVED"`, archivedTemplate 에 내려간 행). 현재 기본
+ * 템플릿은 다른 템플릿을 먼저 기본으로 지정하기 전엔 409(`SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED`)로 거절된다.
  */
-export async function archiveSmsTemplate(
+export async function removeSmsTemplate(
   templateId: string,
   version: string,
   options: { idempotencyKey: string; signal?: AbortSignal },
-): Promise<SmsTemplate> {
-  return updateSmsTemplate(templateId, { active: false, version }, options);
-}
-
-/**
- * 마지막 남은 활성 템플릿인가 (명세 §5.1).
- *
- * 서버도 `SMS_LAST_ACTIVE_TEMPLATE_REQUIRED` 로 막지만, 왕복 전에 화면이 먼저 이유를 말한다.
- * 판정이 엇갈리면 서버가 이긴다 — 이 함수는 안내용이지 방어선이 아니다.
- */
-export function isLastActiveTemplate(templates: readonly SmsTemplate[], templateId: string): boolean {
-  const active = templates.filter((template) => template.active);
-  return active.length === 1 && active[0]?.templateId === templateId;
+): Promise<SmsTemplateRemovalResult> {
+  return apiRequest<SmsTemplateRemovalResult>(`/admin/sms/templates/${encodeURIComponent(templateId)}`, {
+    method: "DELETE",
+    ifMatchVersion: version,
+    idempotencyKey: options.idempotencyKey,
+    signal: options.signal,
+  });
 }
 
 /* ── 대상 프리뷰 ─────────────────────────────────────────────────────────── */

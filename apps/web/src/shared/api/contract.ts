@@ -193,11 +193,10 @@ export interface DeviceRevocationRequest {
 }
 
 /** 계약 enum — NOT_OPEN(예약 시작 전)과 CLOSED(예약 마감)를 구분한다. */
-export type PublicAvailability = "AVAILABLE" | "FULL" | "NOT_OPEN" | "CLOSED";
+export type PublicAvailability = "AVAILABLE" | "NOT_OPEN" | "CLOSED";
 
 export const AVAILABILITY_LABELS: Record<PublicAvailability, string> = {
   AVAILABLE: "예약 가능",
-  FULL: "마감",
   NOT_OPEN: "예약 시작 전",
   CLOSED: "예약 마감",
 };
@@ -222,7 +221,6 @@ export interface PublicSeminarSession {
    */
   guestBookingEnabled: boolean;
   availability: PublicAvailability;
-  remainingCapacity: number;
 }
 
 export interface ScannerSessionList {
@@ -283,6 +281,15 @@ export const ATTENDANCE_PARTY_LABELS: Record<AttendanceParty, string> = {
   FATHER: "부",
   BOTH: "모/부",
 };
+
+/**
+ * 사용자 노출 참석 학부모 요약 문구 — "모 · 1명" / "부 · 1명" / "모/부 · 2명" 으로 통일한다.
+ * 선택 버튼·티켓·예약 요약·스캐너 후보 등 모든 노출 지점이 이 helper 하나만 쓴다(중복 금지).
+ * 인원은 서버 좌석 파생(MOTHER 1 / FATHER 1 / BOTH 2)과 동일하다.
+ */
+export function attendancePartySummary(party: AttendanceParty): string {
+  return `${ATTENDANCE_PARTY_LABELS[party]} · ${party === "BOTH" ? 2 : 1}명`;
+}
 
 export type FamilyBookingStatus = "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW";
 
@@ -472,9 +479,22 @@ export interface AdminStudent {
   mathClassName: string | null;
   /** 과학반 이름 목록 — 없으면 빈 배열. 대표 반과 별개의 실제 배정 목록이다. */
   scienceClassNames: string[];
+  /** 선택 회차에 RESERVED·CHECKED_IN·NO_SHOW 예약이 있으면 true. */
+  hasReservation: boolean;
+  /** 선택 회차 예약 투영. 회차 미지정 또는 예약이 없으면 null. */
+  reservation: AdminStudentReservationProjection | null;
   assignments: StudentSourceAssignment[];
   firstSeenAt: string;
   lastSeenAt: string;
+}
+
+/** 계약 AdminStudentReservation — 선택 회차의 가족 예약 투영. */
+export interface AdminStudentReservationProjection {
+  status: FamilyBookingStatus;
+  hasReservation: boolean;
+  familyBookingId: string;
+  attendanceParty: AttendanceParty;
+  bookingSource: BookingSource;
 }
 
 /**
@@ -769,6 +789,53 @@ export interface OwnedFamilyBookingList {
   items: FamilyBooking[];
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * 공개 마스킹 가족 예약 (계약 PublicMaskedFamilyBooking / PublicMaskedFamilyBookingList).
+ *
+ * ★ 공개 self-service 관리 경로(조회·상세·회차 이동·참석 변경·취소)가 다루는 **유일한** 읽기
+ *   모델이다. 전체 `FamilyBooking`(연락처 원문·학생 실명 포함)과 달리, 서버가 이미 **이름과
+ *   연락처를 마스킹해** 내려준다: `participants[].maskedName`(`홍*동`)과 `maskedContact`
+ *   (`010-****-1234`). 프론트는 이 값을 **그대로 표시**한다 — 다시 마스킹하거나(이중 마스킹),
+ *   복원·역마스킹·저장·로깅·URL 노출을 하지 않는다.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** 계약 PublicMaskedFamilyBookingParticipant — 참가자 스냅샷의 **마스킹된** 최소 투영. */
+export interface PublicMaskedFamilyBookingParticipant {
+  participantType: BookingParticipantType;
+  /** 서버가 마스킹한 이름(`홍*동`). 그대로 표시한다 — 다시 마스킹하지 않는다. */
+  maskedName: string;
+  branch: Branch;
+}
+
+/**
+ * 계약 PublicMaskedFamilyBooking — 공개 관리 경로의 마스킹 가족 예약 집계.
+ * enum·좌석 파생 규칙은 전체 `FamilyBooking` 과 동일하되, 신원 필드만 마스킹돼 있고
+ * 학생 식별자·학교·학번·담임 같은 민감 필드는 아예 오지 않는다.
+ */
+export interface PublicMaskedFamilyBooking {
+  familyBookingId: string;
+  seminarSessionId: string;
+  /** 서버가 마스킹한 예약 연락처(`010-****-1234`). 그대로 표시한다. */
+  maskedContact: string;
+  attendanceParty: AttendanceParty;
+  bookingSource: BookingSource;
+  /** 서버 파생 — MOTHER=1 / FATHER=1 / BOTH=2. 자녀 수로 늘어나지 않는다. */
+  seatCount: 1 | 2;
+  status: FamilyBookingStatus;
+  participants: PublicMaskedFamilyBookingParticipant[];
+  qrStatus: QrCredentialStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  checkedInAt: string | null;
+  cancelledAt: string | null;
+}
+
+/** 계약 PublicMaskedFamilyBookingList — 연락처 조회(lookup) 결과. 매칭이 없으면 빈 배열. */
+export interface PublicMaskedFamilyBookingList {
+  items: PublicMaskedFamilyBooking[];
+}
+
 /** 계약 PublicGuestParticipantInput.grade enum — 정확히 이 12개뿐이다. */
 export type GuestGrade =
   | "초1" | "초2" | "초3" | "초4" | "초5" | "초6"
@@ -831,6 +898,16 @@ export interface PublicFamilyBookingUpdateRequest {
 export interface PublicCancellationRequest {
   expectedVersion: number;
   reason?: string | null;
+}
+
+/**
+ * 계약 PublicFamilyBookingReadSessionRequest (POST /public/family-bookings/{id}/read-session).
+ * 연락처 조회로 이미 메모리에 있는 전체 연락처만 본문에 싣는다 — path·query·log 금지.
+ * 서버가 정규화해 **정확히 그 예약 하나**와 대조하고, 통과하면 30분 읽기 전용 관리 세션을 세운다.
+ * 성공 응답은 `BookingAccessExchangeResult`(새 csrfToken 포함)로 개인 링크 교환과 같다.
+ */
+export interface PublicFamilyBookingReadSessionRequest {
+  contact: string;
 }
 
 /**
@@ -910,16 +987,6 @@ export interface SeminarPage {
 
 export type SeminarSessionStatus = "DRAFT" | "OPEN" | "CLOSED" | "CANCELLED" | "ARCHIVED";
 
-/** 계약 SessionCapacity — 정원은 **객체**다(정수 하나가 아니다). */
-export interface SessionCapacity {
-  capacity: number;
-  reservedCount: number;
-  checkedInCount: number;
-  /** 서버 파생 = capacity - reservedCount. 입장 완료분은 이미 reservedCount 안에 있다. */
-  remainingCount: number;
-  version: number;
-}
-
 /**
  * 계약 SessionOperationsSummary — 회차 목록 항목마다 서버가 함께 주는 **가족 예약 건수** 집계
  * (좌석 원장이 아니다). 서버 원시 필드명은 `activeBookingCount…` 지만, 어댑터가 화면이 쓰는
@@ -929,7 +996,7 @@ export interface SessionCapacity {
  * noShow 는 active·unchecked·cancelled 어디에도 섞이지 않는다.
  */
 export interface SeminarSessionOperationsSummary {
-  /** 활성 예약 = RESERVED + CHECKED_IN (NO_SHOW 제외). 예약률 분자·"총 예약". */
+  /** 활성 예약 = RESERVED + CHECKED_IN (NO_SHOW 제외). */
   activeCount: number;
   /** 입장 완료 = CHECKED_IN. */
   checkedInCount: number;
@@ -943,7 +1010,7 @@ export interface SeminarSessionOperationsSummary {
 
 /**
  * 계약 AdminSeminarSession — 공개용 PublicSeminarSession 과 다른 타입이다
- * (이쪽은 `capacity` 객체·`status`·`version` 이 있고 `availability`·`seminarTitle` 이 없다).
+ * (이쪽은 `status`·`version` 이 있고 `availability`·`seminarTitle` 이 없다).
  * DB 컬럼은 place 지만 계약 필드명은 `location` 이다.
  */
 export interface AdminSeminarSession {
@@ -960,7 +1027,6 @@ export interface AdminSeminarSession {
   status: SeminarSessionStatus;
   /** 계약 필수 필드 — 이 회차의 비재원생(guest) 예약 허용 여부. 관리자 토글이 PATCH 로 바꾼다. */
   guestBookingEnabled: boolean;
-  capacity: SessionCapacity;
   /**
    * 회차 목록 엔드포인트가 항목마다 함께 주는 가족 예약 건수 집계. 콘솔은 오직 이 목록으로만
    * 회차를 읽고 어댑터가 항상 채워 주므로, 모든 카드가 좌석 원장(reservedCount) 근사 없이
@@ -1202,10 +1268,21 @@ export interface SessionRosterFacets {
   unmatchedUnitCount: number;
 }
 
+/**
+ * 현재 예약 명단 필터 범위의 참석 규모. 형제자매는 학생 행에는 각각 나타나지만 가족 예약은
+ * 한 번만 세고, 실제 참가자는 참석 학부모(모·부 1명, 모/부 2명) 수로 센다.
+ */
+export interface ParticipationMonitoring {
+  studentCount: number;
+  familyBookingCount: number;
+  attendeeCount: number;
+}
+
 export interface SessionRosterPage {
   items: SessionRosterRow[];
   page: PageMeta;
   facets: SessionRosterFacets;
+  monitoring: ParticipationMonitoring;
 }
 
 export type BookingAuditEventType =
@@ -1338,15 +1415,10 @@ export function isFreshRotation(result: QrRotationResult): result is FreshQrRota
   return result.replayed === false;
 }
 
-/**
- * 계약 allOf: photoAttached=true 면 photoName(basename) 필수,
- * false 면 photoName 은 null 이어야 한다. 사진 바이트는 이 계약이 업로드하지 않는다.
- */
+/** 계약 PublicSurveyResponseCreateRequest — 별점(필수)과 후기(선택)만 받는다. */
 export interface PublicSurveyResponseCreateRequest {
   rating: number;
   comment?: string;
-  photoAttached: boolean;
-  photoName?: string | null;
 }
 
 /* ── 관리자 설문 응답 (tag: Admin seminars) ─────────────────────────────── */
@@ -1380,7 +1452,7 @@ export interface SurveyParticipantContext {
 
 /**
  * 계약 SurveyResponse — 관리자 목록이 주는 응답. `participant` 로 캠퍼스·단위·학생·반·담임·
- * 학부모 연락처까지 함께 온다(POC 만족도 표의 9열이 여기서 나온다).
+ * 학부모 연락처까지 함께 온다(POC 만족도 표의 8열이 여기서 나온다).
  */
 export interface SurveyResponse {
   surveyResponseId: string;
@@ -1388,8 +1460,6 @@ export interface SurveyResponse {
   participant: SurveyParticipantContext;
   rating: number;
   comment: string | null;
-  photoAttached: boolean;
-  photoName: string | null;
   submittedAt: string;
 }
 
@@ -1416,8 +1486,6 @@ export interface SurveyResponseMutationResult {
   seminarSessionId: string;
   rating: number;
   comment: string | null;
-  photoAttached: boolean;
-  photoName: string | null;
   submittedAt: string;
   replayed: boolean;
 }
@@ -1433,6 +1501,7 @@ export interface SurveyResponseMutationResult {
 export type SmsPurpose =
   | "OTP"
   | "BOOKING_CONFIRMED"
+  | "BOOKING_UPDATED"
   | "BOOKING_CANCELLED"
   | "FIRST_CHECK_IN"
   | "ADMIN_GROUP"
@@ -1506,6 +1575,8 @@ export interface SmsTemplate {
   title: string | null;
   body: string;
   active: boolean;
+  /** 용도(purpose)별로 활성 기본 템플릿이 정확히 하나 유지된다. */
+  isDefault: boolean;
   version: string;
   createdAt: string;
   updatedAt: string;
@@ -1518,6 +1589,25 @@ export interface SmsTemplateList {
 /** 계약 SmsTemplateCreated — 생성 응답만 classification 을 함께 준다. */
 export interface SmsTemplateCreated extends SmsTemplate {
   classification: SmsPayloadClassification;
+}
+
+/**
+ * 계약 SmsTemplateRemovalDisposition — DELETE 결과가 하드 삭제였는지 보관이었는지.
+ * `DELETED` 는 사용 이력이 없어 행이 사라졌다는 뜻, `ARCHIVED` 는 이력이 있어 inactive 로 남겼다는 뜻.
+ */
+export type SmsTemplateRemovalDisposition = "DELETED" | "ARCHIVED";
+
+/**
+ * 계약 SmsTemplateRemovalResult — DELETE /admin/sms/templates/{templateId} 응답.
+ *
+ * `archivedTemplate` 는 `disposition:"ARCHIVED"` 일 때만 채워지고(그때 inactive 행), 하드 삭제면 null 이다.
+ * `usageCount` 는 이 템플릿을 참조하는 durable outbox 스냅샷 수다 — 0 이면 삭제, 그 외엔 보관된다.
+ */
+export interface SmsTemplateRemovalResult {
+  templateId: string;
+  disposition: SmsTemplateRemovalDisposition;
+  usageCount: number;
+  archivedTemplate: SmsTemplate | null;
 }
 
 /**
@@ -1631,4 +1721,37 @@ export interface SmsBatchSummary {
 export interface SmsMessageList {
   batches: SmsBatchSummary[];
   items: SmsMessageSummary[];
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 공개 포스터 (계약 tags: Public poster / Admin poster).
+ * GET /public/poster (same-origin, 항상 200) · PUT /admin/poster (multipart).
+ * 서버가 이미지 내용의 sha256 을 버전으로 삼아 불변 URL 로 서빙한다 — 폭·높이 메타데이터는 없다.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** 계약 poster mediaType — 정확히 이 셋만 허용한다(그 밖은 계약상 오지 않는다). */
+export type PosterMediaType = "image/png" | "image/jpeg" | "image/webp";
+
+/**
+ * 계약 PosterDescriptor — 현재 게시된 포스터의 서술자.
+ *
+ * - `version` 은 이미지 내용의 sha256(64 소문자 hex)이다.
+ * - `imageUrl` 은 그 버전을 가리키는 **불변 same-origin 경로**
+ *   `/api/v1/public/poster/image/<64 hex>` 다. 버전이 곧 URL 이라 캐시 무효화가 필요 없다.
+ * - 폭·높이 메타데이터가 없으므로 화면은 자연 비율의 반응형 네이티브 이미지로 그린다.
+ */
+export interface PosterDescriptor {
+  version: string;
+  imageUrl: string;
+  mediaType: PosterMediaType;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+/**
+ * 계약 PosterResource — GET /public/poster 와 PUT /admin/poster 성공 응답의 봉투.
+ * 게시된 포스터가 없으면 `poster: null`(공개 GET 은 이 경우에도 200)이고, 있으면 서술자다.
+ */
+export interface PosterResource {
+  poster: PosterDescriptor | null;
 }

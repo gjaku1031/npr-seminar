@@ -1,8 +1,14 @@
-# NestJS implementation decisions — 2026-07-17
+# NestJS implementation decisions — 2026-07-17 (historical addendum)
 
 This addendum records implementation decisions made after
 `nestjs-backend-handoff.md`. Where the two documents differ, this addendum is
 the newer product decision.
+
+This is a dated implementation record, not the current API contract. The
+authoritative contract is `packages/contracts/openapi.yaml`; the current
+product has unlimited sessions, uses `서울시 교통회관 (올림픽로 319)`, and
+reports student rows, distinct active family bookings, and actual parent
+attendees as separate absolute counts.
 
 ## Student class resolution
 
@@ -100,7 +106,7 @@ the newer product decision.
   digest matches that proof.
 - Student lookup for the public reservation flow is scoped to that authorized
   set. The booking transaction repeats the digest check for every selected
-  student while holding the relevant capacity and student-booking locks.
+  student while holding the relevant family-booking and student-booking locks.
 - A caller cannot reserve a student merely by knowing or guessing a student
   identifier.
 

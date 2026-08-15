@@ -51,8 +51,8 @@ export {
 export const SHEET_SCHEMA_DESCRIPTOR = [
   "sheet:예약명단#1777564107",
   "columns:30",
-  `A:L:${SHEET_BUSINESS_HEADERS.join(",")}`,
-  "M:AC:blank",
+  `A:M:${SHEET_BUSINESS_HEADERS.join(",")}`,
+  "N:AC:blank",
   `AD:hidden+protected:${SHEET_TECHNICAL_MARKER_HEADER}`,
   "sheet:예약집계#202607180",
   "columns:26",
@@ -92,7 +92,8 @@ export interface SheetDispatchPlan {
   readonly workbook: SheetWorkbookExpectation;
   readonly valueInputMode: "RAW";
   readonly hiddenMarkerColumn: "AD";
-  readonly studentKeyColumn: "B";
+  readonly sourceStudentNoDisplayColumn: "B";
+  readonly rowIdentity: "FAMILY_BOOKING_STUDENT_ID_ONLY";
   readonly postVerify: true;
   /** Student-grain current projection retained for the existing 예약명단 tab. */
   readonly row: {
@@ -100,7 +101,8 @@ export interface SheetDispatchPlan {
     readonly sourceStudentNo: string;
     readonly campus: "송파" | "위례" | "광진";
     readonly studentName: string;
-    readonly className: string;
+    readonly mathClassNames: string;
+    readonly scienceClassNames: string;
     readonly schoolName: string;
     readonly grade: string;
     readonly primaryTeacher: string;
@@ -341,13 +343,11 @@ export class GoogleSheetsGateway {
 
   private buildStudentUpdates(plan: SheetDispatchPlan, rows: readonly (readonly string[])[]): SheetsValueRange[] {
     const marker = plan.row.marker;
-    const sourceStudentNo = plan.row.sourceStudentNo;
-    const exactIndex = rows.findIndex((row, index) => index > 0
-      && row[reservationMarkerIndex] === marker && row[sourceStudentNoIndex] === sourceStudentNo);
-    const studentIndex = exactIndex >= 0 || sourceStudentNo === ""
-      ? exactIndex
-      : rows.findIndex((row, index) => index > 0 && row[sourceStudentNoIndex] === sourceStudentNo);
-    const markerRowIndex = studentIndex >= 0 ? studentIndex : rows.findIndex((row, index) => index > 0
+    // familyBookingStudentId is the only reservation-row identity. A source
+    // student number can legitimately recur in another seminar session within
+    // the same workbook and must never cause that other booking row to move or
+    // be overwritten.
+    const markerRowIndex = rows.findIndex((row, index) => index > 0
       && row[reservationMarkerIndex] === marker);
     const targetIndex = markerRowIndex >= 0
       && !this.isBusinessRowVacant(rows[markerRowIndex] ?? [], SHEET_BUSINESS_HEADERS.length)
@@ -360,7 +360,7 @@ export class GoogleSheetsGateway {
         updates.push({ range: `${RESERVATION_SHEET_TITLE}!AD${index + 1}`, values: [[""]] });
       }
     }
-    updates.push({ range: `${RESERVATION_SHEET_TITLE}!A${targetRow}:L${targetRow}`, values: [this.studentValues(plan)] });
+    updates.push({ range: `${RESERVATION_SHEET_TITLE}!A${targetRow}:M${targetRow}`, values: [this.studentValues(plan)] });
     updates.push({ range: `${RESERVATION_SHEET_TITLE}!AD${targetRow}`, values: [[marker]] });
     return updates;
   }
@@ -442,7 +442,8 @@ export class GoogleSheetsGateway {
       plan.row.sourceStudentNo,
       plan.row.campus,
       plan.row.studentName,
-      plan.row.className,
+      plan.row.mathClassNames,
+      plan.row.scienceClassNames,
       plan.row.schoolName,
       plan.row.grade,
       plan.row.primaryTeacher,

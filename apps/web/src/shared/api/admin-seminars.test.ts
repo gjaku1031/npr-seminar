@@ -53,12 +53,11 @@ describe("normalizeAdminSeminarSession — operationsSummary 만 정규화하고
     branch: null,
     startsAt: "2026-08-21T01:00:00.000Z",
     endsAt: "2026-08-21T03:00:00.000Z",
-    location: "송파 대강당",
+    location: "서울시 교통회관 (올림픽로 319)",
     bookingOpensAt: "2026-08-01T00:00:00.000Z",
     bookingClosesAt: "2026-08-20T00:00:00.000Z",
     status: "OPEN" as const,
     guestBookingEnabled: false,
-    capacity: { capacity: 800, reservedCount: 120, checkedInCount: 40, remainingCount: 680, version: 3 },
     version: 5,
     createdAt: "2026-07-01T00:00:00.000Z",
     updatedAt: "2026-07-10T00:00:00.000Z",
@@ -77,11 +76,8 @@ describe("normalizeAdminSeminarSession — operationsSummary 만 정규화하고
     });
     assert.equal(session.operationsSummary.activeCount, 130);
     assert.equal(session.operationsSummary.uncheckedCount, 90);
-    // active 는 좌석 원장 reservedCount(120) 가 아니라 실집계(130)여야 한다.
-    assert.notEqual(session.operationsSummary.activeCount, rawBase.capacity.reservedCount);
     // 나머지 필드는 그대로 보존된다.
     assert.equal(session.seminarSessionId, "sess-1");
-    assert.equal(session.capacity.capacity, 800);
     assert.equal(session.status, "OPEN");
   });
 });
@@ -100,12 +96,11 @@ describe("updateAdminSeminarSession — 비재원생 토글 PATCH", () => {
     branch: "SONGPA",
     startsAt: "2026-08-21T01:00:00.000Z",
     endsAt: "2026-08-21T03:00:00.000Z",
-    location: "송파 대강당",
+    location: "서울시 교통회관 (올림픽로 319)",
     bookingOpensAt: "2026-08-01T00:00:00.000Z",
     bookingClosesAt: "2026-08-20T00:00:00.000Z",
     status: "OPEN",
     guestBookingEnabled: true,
-    capacity: { capacity: 800, reservedCount: 120, checkedInCount: 40, remainingCount: 680, version: 4 },
     operationsSummary: { activeCount: 0, checkedInCount: 0, uncheckedCount: 0, cancelledCount: 0, noShowCount: 0 },
     version: 4,
     createdAt: "2026-07-01T00:00:00.000Z",

@@ -12,6 +12,7 @@ import { isAborted, isApiError } from "./problem";
 import { BRANCH_LABELS } from "./contract";
 import type {
   AdminStudent,
+  AdminStudentReservationProjection,
   AdminStudentPage,
   Branch,
   FamilyBookingStatus,
@@ -39,12 +40,7 @@ export interface ListAdminStudentsParams {
   /** 대표 반 판정 결과로 거른다 — 계약 enum 값만 보낸다. */
   resolution?: RepresentativeResolution;
   sourceActive?: boolean;
-  /**
-   * 계획된 파라미터(계약 확정 전) — 회차를 함께 보내면 서버가 **그 회차 기준** 학생별 예약
-   * 상태를 `items[].reservationStatus` 로 실어 준다. 목록 **범위는 바꾸지 않는다**(여전히 재원
-   * 명부 전체다) — 각 행에 예약 여부만 얹는 주석일 뿐이다. 현재 배포가 이 파라미터를 모르면
-   * 조용히 무시하고 응답에 그 필드가 없다 → "예약 여부" 열은 전원 미예약으로 떨어진다.
-   */
+  /** 회차를 함께 보내면 서버가 각 행에 hasReservation/reservation 투영을 얹는다. */
   seminarSessionId?: string;
   page?: number;
   /** 계약 최대 200. */
@@ -53,7 +49,8 @@ export interface ListAdminStudentsParams {
 
 /**
  * 목록 응답에 겹쳐지는 계획된 학생별 필드 — 현재 배포에는 없을 수 있어 items 타입을 넓힌다.
- * 계약이 확정되면 이 확장(예약 여부 · canonical 담임)은 사라지고 AdminStudent 본체로 흡수된다.
+ * 정식 계약 필드는 AdminStudent 본체에 있다. 아래 교차 타입은 롤링 배포 중인 레거시 응답의
+ * 최상위 `reservationStatus` 만 선택적으로 받아 주기 위한 호환 경계다.
  */
 export interface AdminStudentReservationPage extends Omit<AdminStudentPage, "items"> {
   items: Array<AdminStudentPage["items"][number] & AdminStudentReservation & AdminStudentCanonicalTeacher>;
@@ -129,33 +126,43 @@ export function campusScopedLabel(branch: Branch | undefined, label: string): st
   return branch === undefined ? label : `${BRANCH_LABELS[branch]} ${label}`;
 }
 
-/* ── 회차 예약 여부 (계획된 학생별 필드) ──────────────────────────────────────
+/* ── 회차 예약 여부 ───────────────────────────────────────────────────────────
  *
- * "예약 여부" 열은 오직 두 값만 낸다: 예약 / 미예약. `seminarSessionId` 를 목록 요청에 함께
- * 보내면 서버가 각 학생의 그 회차 예약 상태를 실어 준다. 계약 확정 전이라 AdminStudent 본체
- * 에는 아직 없다 — 그래서 선택 필드로 받아 두고, 없으면(현재 배포·미지정 회차) 미예약으로
- * 떨어뜨린다. 세부 상태·참석 학부모·로그·시각은 이 열에 절대 싣지 않는다.
+ * `seminarSessionId` 를 목록 요청에 함께 보내면 서버가 AdminStudent.hasReservation 과
+ * AdminStudent.reservation 을 실어 준다. 정식 중첩 투영을 우선하고, 두 정식 필드가 모두 없는
+ * 롤링 배포 응답에서만 과거 최상위 `reservationStatus` 를 fallback 으로 읽는다.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** 서버가 실어 줄 학생별 회차 예약 상태 — 가족 예약 상태 + 예약 없음(NONE). */
 export type StudentReservationStatus = FamilyBookingStatus | "NONE";
 
-/** AdminStudent 에 겹쳐지는 계획된 선택 필드. 현재 응답에는 없을 수 있다(undefined). */
+/**
+ * 정식 계약과 롤링 배포 호환 입력. AdminStudent 와 교차하면 정식 필드는 required 가 되고,
+ * 순수 helper 테스트에서는 일부 필드만 넘길 수 있다.
+ */
 export interface AdminStudentReservation {
+  hasReservation?: boolean;
+  reservation?: AdminStudentReservationProjection | null;
+  /** @deprecated 정식 중첩 reservation 이 없는 레거시 응답에서만 사용한다. */
   reservationStatus?: StudentReservationStatus | null;
 }
 
 export type StudentReservationLabel = "예약" | "미예약";
 
 /**
- * "예약 여부" 열 라벨 — 지시된 대응만 따른다:
- *   RESERVED · CHECKED_IN · NO_SHOW → 예약
- *   NONE · CANCELLED · 부재(null·undefined) → 미예약
- *
- * AdminStudent 는 이 선택 필드를 아직 갖지 않지만 구조적으로 이 형태에 대입된다 —
- * 현재 응답이면 필드가 없어 미예약, 계획된 응답이면 값대로 갈린다.
+ * "예약 여부" 열 라벨은 오직 예약/미예약 두 값이다. 정식 최상위 hasReservation 을 최우선으로
+ * 판정하고, 롤링 배포 중 그 필드가 없을 때만 중첩 projection 또는 legacy 상태를 fallback 으로
+ * 읽는다. CANCELLED 는 서버의 hasReservation=false 규칙에 따라 미예약이다.
  */
 export function studentReservationLabel(student: AdminStudentReservation): StudentReservationLabel {
+  if (student.hasReservation !== undefined) {
+    return student.hasReservation ? "예약" : "미예약";
+  }
+
+  if (student.reservation?.hasReservation !== undefined) {
+    return student.reservation.hasReservation ? "예약" : "미예약";
+  }
+
   switch (student.reservationStatus) {
     case "RESERVED":
     case "CHECKED_IN":

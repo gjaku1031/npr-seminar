@@ -64,6 +64,7 @@ describe("channelBreakdownFrom — MOBILE/MANUAL 활성 건수만 합산한다",
   it("채널별 activeBookingCount 를 모바일/수동으로 나눈다", () => {
     const breakdown = channelBreakdownFrom([
       {
+        monitoring: { studentCount: 36, familyBookingCount: 30, attendeeCount: 38 },
         channel: "MOBILE",
         bookingSources: ["WEB_APP"],
         activeBookingCount: 30,
@@ -73,6 +74,7 @@ describe("channelBreakdownFrom — MOBILE/MANUAL 활성 건수만 합산한다",
         noShowBookingCount: 1,
       },
       {
+        monitoring: { studentCount: 15, familyBookingCount: 12, attendeeCount: 14 },
         channel: "MANUAL",
         bookingSources: ["ADMIN_CONSOLE", "PHONE"],
         activeBookingCount: 12,
@@ -95,7 +97,7 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
     const stats = statisticsFromServer({
       branch: "SONGPA",
       summary: {
-        eligibleCurrentStudentCount: 500,
+        monitoring: { studentCount: 210, familyBookingCount: 180, attendeeCount: 225 },
         activeBookingCount: 180,
         reservedBookingCount: 120,
         checkedInBookingCount: 60,
@@ -104,15 +106,15 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
       },
       units: [
         {
+          monitoring: { studentCount: 210, familyBookingCount: 180, attendeeCount: 225 },
           unitGroup: "전체",
-          eligibleStudentCount: 500,
           activeBookingCount: 180,
           reservedBookingCount: 120,
           checkedInBookingCount: 60,
         },
         {
+          monitoring: { studentCount: 50, familyBookingCount: 40, attendeeCount: 52 },
           unitGroup: "중1",
-          eligibleStudentCount: 80,
           activeBookingCount: 40,
           reservedBookingCount: 25,
           checkedInBookingCount: 15,
@@ -120,6 +122,7 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
       ],
       channels: [
         {
+          monitoring: { studentCount: 175, familyBookingCount: 150, attendeeCount: 188 },
           channel: "MOBILE",
           bookingSources: ["WEB_APP"],
           activeBookingCount: 150,
@@ -129,6 +132,7 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
           noShowBookingCount: 7,
         },
         {
+          monitoring: { studentCount: 35, familyBookingCount: 30, attendeeCount: 37 },
           channel: "MANUAL",
           bookingSources: ["ADMIN_CONSOLE"],
           activeBookingCount: 30,
@@ -142,32 +146,48 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
     });
 
     assert.equal(stats.source, "server");
-    assert.equal(stats.eligibleStudentCount, 500);
+    assert.deepEqual(stats.monitoring, { studentCount: 210, familyBookingCount: 180, attendeeCount: 225 });
     assert.equal(stats.activeCount, 180);
     assert.equal(stats.checkedInCount, 60);
+    assert.equal(stats.reservedCount, 120);
+    assert.equal(stats.cancelledCount, 15);
     assert.equal(stats.noShowCount, 9);
     assert.deepEqual(stats.survey, { averageRating: 4.4, responseCount: 42 });
     assert.deepEqual(stats.channels, { mobileCount: 150, manualCount: 30 });
     assert.deepEqual(stats.units, [
-      { unit: "전체", eligibleStudentCount: 500, activeCount: 180, checkedInCount: 60 },
-      { unit: "중1", eligibleStudentCount: 80, activeCount: 40, checkedInCount: 15 },
+      {
+        unit: "전체",
+        activeCount: 180,
+        checkedInCount: 60,
+        monitoring: { studentCount: 210, familyBookingCount: 180, attendeeCount: 225 },
+      },
+      {
+        unit: "중1",
+        activeCount: 40,
+        checkedInCount: 15,
+        monitoring: { studentCount: 50, familyBookingCount: 40, attendeeCount: 52 },
+      },
     ]);
+    assert.equal(stats.channelStats?.[0]?.monitoring?.attendeeCount, 188);
   });
 });
 
 describe("statisticsSummaryFrom — 합성 통계는 active 에서 NO_SHOW 를 빼고 단위·채널을 지어내지 않는다", () => {
   it("active = reserved + checkedIn, units/channels = null", () => {
     const stats = statisticsSummaryFrom(
-      { eligibleStudentCount: 300, reservedCount: 90, checkedInCount: 40, noShowCount: 12 },
+      { reservedCount: 90, checkedInCount: 40, noShowCount: 12, cancelledCount: 7 },
       { averageRating: null, responseCount: 0 },
     );
     assert.equal(stats.source, "derived");
-    assert.equal(stats.eligibleStudentCount, 300);
     assert.equal(stats.activeCount, 130); // 90 + 40 — 노쇼 12 는 빠진다
     assert.equal(stats.checkedInCount, 40);
+    assert.equal(stats.reservedCount, 90);
+    assert.equal(stats.cancelledCount, 7);
+    assert.equal(stats.monitoring, null);
     assert.equal(stats.noShowCount, 12);
     assert.equal(stats.units, null);
     assert.equal(stats.channels, null);
+    assert.equal(stats.channelStats, null);
     assert.deepEqual(stats.survey, { averageRating: null, responseCount: 0 });
   });
 });

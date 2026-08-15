@@ -30,7 +30,7 @@ import {
   SYNC_BLOCKED_CIRCUIT_OPEN,
   SYNC_BLOCKED_SOURCE_NOT_READY,
 } from "./admin-students";
-import type { AdminStudentCanonicalTeacher, AdminStudentReservation } from "./admin-students";
+import type { AdminStudentCanonicalTeacher } from "./admin-students";
 import type {
   AdminStudent,
   StudentClassificationSummary,
@@ -116,6 +116,8 @@ const student = (
   },
   mathClassName: "중3 수학 A",
   scienceClassNames: [],
+  hasReservation: false,
+  reservation: null,
   assignments: [],
   firstSeenAt: "2026-07-01T00:00:00.000Z",
   lastSeenAt: "2026-07-18T00:00:00.000Z",
@@ -192,30 +194,42 @@ describe("evaluateManualSyncGate", () => {
   });
 });
 
-/* ── 예약 여부 라벨 (순수) ────────────────────────────────────────────────────
- *
- * "예약 여부" 열은 오직 두 값만 낸다. 지시된 대응을 못박는다: RESERVED·CHECKED_IN·NO_SHOW 는
- * 예약, NONE·CANCELLED·부재는 미예약. 세부 상태를 이 열에 흘리지 않는 유일한 판정이다.
- * ──────────────────────────────────────────────────────────────────────────── */
+/* ── 예약 여부 라벨 (순수) ──────────────────────────────────────────────────── */
 
-describe("studentReservationLabel — 예약/미예약 두 값뿐", () => {
-  const of = (reservationStatus: AdminStudentReservation["reservationStatus"]) =>
-    studentReservationLabel({ reservationStatus });
-
-  it("RESERVED·CHECKED_IN·NO_SHOW 는 예약이다", () => {
-    assert.equal(of("RESERVED"), "예약");
-    assert.equal(of("CHECKED_IN"), "예약");
-    assert.equal(of("NO_SHOW"), "예약");
+describe("studentReservationLabel — 정식 hasReservation 우선", () => {
+  const projection = (
+    status: "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW",
+    attendanceParty: "MOTHER" | "FATHER" | "BOTH" = "MOTHER",
+  ) => ({
+    status,
+    hasReservation: status !== "CANCELLED",
+    familyBookingId: "11111111-1111-4111-8111-111111111111",
+    attendanceParty,
+    bookingSource: "WEB_APP" as const,
   });
 
-  it("NONE·CANCELLED 는 미예약이다", () => {
-    assert.equal(of("NONE"), "미예약");
-    assert.equal(of("CANCELLED"), "미예약");
+  it("실제 API shape 의 최상위 boolean 으로 예약/미예약을 판정한다", () => {
+    assert.equal(studentReservationLabel({ hasReservation: true, reservation: projection("RESERVED", "BOTH") }), "예약");
+    assert.equal(studentReservationLabel({ hasReservation: true, reservation: projection("CHECKED_IN") }), "예약");
+    assert.equal(studentReservationLabel({ hasReservation: true, reservation: projection("NO_SHOW") }), "예약");
+    assert.equal(studentReservationLabel({ hasReservation: false, reservation: projection("CANCELLED") }), "미예약");
   });
 
-  it("필드 부재(현재 배포·미지정 회차)는 미예약으로 떨어진다", () => {
-    assert.equal(of(undefined), "미예약");
-    assert.equal(of(null), "미예약");
+  it("최상위 정식 boolean 은 충돌하는 nested/legacy 값보다 우선한다", () => {
+    assert.equal(studentReservationLabel({ hasReservation: false, reservation: projection("RESERVED"), reservationStatus: "RESERVED" }), "미예약");
+    assert.equal(studentReservationLabel({ hasReservation: true, reservation: projection("CANCELLED"), reservationStatus: "CANCELLED" }), "예약");
+  });
+
+  it("최상위 정식 필드가 없으면 nested hasReservation 을 fallback 으로 쓴다", () => {
+    assert.equal(studentReservationLabel({ reservation: projection("RESERVED") }), "예약");
+    assert.equal(studentReservationLabel({ reservation: projection("CANCELLED") }), "미예약");
+  });
+
+  it("정식 필드가 모두 없는 롤링 배포에서만 legacy 상태를 사용한다", () => {
+    assert.equal(studentReservationLabel({ reservationStatus: "RESERVED" }), "예약");
+    assert.equal(studentReservationLabel({ reservationStatus: "CHECKED_IN" }), "예약");
+    assert.equal(studentReservationLabel({ reservationStatus: "NO_SHOW" }), "예약");
+    assert.equal(studentReservationLabel({ reservationStatus: "CANCELLED" }), "미예약");
     assert.equal(studentReservationLabel({}), "미예약");
   });
 });

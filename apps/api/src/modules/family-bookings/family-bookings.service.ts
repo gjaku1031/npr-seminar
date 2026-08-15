@@ -8,6 +8,7 @@ import { type AttendanceParty, seatCountFor } from "./attendance.js";
 import { BookingCryptoService } from "./booking-crypto.service.js";
 import { OtpProofPort } from "./otp-proof.port.js";
 import { SmsOutboxService, type SmsBranch } from "../sms/sms-outbox.service.js";
+import { SmsTemplateCatalog } from "../sms/sms-template-catalog.service.js";
 import type { AppEnvironment } from "../../common/config/environment.js";
 import { SheetOutboxService } from "../google-sheets/sheet-outbox.service.js";
 import { currentStudentMathHomeroomTeacher } from "../student-sync/student-homeroom-policy.js";
@@ -53,6 +54,7 @@ export class FamilyBookingsService {
     private readonly qrTokenProtector: QrTokenProtector,
     private readonly otpProof: OtpProofPort,
     private readonly smsOutbox: SmsOutboxService,
+    private readonly smsTemplates: SmsTemplateCatalog,
     private readonly sheetOutbox: SheetOutboxService,
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
@@ -103,29 +105,28 @@ export class FamilyBookingsService {
         return { ...stored, qrToken: null, qrExpiresAt: null, replayed: true };
       }
 
-      const capacities = await transaction.$queryRaw<Array<{
+      const sessionStates = await transaction.$queryRaw<Array<{
         session_id: bigint; session_public_id: string; status: string; starts_at: Date;
         ends_at: Date; guest_booking_enabled: boolean; seminar_status: string;
-        booking_opens_at: Date | null; booking_closes_at: Date | null; capacity: number; reserved_count: number;
+        seminar_title: string; place: string;
+        booking_opens_at: Date | null; booking_closes_at: Date | null;
         scope: string; branch_id: bigint | null;
-      }>>`select sc.session_id,ss.public_id session_public_id,ss.status,ss.starts_at,ss.ends_at,
+      }>>`select ss.id session_id,ss.public_id session_public_id,ss.status,ss.starts_at,ss.ends_at,
+                 se.title seminar_title,ss.place,
                  ss.guest_booking_enabled,se.status seminar_status,ss.booking_opens_at,
                  ss.scope,ss.branch_id,
-                 ss.booking_closes_at,sc.capacity,sc.reserved_count
-            from session_capacities sc
-            join seminar_sessions ss on ss.id=sc.session_id
+                 ss.booking_closes_at
+            from seminar_sessions ss
             join seminars se on se.id=ss.seminar_id
-           where ss.public_id=${request.sessionId}::uuid for update of sc`;
-      const capacity = capacities[0];
-      if (capacity === undefined || capacity.status !== "OPEN"
-        || (request.adminOverride === undefined && capacity.seminar_status !== "PUBLISHED")) {
+           where ss.public_id=${request.sessionId}::uuid for update of ss`;
+      const sessionState = sessionStates[0];
+      if (sessionState === undefined || sessionState.status !== "OPEN"
+        || (request.adminOverride === undefined && sessionState.seminar_status !== "PUBLISHED")) {
         this.fail(409, "SESSION_NOT_BOOKABLE");
       }
       const now = new Date();
-      if ((capacity.booking_opens_at !== null && now < capacity.booking_opens_at)
-        || (capacity.booking_closes_at !== null && now > capacity.booking_closes_at)) this.fail(409, "BOOKING_WINDOW_CLOSED");
-      if (capacity.reserved_count + seats > capacity.capacity) this.fail(409, "CAPACITY_EXCEEDED");
-
+      if ((sessionState.booking_opens_at !== null && now < sessionState.booking_opens_at)
+        || (sessionState.booking_closes_at !== null && now > sessionState.booking_closes_at)) this.fail(409, "BOOKING_WINDOW_CLOSED");
       const proof = request.adminOverride === undefined
         ? await this.otpProof.consume(transaction, request.bookingProof ?? "", "FAMILY_BOOKING")
         : await transaction.otpProofAudit.create({
@@ -185,7 +186,7 @@ export class FamilyBookingsService {
         } else {
           if (matchingStudents.length > 0) this.fail(409, "ENROLLED_CONTACT_MUST_USE_ENROLLED_FLOW");
           if (guest === null) this.fail(400, "PARTICIPANT_INPUT_INVALID");
-          if (!capacity.guest_booking_enabled) this.fail(409, "GUEST_BOOKING_DISABLED");
+          if (!sessionState.guest_booking_enabled) this.fail(409, "GUEST_BOOKING_DISABLED");
           if (guest.branch !== selectedBranch) this.fail(400, "GUEST_CAMPUS_MISMATCH");
           studentIds = [];
         }
@@ -202,14 +203,14 @@ export class FamilyBookingsService {
       }
       const guestBranch = guest === null ? null : await transaction.branch.findUnique({ where: { code: guest.branch } });
       if (guest !== null && (guestBranch === null || !guestBranch.active)) this.fail(400, "GUEST_BRANCH_INVALID");
-      if (capacity.scope === "BRANCH" && (capacity.branch_id === null || (guestBranch !== null
-        ? guestBranch.id !== capacity.branch_id
-        : students.some((student) => student.branch_id !== capacity.branch_id)))) {
+      if (sessionState.scope === "BRANCH" && (sessionState.branch_id === null || (guestBranch !== null
+        ? guestBranch.id !== sessionState.branch_id
+        : students.some((student) => student.branch_id !== sessionState.branch_id)))) {
         this.fail(409, "SESSION_BRANCH_MISMATCH");
       }
       const activeBooking = await transaction.familyBooking.findFirst({
         where: {
-          sessionId: capacity.session_id,
+          sessionId: sessionState.session_id,
           contactDigest: this.bytes(protectedContact.digest),
           status: { in: ["RESERVED", "CHECKED_IN"] },
         },
@@ -218,13 +219,13 @@ export class FamilyBookingsService {
       if (activeBooking !== null) this.fail(409, "ACTIVE_FAMILY_BOOKING_EXISTS");
 
       const expiresAt = new Date(Math.max(
-        capacity.starts_at.getTime() + 6 * 60 * 60 * 1_000,
-        capacity.ends_at.getTime() + 60 * 60 * 1_000,
+        sessionState.starts_at.getTime() + 6 * 60 * 60 * 1_000,
+        sessionState.ends_at.getTime() + 60 * 60 * 1_000,
         Date.now() + 60 * 60 * 1_000,
       ));
       const booking = await transaction.familyBooking.create({
         data: {
-          sessionId: capacity.session_id,
+          sessionId: sessionState.session_id,
           contactDigest: this.bytes(protectedContact.digest),
           contactCiphertext: this.bytes(protectedContact.ciphertext),
           contactLast4: protectedContact.last4,
@@ -253,7 +254,7 @@ export class FamilyBookingsService {
         });
         const link = await transaction.familyBookingStudent.create({ data: {
           familyBookingId: booking.id,
-          sessionId: capacity.session_id,
+          sessionId: sessionState.session_id,
           participantType: "ENROLLED",
           studentId: student.id,
           branchCodeAtBooking: student.branch_code,
@@ -277,7 +278,7 @@ export class FamilyBookingsService {
         const sourceStudentNo = `비재원-${sequence[0]!.value.toString().padStart(6, "0")}`;
         const link = await transaction.familyBookingStudent.create({ data: {
           familyBookingId: booking.id,
-          sessionId: capacity.session_id,
+          sessionId: sessionState.session_id,
           participantType: "GUEST",
           studentId: null,
           branchCodeAtBooking: guest.branch,
@@ -295,10 +296,6 @@ export class FamilyBookingsService {
           schoolName: guest.schoolName, grade: guest.grade,
         });
       }
-      await transaction.sessionCapacity.update({
-        where: { sessionId: capacity.session_id },
-        data: { reservedCount: { increment: seats }, version: { increment: 1 }, updatedAt: now },
-      });
       await transaction.qrCredential.create({
         data: {
           familyBookingId: booking.id,
@@ -310,7 +307,7 @@ export class FamilyBookingsService {
         },
       });
       const accessExpiresAt = new Date(Math.max(
-        capacity.ends_at.getTime() + 30 * 24 * 60 * 60_000,
+        sessionState.ends_at.getTime() + 30 * 24 * 60 * 60_000,
         Date.now() + 30 * 24 * 60 * 60_000,
       ));
       await transaction.bookingAccessCredential.create({
@@ -328,24 +325,37 @@ export class FamilyBookingsService {
       await transaction.bookingEvent.create({ data: { familyBookingId: booking.id, eventType: "QR_ISSUED", safeMetadata: { version: 1 } } });
       const bookingUrl = new URL("/booking/access", this.environment.publicBaseUrl ?? "https://invalid.local");
       bookingUrl.hash = `token=${access.rawToken}`;
+      const smsBranch = bookingChildren[0]!.branch;
+      const rendered = await this.smsTemplates.renderDefault(transaction, "BOOKING_CONFIRMED", {
+        studentName: bookingChildren.map((child) => child.studentName).join(", "),
+        seminarTitle: sessionState.seminar_title,
+        sessionDateTime: this.formatSessionDateTime(sessionState.starts_at),
+        place: sessionState.place,
+        bookingUrl: bookingUrl.toString(),
+        inquiryPhone: this.inquiryPhone(smsBranch),
+      }, {
+        key: "SYSTEM_BOOKING_CONFIRMED",
+        body: "[늘푸른수학원] 설명회 예약이 완료되었습니다. 예약 및 입장 QR 확인: {예약확인링크}",
+      });
       await this.smsOutbox.enqueue(transaction, {
         eventKey: `BOOKING_CONFIRMED:${booking.publicId}:1`,
         source: "BOOKING_CONFIRMED",
-        branch: bookingChildren[0]!.branch,
-        seminarSessionPublicId: capacity.session_public_id,
+        branch: smsBranch,
+        seminarSessionPublicId: sessionState.session_public_id,
         familyBookingPublicId: booking.publicId,
         recipientCiphertext: protectedContact.ciphertext,
         recipientDigest: protectedContact.digest,
         recipientLast4: protectedContact.last4,
-        message: `[NPR] 설명회 예약이 완료되었습니다. 예약 및 입장 QR 확인: ${bookingUrl.toString()}`,
+        message: rendered.message,
+        title: rendered.title,
         actorSubject: request.adminOverride?.actorSubject ?? null,
-        safeMetadata: { qrVersion: 1 },
+        safeMetadata: { qrVersion: 1, ...rendered.snapshot },
       });
       await this.sheetOutbox.enqueueBookingEvent(transaction, {
         eventId: createdEvent.eventId,
         eventType: "CREATED",
         occurredAt: createdEvent.occurredAt,
-        seminarSessionPublicId: capacity.session_public_id,
+        seminarSessionPublicId: sessionState.session_public_id,
         familyBookingPublicId: booking.publicId,
         bookingVersion: booking.version,
         bookingCreatedAt: booking.createdAt,
@@ -366,7 +376,7 @@ export class FamilyBookingsService {
       });
       const responseWithoutRaw = {
         familyBookingId: booking.publicId,
-        sessionId: capacity.session_public_id,
+        sessionId: sessionState.session_public_id,
         attendanceParty: request.attendanceParty,
         seatCount: seats,
         status: booking.status,
@@ -398,5 +408,16 @@ export class FamilyBookingsService {
 
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The family booking could not be completed.");
+  }
+
+  private formatSessionDateTime(value: Date): string {
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+      weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).format(value);
+  }
+
+  private inquiryPhone(branch: SmsBranch): string {
+    return ({ SONGPA: "02-413-2652", WIRYE: "02-425-2652", GWANGJIN: "02-422-2652" } as const)[branch];
   }
 }

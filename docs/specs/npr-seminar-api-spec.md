@@ -1,8 +1,9 @@
 # 입시 설명회 예약·QR 입장 시스템 — API 명세서
 
 > **대상 독자**: 백엔드 개발팀
-> **버전**: v0.1 (draft) · 최종 확정 전 리뷰 필요
-> **문서 목적**: FE ↔ BE 계약(contract) 정의. DTO, 상태 코드, 동시성·인증 요구사항 전달.
+> **버전**: v0.2 (현행 제품 규칙 반영)
+> **문서 목적**: 제품 동작의 설명용 요약. 기계 판독 가능한 최종 계약은
+> `packages/contracts/openapi.yaml`이며, 이 문서와 다르면 OpenAPI가 우선한다.
 
 ---
 
@@ -42,8 +43,8 @@
 {
   "success": false,
   "error": {
-    "code": "RESERVATION_SESSION_FULL",
-    "message": "선택한 회차의 정원이 마감되었습니다.",
+    "code": "SESSION_CLOSED",
+    "message": "선택한 회차의 예약이 마감되었습니다.",
     "details": { "sessionId": "..." }
   }
 }
@@ -57,7 +58,7 @@
 | `UNAUTHORIZED` | 401 | 인증 누락/만료 (스태프 API) |
 | `FORBIDDEN` | 403 | 권한 없음 |
 | `NOT_FOUND` | 404 | 리소스 없음 |
-| `CONFLICT` | 409 | 동시성 충돌(정원 마감, 중복 입장 등 — 하위 code로 세분) |
+| `CONFLICT` | 409 | 동시성 충돌(중복 예약·중복 입장 등 — 하위 code로 세분) |
 | `RATE_LIMITED` | 429 | 레이트리밋 |
 | `INTERNAL_ERROR` | 500 | 서버 오류 |
 
@@ -119,8 +120,9 @@
 
 ---
 
-### 2.2 `GET /api/sessions` — 설명회 회차 목록/정원
-예약 폼의 회차 선택 UI에 사용. **정원 마감 여부를 FE가 disabled 처리**하는 데 필요.
+### 2.2 `GET /api/sessions` — 설명회 회차 목록
+예약 폼의 회차 선택 UI에 사용한다. 회차의 공개 여부와 예약 기간만 노출하며,
+좌석 수·잔여 좌석·예약 비율은 계약과 화면 어디에서도 제공하지 않는다.
 
 **Response 200**
 ```json
@@ -132,10 +134,8 @@
         "sessionId": "ses_a1",
         "title": "1부 오전 설명회",
         "startAt": "2026-03-14T01:00:00Z",
-        "capacity": 200,
-        "reservedCount": 187,
-        "remaining": 13,
-        "status": "open"           // open | full | closed
+        "place": "서울시 교통회관 (올림픽로 319)",
+        "status": "open"           // open | closed
       }
     ]
   }
@@ -143,8 +143,8 @@
 ```
 
 **주의점 (BE)**
-- `remaining`, `status`는 서버가 계산해 내려줄 것(FE가 capacity-reserved 계산하지 않게).
-- `reservedCount`는 참고용. **정원 판정의 최종 권위는 예약 생성 트랜잭션**(§2.3)이지 이 값이 아님.
+- `status`는 공개 여부와 예약 기간을 기준으로 서버가 계산한다.
+- 인원 집계는 예약 명단·통계용 모니터링 응답에서만 제공한다.
 
 ---
 
@@ -199,14 +199,13 @@
 **에러 코드**
 | code | HTTP | 상황 |
 |------|------|------|
-| `RESERVATION_SESSION_FULL` | 409 | 정원 마감 (트랜잭션 내 재확인 결과) |
 | `STUDENT_NOT_VERIFIED` | 400 | student인데 studentId 무효/누락 |
 | `SESSION_CLOSED` | 409 | 예약 마감된 회차 |
 | `DUPLICATE_RESERVATION` | 409 | (정책 결정 필요) 동일 전화번호+회차 중복 |
 
 **동시성 주의점 (BE — 가장 중요)**
-- 정원 초과 방지는 **트랜잭션 내에서 `reservedCount < capacity` 확인 후 증가**시켜 처리. §2.2의 GET 값에 의존하지 말 것.
-- 예약 오픈 순간 **동시 요청 스파이크** 발생. 낙관적 락 또는 DB 제약으로 오버부킹 원천 차단.
+- 예약 오픈 순간의 동시 요청에서도 가족 예약과 학생 연결을 한 트랜잭션으로 생성한다.
+- 동일 연락처·회차 중복 정책과 멱등키를 DB 트랜잭션에서 일관되게 적용한다.
 - `Idempotency-Key` 재시도 시 **QR 재발급이 아니라 기존 예약을 반환**.
 
 ---
@@ -285,16 +284,18 @@
   "data": {
     "generatedAt": "2026-03-14T00:56:00Z",
     "overall": {
-      "totalReserved": 540,
-      "totalCheckedIn": 312,
-      "checkInRate": 0.578
+      "studentCount": 540,
+      "familyBookingCount": 415,
+      "attendeeCount": 470,
+      "totalCheckedIn": 312
     },
     "bySession": [
       {
         "sessionId": "ses_a1",
         "title": "1부 오전 설명회",
-        "capacity": 200,
-        "reserved": 200,
+        "studentCount": 200,
+        "familyBookingCount": 160,
+        "attendeeCount": 183,
         "checkedIn": 156
       }
     ],
@@ -309,6 +310,11 @@
 **주의점 (BE)**
 - 집계는 서버 계산. FE는 그대로 렌더.
 - 재학생/외부 구분 집계(`byVisitorType`) 포함 — 발주처 요구(유형 구분 접수)에 대응.
+- 모니터링 숫자의 의미는 고정한다.
+  - `studentCount`: 현재 필터에 포함되는 학생 행 수. 형제 학생은 각각 한 행이다.
+  - `familyBookingCount`: 현재 필터 학생과 연결된 활성 가족 예약의 중복 없는 수.
+  - `attendeeCount`: 활성 가족 예약의 실제 참석 학부모 수. 모·부는 각각 1명,
+    모/부는 2명이며 형제 학생 수에 따라 중복 증가하지 않는다.
 
 ---
 
@@ -357,7 +363,7 @@
 ## 5. 전달 요약 (BE 팀에게 한 줄씩)
 
 - 명단 검증은 **캐시 대상 조회**, Sheets 직접 호출 금지.
-- 정원·중복입장은 **DB 트랜잭션/원자적 UPDATE**로 처리. GET 값 신뢰 금지.
+- 중복예약·중복입장은 **DB 트랜잭션/원자적 UPDATE**로 처리한다.
 - 예약/입장 API는 **멱등**하게. `Idempotency-Key` 존중.
 - 실패 응답도 **통일 래퍼 + 고정 code**로. FE는 code로 분기한다.
 - check-in은 **5단계 result**를 반드시 구분해 내려줄 것.

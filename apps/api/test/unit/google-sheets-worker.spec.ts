@@ -13,6 +13,7 @@ import {
   sheetFamilyProjectionStatus,
   sheetProjectionStatus,
   sheetReservationState,
+  sheetStudentClassColumns,
   SheetWorkerService,
 } from "../../src/modules/google-sheets/sheet-worker.service.js";
 
@@ -81,6 +82,27 @@ describe("SheetWorkerService mapping safety refresh", () => {
 });
 
 describe("SheetWorkerService v4 row projection", () => {
+  it("separates every active representative math/science class without stripping schedule suffixes", () => {
+    expect(sheetStudentClassColumns([
+      { className: " 5ZMA ", sourceActive: true },
+      { className: "과고3생2[화2]", sourceActive: true },
+      { className: "과2내신[토10]", sourceActive: true },
+      { className: "과2내신[토10]", sourceActive: true },
+      { className: "수학특강", sourceActive: true },
+      { className: "3T3A", sourceActive: false },
+    ], "과학")).toEqual({
+      mathClassNames: "5ZMA",
+      scienceClassNames: "과2내신[토10], 과고3생2[화2]",
+    });
+  });
+
+  it("uses the booking snapshot only when current representative assignments are unavailable", () => {
+    expect(sheetStudentClassColumns([], "과고2역학SKY[일5]")).toEqual({
+      mathClassNames: "",
+      scienceClassNames: "과고2역학SKY[일5]",
+    });
+  });
+
   it("projects a family moved to another session as cancelled in the old session workbook", () => {
     expect(sheetFamilyProjectionStatus("new-session", "old-session", "RESERVED")).toBe("CANCELLED");
     expect(sheetFamilyProjectionStatus("new-session", "old-session", "CHECKED_IN")).toBe("CANCELLED");

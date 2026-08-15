@@ -8,6 +8,11 @@ import {
   OPERATIONAL_BOOKING_EVENT_TYPES,
   type OperationalBookingEventType,
 } from "../family-bookings/booking-operational-event.js";
+import {
+  isRepresentativeStudentClass,
+  isScienceStudentClass,
+  normalizeStudentClassName,
+} from "../student-sync/student-classification.js";
 import { currentOrHistoricMathHomeroomTeacher } from "../student-sync/student-homeroom-policy.js";
 import {
   GoogleSheetsGateway,
@@ -95,6 +100,25 @@ const projectionLinkSelect = {
 type ProjectionLink = Prisma.FamilyBookingStudentGetPayload<{ select: typeof projectionLinkSelect }>;
 export type SheetAttendanceParty = "MOTHER" | "FATHER" | "BOTH";
 export type SheetProjectionStatus = "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW";
+
+export function sheetStudentClassColumns(
+  assignments: readonly { readonly className: string; readonly sourceActive: boolean }[],
+  historicClassName: string | null,
+): { readonly mathClassNames: string; readonly scienceClassNames: string } {
+  const activeClasses = [...new Set(assignments
+    .filter((assignment) => assignment.sourceActive)
+    .map((assignment) => normalizeStudentClassName(assignment.className))
+    .filter((className) => className !== "" && isRepresentativeStudentClass(className)))]
+    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  const fallback = historicClassName === null ? "" : normalizeStudentClassName(historicClassName);
+  const classes = activeClasses.length > 0
+    ? activeClasses
+    : fallback !== "" && isRepresentativeStudentClass(fallback) ? [fallback] : [];
+  return {
+    mathClassNames: classes.filter((className) => !isScienceStudentClass(className)).join(", "),
+    scienceClassNames: classes.filter((className) => isScienceStudentClass(className)).join(", "),
+  };
+}
 
 export function sheetProjectionStatus(value: string): SheetProjectionStatus {
   if (["RESERVED", "CHECKED_IN", "CANCELLED", "NO_SHOW"].includes(value)) {
@@ -249,9 +273,8 @@ export class SheetWorkerService {
     const candidates = identityCandidates.length === 0 ? [source] : identityCandidates;
     const selected = this.selectCurrentProjection(candidates);
     // The V4 student-row idempotency key is the currently selected
-    // familyBookingStudentId. The gateway's source-student fallback updates the
-    // existing single row when a cancelled family rebooks, then replaces this
-    // marker with the new authoritative link ID.
+    // familyBookingStudentId. Source student numbers are display data only and
+    // are never used to locate or replace an existing workbook row.
     const marker = selected.publicId;
     const latestEvent = selected.familyBooking.bookingEvents[0];
     if (latestEvent === undefined) throw new Error("SHEET_PROJECTION_EVENT_MISSING");
@@ -278,6 +301,12 @@ export class SheetWorkerService {
       ? sheetProjectionStatus(selected.familyBooking.status)
       : "CANCELLED";
     const phones = this.projectionPhones(selected);
+    const classColumns = selected.participantType === "GUEST"
+      ? { mathClassNames: "", scienceClassNames: "" }
+      : sheetStudentClassColumns(
+        selected.student?.assignments ?? [],
+        selected.student === null ? selected.classNameSnapshot : null,
+      );
     const eventLabel = bookingOperationalEventLabel(
       latestEvent.eventType as OperationalBookingEventType,
       latestEvent.actorSubject,
@@ -323,14 +352,16 @@ export class SheetWorkerService {
       }),
       valueInputMode: "RAW",
       hiddenMarkerColumn: "AD",
-      studentKeyColumn: "B",
+      sourceStudentNoDisplayColumn: "B",
+      rowIdentity: "FAMILY_BOOKING_STUDENT_ID_ONLY",
       postVerify: true,
       row: {
         bookingCreatedAt: this.kst(selected.familyBooking.createdAt),
         sourceStudentNo: this.safe(selected.sourceStudentNoSnapshot),
         campus: sheetCampus(selected.branchCodeAtBooking),
         studentName: this.safe(selected.studentNameSnapshot),
-        className: this.safe(selected.classNameSnapshot),
+        mathClassNames: this.safe(classColumns.mathClassNames),
+        scienceClassNames: this.safe(classColumns.scienceClassNames),
         schoolName: this.safe(selected.schoolNameSnapshot ?? ""),
         grade: this.safe(selected.gradeSnapshot ?? ""),
         primaryTeacher: this.safe((selected.participantType === "GUEST"

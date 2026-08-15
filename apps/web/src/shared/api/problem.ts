@@ -100,19 +100,19 @@ export async function toApiError(response: Response): Promise<ApiError> {
     kind: "unexpected",
     status: response.status,
     code: `HTTP_${response.status}`,
-    message: `요청이 실패했어요. (HTTP ${response.status})`,
+    message: `요청이 실패했습니다. (HTTP ${response.status})`,
   });
 }
 
 /** 어떤 실패든 화면에 바로 쓸 수 있는 한국어 기본 문구. 기능별 code 분기가 우선한다. */
 export function defaultErrorMessage(error: unknown): string {
-  if (!isApiError(error)) return "알 수 없는 오류가 발생했어요. 잠시 후 다시 시도해 주세요.";
+  if (!isApiError(error)) return "알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
 
   switch (error.kind) {
     case "aborted":
-      return "요청이 취소됐어요.";
+      return "요청이 취소되었습니다.";
     case "network":
-      return "네트워크에 연결할 수 없어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
+      return "네트워크에 연결할 수 없습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
     default:
       break;
   }
@@ -121,20 +121,20 @@ export function defaultErrorMessage(error: unknown): string {
     case 400:
       return "입력값을 다시 확인해 주세요.";
     case 401:
-      return "인증이 만료됐어요. 다시 로그인해 주세요.";
+      return "인증이 만료되었습니다. 다시 로그인해 주세요.";
     case 403:
-      return "권한이 없어요.";
+      return "권한이 없습니다.";
     case 404:
-      return "대상을 찾을 수 없어요.";
+      return "대상을 찾을 수 없습니다.";
     case 409:
-      return "다른 작업과 충돌했어요. 새로고침한 뒤 다시 시도해 주세요.";
+      return "다른 작업과 충돌했습니다. 새로고침한 뒤 다시 시도해 주세요.";
     case 410:
-      return "만료된 요청이에요.";
+      return "만료된 요청입니다.";
     case 429:
-      return "요청이 너무 잦아요. 잠시 후 다시 시도해 주세요.";
+      return "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.";
     case 503:
-      return "서버가 일시적으로 응답하지 않아요. 잠시 후 다시 시도해 주세요.";
+      return "서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해 주세요.";
     default:
-      return "요청이 실패했어요. 잠시 후 다시 시도해 주세요.";
+      return "요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
   }
 }

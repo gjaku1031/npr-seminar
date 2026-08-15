@@ -19,7 +19,8 @@ export const sessions = pgTable("sessions", {
   /** "HH:mm" */
   time: text("time").notNull().default("10:00"),
   place: text("place").notNull(),
-  capacity: integer("capacity").notNull(),
+  /** Legacy compatibility only. Product/API logic must not read this value. */
+  capacity: integer("capacity").notNull().default(0),
   desc: text("desc").notNull().default(""),
   /** true면 예약 시 참석 학부모(모/부)·참석 인원 수집 (명세 §10.4) */
   attendField: boolean("attend_field").notNull().default(false),

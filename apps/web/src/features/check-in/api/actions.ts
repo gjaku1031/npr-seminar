@@ -114,7 +114,7 @@ export async function checkInAction(_prev: CheckInState, formData: FormData): Pr
 
 /**
  * 현장 입장 — 재원생·무예약이면 즉석 예약(현장 예약) 후 체크인 (명세 §9.3).
- * 즉석 예약도 정원 불변식을 통과한다 (설계 §6.4).
+ * 즉석 예약도 중복·예약 가능 기간 불변식을 통과한다 (설계 §6.4).
  */
 export async function walkInAction(_prev: CheckInState, formData: FormData): Promise<CheckInState> {
   const parsed = z

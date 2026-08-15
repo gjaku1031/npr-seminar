@@ -109,12 +109,6 @@ export const memoryReservationRepository: ReservationRepository = {
     });
   },
 
-  async countActive(sessionId) {
-    return [...db().reservations.values()].filter(
-      (r) => r.sessionId === sessionId && isActiveReservation(r.status),
-    ).length;
-  },
-
   async create(draft) {
     const row = build(draft, null);
     db().reservations.set(row.id, row);
