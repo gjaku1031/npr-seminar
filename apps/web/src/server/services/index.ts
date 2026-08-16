@@ -1,84 +1,11 @@
 import "server-only";
 
 /**
- * server 존 공개 API (barrel) — 진입점(app 페이지 RSC · features의 Server Action)은
- * @/server/services 로만 들어온다 (ESLint R1). 리포지토리·db는 여기서 재노출하지 않는다.
+ * server 존 공개 API (barrel) — 진입점인 app 페이지(RSC)는 `@/server/services` 로만 들어온다 (ESLint R1).
+ *
+ * 이 존에 남은 책임은 **인증 판정 하나**다. 업무 데이터·변경은 전부 브라우저가 same-origin
+ * `/api/v1` 로 Nest 에 직접 요청한다 (`@/shared/api`). 여기에 새 도메인 로직을 두지 않는다.
  */
 
-// 설명회 (명세 §6)
-export {
-  listSessions,
-  listOpenSessions,
-  listSessionsWithStats,
-  getSession,
-  getSessionStats,
-  createSession,
-  updateSurveySms,
-  endSession,
-  deleteSession,
-} from "./session.service";
-
-// 예약 (명세 §4 · §9 · §10 · §11) — 서버 불변식 적용 지점
-export {
-  listReservations,
-  listAllReservations,
-  getReservation,
-  findReservationByCode,
-  findReservationsByPhone,
-  createReservation,
-  createFamilyReservation,
-  createGuestReservation,
-  setRosterReservation,
-  addGuestReservation,
-  checkIn,
-  checkInByCode,
-  checkInByQrToken,
-  getReservationByQrToken,
-  rollbackEntry,
-  cancelReservation,
-  moveReservation,
-  reissueReservationCode,
-  walkInCheckIn,
-} from "./reservation.service";
-export type { QrScanOutcome } from "./reservation.service";
-
-// 재원생 (명세 §4 — 읽기 전용 참조)
-export { listStudents, getStudent, findStudentsByParentPhone } from "./student.service";
-
-// 부가 도메인 (명세 §5 · §6.4~6.5 · §9.1)
-export {
-  listClasses,
-  listTeachers,
-  getAdminUser,
-  listSmsTemplates,
-  createSmsTemplate,
-  saveSmsTemplate,
-  deleteSmsTemplate,
-  listSmsLogs,
-  sendGroupSms,
-  sendSurveySms,
-  listSurveyResponses,
-  getSurveySummary,
-  submitSurvey,
-  submitMobileSurvey,
-  listDevices,
-} from "./support.service";
-
-// 통계 (명세 §8)
-export { getStatsOverview } from "./stats.service";
-export type { StatsOverview, UnitStat } from "./stats.service";
-
-// 인증 이음새 (명세 §1.1 단일 관리자) — 설계 §8.
-// 세션 생성·파기는 브라우저가 계약(POST /auth/login · /auth/logout)으로 직접 한다 —
-// 서버 액션이 쿠키를 심던 signIn/signOut 은 사라졌다.
-export { currentUser, requireModuleAccess, assertModuleAccess } from "./auth.service";
-
-// 도메인 에러 — Server Action이 잡아 사용자 메시지로 변환한다 (설계 §7)
-export {
-  DomainError,
-  DuplicateReservationError,
-  NotFoundError,
-  InvalidStateError,
-  ForbiddenError,
-  isDomainError,
-} from "./errors";
+// 인증 이음새 — 판정 권위는 Nest (계약 GET /api/v1/auth/me). 자세한 이유는 auth.service.ts.
+export { currentUser, requireModuleAccess } from "./auth.service";

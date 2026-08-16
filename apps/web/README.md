@@ -18,14 +18,18 @@ npr 입시설명회 **Next.js 클라이언트 UI**. 화면·라우팅·접근성
 
 | 경로 | 공개 여부 | 설명 |
 | --- | --- | --- |
-| `/` | 공개 | 학부모 모바일 예약 앱 (캠퍼스 → 회차 → 본인 확인 → 예약) |
-| `/reserve` | 공개 | `/` 로 **308 영구 이동** (기존 배포 링크 호환) |
+| `/` | 공개 | 안내 포스터 진입면 — 예약하기 · 예약 조회로 보낸다 |
+| `/reserve` | 공개 | 학부모 모바일 예약 앱 (캠퍼스 → 회차 → 본인 확인 → 예약). `?mode=manage` 는 조회·변경·취소 |
 | `/booking/{familyBookingId}` | 공개 | 문자로 보내는 안전한 예약 링크 |
-| `/admin` | 보호 | 관리자 콘솔 허브 |
+| `/admin` | 보호 | `/sessions` 로 이동 (기존 링크 호환. 카드 런처 허브는 2026-08 제거) |
+| `/sessions` `/students` `/sms` `/stats` `/student-status` `/counsel` | 보호 | 관리자 콘솔 모듈 |
 | `/scanner` | 보호 | 관리자용 스캐너 기기 모니터·페어링 |
 | `/scanner/connect` | 공개 | iPad 페어링·스캔 UI |
 
-가드는 `src/proxy.ts` 매처가 담당한다. `/`·`/reserve`·`/booking/*`·`/scanner/connect` 는 매처 밖(공개), `/admin` 과 각 관리자 모듈은 매처 안(보호)이다.
+가드는 `src/app/(main)/layout.tsx` 가 담당한다 — 미들웨어나 프록시 매처가 아니라 **데이터 경계**에
+둔다. `(main)` 아래 화면은 전부 이 레이아웃을 지나고, 레이아웃은 매 요청 Nest 에
+`GET /api/v1/auth/me` 로 되물어 ADMIN 세션만 통과시킨다. 각 페이지가 `requireModuleAccess` 로 한 번 더
+확인한다. `/`·`/reserve`·`/booking/*`·`/scanner/connect` 는 `(main)` 밖이라 공개다.
 
 ## 제품 표시 불변식
 
@@ -72,13 +76,18 @@ pnpm build
 
 > 요구: Node >= 22, pnpm
 
-## ⚠️ 마이그레이션 중 — 남아 있는 레거시
+## 레거시 이관 완료 (2026-08)
 
-단계적 이관 중이라 아래가 저장소에 **아직 남아 있지만 프로덕션 백엔드가 아니다**. 새 코드에서 쓰지 않는다.
+전환 기간 동안 저장소에 남아 있던 **풀스택 레거시를 제거했다.** 이제 이 앱에 백엔드는 없다.
 
-- `src/server/**` (Drizzle 스키마·리포지토리·서비스·SOLAPI 게이트웨이)와 이를 쓰는 레거시 `features/*/api/actions.ts` Server Action.
-- `package.json` 의 DB 관련 의존성·스크립트(`db:migrate`·`db:seed`·`db:studio`·`vercel-build` 등)와 `drizzle/`.
+지운 것: `src/server/{db,repositories,seed,sms}` (Drizzle 스키마·Neon 드라이버·리포지토리·SOLAPI
+게이트웨이), 도메인 서비스와 이를 쓰던 `features/<slice>/api/actions.ts` Server Action 7종,
+그 액션만 참조하던 화면 조각과 도메인 모델 슬라이스, `drizzle/` 마이그레이션, DB 의존성과
+`db:*`·`vercel-build` 스크립트.
 
-이 코드는 **아직 이관되지 않은 관리자 화면**(`/admin`·`/students`·`/sms`·`/sessions`·`/stats`)만 지탱한다. 공개 학부모 앱(`/`·`/booking/*`)과 스캐너(`/scanner`·`/scanner/connect`)는 이미 계약 API 로만 동작하며 `@/server` 를 import 하지 않는다.
+제거 시점에 **이 코드를 렌더 경로에서 참조하는 화면은 하나도 없었다** — 관리자 화면까지 계약 API
+이관이 끝난 뒤였다. `src/server` 에 남은 것은 인증 판정(`currentUser`·`requireModuleAccess`)뿐이고,
+그마저 DB 가 아니라 Nest `GET /api/v1/auth/me` 를 부른다. 자세한 내용은
+[`src/server/README.md`](src/server/README.md).
 
-**실제 관리자 인증과 나머지 관리자 화면의 Nest 이관은 화면 승인 대기로 의도적으로 보류 중이다.** 위 레거시를 백엔드 사실로 취급하거나 문서화하지 않는다.
+이전 풀스택 구조의 설계 기록은 [`docs/architecture.md`](../../docs/architecture.md) 에 보존한다.
