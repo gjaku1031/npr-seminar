@@ -373,6 +373,12 @@ export function StudentsView() {
         pendingId={mutations.pendingId}
         onChangeParty={(row, party) => setRequest({ kind: "party", row, party })}
         onCancel={(row) => setRequest({ kind: "cancel", row })}
+        // 테스트 예약 전용 — 확인 대화상자를 거치지 않는다. 되돌려도 잃는 것이 없고,
+        // QR 리허설은 이 동작을 반복해야 해서 매번 확인을 물으면 방해만 된다.
+        onRollbackCheckIn={(row) => {
+          const familyBookingId = row.booking?.familyBookingId;
+          if (familyBookingId !== undefined) void mutations.rollbackCheckIn(familyBookingId);
+        }}
         onBook={openBookingDraft}
         onOpenEvents={setEventsFor}
       />
@@ -757,6 +763,7 @@ function RosterTable({
   onCancel,
   onBook,
   onOpenEvents,
+  onRollbackCheckIn,
 }: {
   roster: ReturnType<typeof useSessionRoster>;
   rows: readonly SessionRosterRow[];
@@ -766,6 +773,7 @@ function RosterTable({
   onCancel: (row: SessionRosterRow) => void;
   onBook: (row: SessionRosterRow, party: AttendanceParty | null) => void;
   onOpenEvents: (row: SessionRosterRow) => void;
+  onRollbackCheckIn: (row: SessionRosterRow) => void;
 }) {
   const { page, loading, refreshing, error, filtered } = roster;
   const cols = gridCols(showBranchColumn);
@@ -842,6 +850,7 @@ function RosterTable({
                   onCancel={onCancel}
                   onBook={onBook}
                   onOpenEvents={onOpenEvents}
+                  onRollbackCheckIn={onRollbackCheckIn}
                 />
               ))}
 
@@ -909,6 +918,7 @@ function RosterRow({
   onCancel,
   onBook,
   onOpenEvents,
+  onRollbackCheckIn,
 }: {
   row: SessionRosterRow;
   no: number;
@@ -920,6 +930,7 @@ function RosterRow({
   onCancel: (row: SessionRosterRow) => void;
   onBook: (row: SessionRosterRow, party: AttendanceParty | null) => void;
   onOpenEvents: (row: SessionRosterRow) => void;
+  onRollbackCheckIn: (row: SessionRosterRow) => void;
 }) {
   const control = rosterBookingControl(row);
   const guest = row.participantType === "GUEST";
@@ -976,7 +987,7 @@ function RosterRow({
         onBook={onBook}
       />
 
-      <EntryCell row={row} />
+      <EntryCell row={row} pending={pending} onRollbackCheckIn={onRollbackCheckIn} />
 
       <LatestLogCell row={row} onOpenEvents={onOpenEvents} />
     </div>
@@ -1346,15 +1357,57 @@ function BookingCell({
 }
 
 /** 입장 — 예약이 말해 주는 사실만. 스캐너 번호는 계약이 주지 않으므로 지어내지 않는다. */
-function EntryCell({ row }: { row: SessionRosterRow }) {
+function EntryCell({
+  row,
+  pending,
+  onRollbackCheckIn,
+}: {
+  row: SessionRosterRow;
+  pending: boolean;
+  onRollbackCheckIn: (row: SessionRosterRow) => void;
+}) {
   const booking = row.booking;
 
   if (booking !== null && booking.checkedInAt !== null) {
+    /**
+     * **실제 입장 인원**을 말한다 — 예약 인원이 아니다. 2명 예약에 한 분만 온 경우가 있어
+     * 게이트에서 스태프가 고른 값이 여기로 온다. 도입 전 입장 건은 값이 없을 수 있으므로,
+     * 없으면 인원을 지어내지 않고 예전처럼 `입장` 으로만 둔다.
+     */
+    const entered = booking.attendedCount;
     return (
       <span style={{ fontSize: 11.5, lineHeight: 1.5, fontFeatureSettings: '"tnum"' }}>
-        <b style={{ color: "var(--status-success)", fontWeight: 700 }}>입장</b>
+        <b style={{ color: "var(--status-success)", fontWeight: 700 }}>
+          {entered === null ? "입장" : `${entered}명 입장`}
+        </b>
         <br />
         <span style={{ color: "var(--text-muted)" }}>{at(booking.checkedInAt)}</span>
+        {/* 테스트 예약만 되돌릴 수 있다. 실제 입장 기록에는 이 버튼이 아예 나오지 않는다 —
+            서버도 거절하지만, 누를 수 있게 두는 것 자체가 잘못된 기대를 만든다. */}
+        {booking.isTest && (
+          <>
+            <br />
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => onRollbackCheckIn(row)}
+              style={{
+                marginTop: 4,
+                padding: "3px 9px",
+                borderRadius: "var(--radius-pill)",
+                border: "1px solid var(--border-soft)",
+                background: "var(--surface-card)",
+                color: "var(--text-muted)",
+                fontFamily: "inherit",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: pending ? "progress" : "pointer",
+              }}
+            >
+              {pending ? "취소 중…" : "입장 취소"}
+            </button>
+          </>
+        )}
       </span>
     );
   }
@@ -1473,7 +1526,7 @@ function ConfirmRequestDialog({
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
           <b>{request.row.name}</b> 학생이 속한 <b>가족 예약 한 건</b>에 적용돼요.
           {request.kind === "party" && ` 참석 학부모를 ${ATTENDANCE_PARTY_LABELS[request.party]}(으)로 바꿔요.`}
-          {cancelling && " 취소해도 기록은 지워지지 않아요 — 좌석이 반환되고 QR 이 폐기돼요."}
+          {cancelling && " 취소해도 기록은 지워지지 않아요 — 예약이 해제되고 QR 이 폐기돼요."}
         </p>
 
         {/* 형제는 각자 행이지만 예약은 하나다 — 조작이 누구에게까지 걸리는지 먼저 말한다. */}

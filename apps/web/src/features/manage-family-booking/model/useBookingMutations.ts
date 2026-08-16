@@ -22,6 +22,7 @@ import { useCallback, useState } from "react";
 import {
   BOOKING_VERSION_CONFLICT_CODE,
   cancelAdminFamilyBooking,
+  rollbackFamilyBookingCheckIn,
   changeFamilyBookingAttendanceParty,
   createAdminEnrolledFamilyBooking,
   createAdminGuestFamilyBooking,
@@ -54,6 +55,8 @@ export interface BookingMutationsState {
     expectedVersion: number;
     reason: string;
   }) => Promise<boolean>;
+  /** 테스트 예약 전용 입장 취소. 서버가 isTest 가 아니면 409 로 막는다. */
+  rollbackCheckIn: (familyBookingId: string) => Promise<boolean>;
   cancel: (input: {
     familyBookingId: string;
     expectedVersion: number;
@@ -85,6 +88,8 @@ const DIVERGED_MESSAGE =
 type BookingIntent =
   | { action: "changeParty"; familyBookingId: string; attendanceParty: AttendanceParty; expectedVersion: number; reason: string }
   | { action: "cancel"; familyBookingId: string; expectedVersion: number; cancellationType: AdminCancellationType }
+  /** 테스트 예약만 — 서버가 isTest 가 아닌 예약을 거절한다. 버전을 실지 않는다(되돌림은 상태 하나뿐). */
+  | { action: "rollbackCheckIn"; familyBookingId: string }
   | {
       action: "createEnrolled";
       /**
@@ -114,6 +119,7 @@ function intentTarget(intent: BookingIntent): string {
   switch (intent.action) {
     case "changeParty":
     case "cancel":
+    case "rollbackCheckIn":
       return `booking:${intent.familyBookingId}`;
     case "createEnrolled":
       return `enrolled:${intent.input.seminarSessionId}:${intent.primaryStudentId}`;
@@ -144,6 +150,8 @@ function send(intent: BookingIntent, idempotencyKey: string): Promise<unknown> {
         },
         { idempotencyKey },
       );
+    case "rollbackCheckIn":
+      return rollbackFamilyBookingCheckIn(intent.familyBookingId, { idempotencyKey });
     case "createEnrolled":
       return createAdminEnrolledFamilyBooking(intent.input, { idempotencyKey });
     case "createGuest":
@@ -154,6 +162,7 @@ function send(intent: BookingIntent, idempotencyKey: string): Promise<unknown> {
 const SUCCESS_NOTICE: Record<BookingIntent["action"], string> = {
   changeParty: "참석 학부모를 변경했어요.",
   cancel: "예약을 취소했어요.",
+  rollbackCheckIn: "입장을 취소했어요. 같은 QR로 다시 테스트할 수 있어요.",
   createEnrolled: "예약을 추가했어요.",
   createGuest: "비재원생 예약을 추가했어요.",
 };
@@ -247,6 +256,12 @@ export function useBookingMutations(onChanged: () => void): BookingMutationsStat
     [run],
   );
 
+  /** 테스트 예약을 다시 미입장으로 — QR 리허설을 반복하기 위한 유일한 경로다. */
+  const rollbackCheckIn: BookingMutationsState["rollbackCheckIn"] = useCallback(
+    (familyBookingId) => run({ action: "rollbackCheckIn", familyBookingId }),
+    [run],
+  );
+
   const addGuest: BookingMutationsState["addGuest"] = useCallback(
     (input) => (guestPending ? Promise.resolve(false) : run({ action: "createGuest", input })),
     [guestPending, run],
@@ -292,6 +307,7 @@ export function useBookingMutations(onChanged: () => void): BookingMutationsStat
     retryRetained: retained === null ? null : retryRetained,
     changeParty,
     cancel,
+    rollbackCheckIn,
     addGuest,
     guestPending,
     addEnrolled,

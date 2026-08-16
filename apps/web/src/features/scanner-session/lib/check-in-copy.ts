@@ -36,16 +36,29 @@ export function formatCheckInOutcome(outcome: CheckInOutcome): CheckInCopy {
   switch (outcome.result) {
     case "CHECKED_IN": {
       const prefix = representativePrefix(outcome);
-      // seatCount 는 계약상 성공 시 항상 1|2 지만 방어적으로 확인한다.
-      if (prefix !== null && outcome.familySeatCount !== null) {
-        return { title: "입장 완료", detail: `${prefix} ${outcome.familySeatCount}명 입장 완료` };
+      // **예약 인원이 아니라 실제 입장 인원을 읽는다.** 2명 예약에 한 분만 온 경우
+      // familySeatCount 를 그대로 쓰면 화면이 오지 않은 사람까지 입장했다고 말한다.
+      const entered = outcome.attendedCount ?? outcome.familySeatCount;
+      if (prefix !== null && entered !== null) {
+        return { title: "입장 완료", detail: `${prefix} ${entered}명 입장 완료` };
       }
       return { title: "입장 완료", detail: "입장 처리됐어요." };
+    }
+    // 인원 선택 오버레이가 이 결과를 가로채 자기 화면을 띄우므로 보통은 보이지 않는다.
+    // 그래도 결과 문구는 있어야 한다 — 오버레이가 뜨지 못한 경우에도 화면이 침묵하면 안 된다.
+    case "PARTY_SELECTION_REQUIRED": {
+      const prefix = representativePrefix(outcome);
+      const detail = "몇 분 입장하는지 선택해야 입장 처리돼요.";
+      return { title: "인원 선택 필요", detail: prefix === null ? detail : `${prefix} · ${detail}` };
     }
     case "ALREADY_CHECKED_IN": {
       const prefix = representativePrefix(outcome);
       if (prefix !== null) {
-        return { title: "이미 입장한 QR", detail: `${prefix} 이미 입장 완료` };
+        const entered = outcome.attendedCount;
+        return {
+          title: "이미 입장한 QR",
+          detail: entered === null ? `${prefix} 이미 입장 완료` : `${prefix} 이미 ${entered}명 입장 완료`,
+        };
       }
       return { title: "이미 입장한 QR", detail: "이 예약은 이미 입장 처리됐어요." };
     }
@@ -73,6 +86,8 @@ export function checkInTone(result: CheckInResult): CheckInTone {
   switch (result) {
     case "CHECKED_IN":
       return "success";
+    // 아직 입장하지 않았다 — 성공색으로 칠하면 끝난 일로 읽힌다.
+    case "PARTY_SELECTION_REQUIRED":
     case "ALREADY_CHECKED_IN":
     case "SESSION_MISMATCH":
       return "warning";
