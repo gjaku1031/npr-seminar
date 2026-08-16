@@ -229,6 +229,12 @@ export interface ScannerSessionList {
 
 export type CheckInResult =
   | "CHECKED_IN"
+  /**
+   * 입장도 실패도 아니다. QR·회차·예약 상태는 이미 유효한데 2명 예약이라 실제 온 인원을
+   * 알려 주지 않았을 뿐이다 — 서버는 **아무것도 바꾸지 않는다**. 스캐너가 스태프에게 묻고
+   * attendedCount 를 실어 다시 부른다.
+   */
+  | "PARTY_SELECTION_REQUIRED"
   | "ALREADY_CHECKED_IN"
   | "CANCELLED"
   | "SESSION_MISMATCH"
@@ -259,6 +265,8 @@ export interface CheckInOutcome {
   replayed: boolean;
   familyBookingId: string | null;
   familySeatCount: 1 | 2 | null;
+  /** 이 입장이 기록한 인원. CHECKED_IN·ALREADY_CHECKED_IN 에서만 값이 있다. */
+  attendedCount: 1 | 2 | null;
   /** 가족 참석 학부모 — 예약을 못 찾으면 null. 스캐너 확인 문구에 그대로 쓴다. */
   attendanceParty: AttendanceParty | null;
   /** 대표(최고학년) 학생 이름 — 확인 문구 전용. 예약을 못 찾으면 null. */
@@ -773,6 +781,10 @@ export interface FamilyBooking {
   bookingSource: BookingSource;
   /** 서버 파생 — MOTHER=1 / FATHER=1 / BOTH=2. 자녀 수로 늘어나지 않는다. */
   seatCount: 1 | 2;
+  /** 실제 입장 인원 — 게이트에서 정한다. 미입장이면 null. */
+  attendedCount: 1 | 2 | null;
+  /** QR 리허설용 예약. 통계·시트·일반 문자에서 제외된다. */
+  isTest: boolean;
   status: FamilyBookingStatus;
   students: FamilyBookingStudentSnapshot[];
   qrStatus: QrCredentialStatus;
@@ -1165,8 +1177,15 @@ export interface SessionRosterBookingProjection {
   status: FamilyBookingStatus;
   attendanceParty: AttendanceParty;
   bookingSource: BookingSource;
-  /** 계약 enum [1, 2]. */
+  /** 예약 인원. 계약 enum [1, 2]. */
   seatCount: number;
+  /**
+   * 실제로 입장한 인원 — 게이트에서 정한다. 미입장이면 null 이고, 2명 예약에 한 분만
+   * 온 경우 seatCount 보다 작다.
+   */
+  attendedCount: 1 | 2 | null;
+  /** QR 리허설용 예약. 통계·시트·일반 문자에서 빠지고 명단 맨 앞에 고정된다. */
+  isTest: boolean;
   checkedInAt: string | null;
   cancelledAt: string | null;
   /** 낙관적 잠금 값 — 조작에 그대로 실어 보낸다. */
@@ -1523,7 +1542,9 @@ export type SmsAudience =
   | "BOOKED_FAMILIES"
   | "RESERVED_FAMILIES"
   | "CHECKED_IN_FAMILIES"
-  | "CANCELLED_FAMILIES";
+  | "CANCELLED_FAMILIES"
+  /** 테스트 예약만. 다른 모든 대상에서는 테스트 예약이 제외된다. */
+  | "TEST_ACCOUNTS";
 
 /** 명세 §5.2 의 그룹 이름 그대로 — 확인 대화상자가 이 문구를 그대로 읽어 준다. */
 export const SMS_AUDIENCE_LABELS: Record<SmsAudience, string> = {
@@ -1531,6 +1552,7 @@ export const SMS_AUDIENCE_LABELS: Record<SmsAudience, string> = {
   RESERVED_FAMILIES: "미체크만",
   CHECKED_IN_FAMILIES: "입장 완료",
   CANCELLED_FAMILIES: "취소자",
+  TEST_ACCOUNTS: "테스트 계정",
 };
 
 export const SMS_AUDIENCE_OPTIONS: ReadonlyArray<{ value: SmsAudience; label: string }> = [
@@ -1538,6 +1560,8 @@ export const SMS_AUDIENCE_OPTIONS: ReadonlyArray<{ value: SmsAudience; label: st
   { value: "RESERVED_FAMILIES", label: SMS_AUDIENCE_LABELS.RESERVED_FAMILIES },
   { value: "CHECKED_IN_FAMILIES", label: SMS_AUDIENCE_LABELS.CHECKED_IN_FAMILIES },
   { value: "CANCELLED_FAMILIES", label: SMS_AUDIENCE_LABELS.CANCELLED_FAMILIES },
+  // 맨 오른쪽 — 실제 가족에게 닿지 않고 발송 경로만 확인하는 대상이다.
+  { value: "TEST_ACCOUNTS", label: SMS_AUDIENCE_LABELS.TEST_ACCOUNTS },
 ];
 
 /**

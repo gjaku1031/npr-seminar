@@ -367,4 +367,21 @@ export const CONTACT_MIN_LENGTH = 8;
 export const CONTACT_MAX_LENGTH = 40;
 
 /** 낙관적 잠금 실패 — 다른 사람이 먼저 바꿨다는 뜻이므로 다시 읽어야 한다. */
+/**
+ * 테스트 예약을 다시 미입장으로 되돌린다 (계약 POST /admin/family-bookings/{id}/check-in-rollback).
+ *
+ * **실제 입장 기록에는 쓸 수 없다** — 서버가 isTest 가 아닌 예약을 409 로 거절한다. 오스캔은
+ * 인원을 고쳐 바로잡고, 일어난 입장은 일어난 것으로 남는다. 이 경로는 게이트 장비와 QR 흐름을
+ * 같은 예약으로 반복 리허설하기 위해서만 존재한다.
+ */
+export async function rollbackFamilyBookingCheckIn(
+  familyBookingId: string,
+  options: AdminBookingMutationOptions,
+): Promise<FamilyBooking> {
+  return apiRequest<FamilyBooking>(
+    `/admin/family-bookings/${encodeURIComponent(familyBookingId)}/check-in-rollback`,
+    { method: "POST", idempotencyKey: options.idempotencyKey, signal: options.signal },
+  );
+}
+
 export const BOOKING_VERSION_CONFLICT_CODE = "FAMILY_BOOKING_VERSION_CONFLICT";
