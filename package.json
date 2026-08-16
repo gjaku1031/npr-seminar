@@ -24,10 +24,6 @@
     "db:migrate:deploy": "pnpm --dir apps/api db:migrate:deploy",
     "db:seed": "pnpm --dir apps/api db:seed",
     "db:studio": "pnpm --dir apps/api db:studio",
-    "web:db:generate": "pnpm --dir apps/web db:generate",
-    "web:db:migrate": "pnpm --dir apps/web db:migrate",
-    "web:db:seed": "pnpm --dir apps/web db:seed",
-    "web:db:studio": "pnpm --dir apps/web db:studio",
     "db:migrate": "pnpm run db:migrate:deploy"
   },
   "devDependencies": {

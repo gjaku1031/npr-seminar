@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * ADMIN 세션만 통과시키고, 여기서 모듈 접근을 한 번 더 확인한다.
  *
  * 데이터는 전부 브라우저가 same-origin `/api/v1` 로 Nest 에서 직접 읽는다 — 이 페이지는
- * 더 이상 로컬 server 존(메모리·drizzle 리포지토리)에서 명단을 미리 불러오지 않는다.
+ * 명단을 서버에서 미리 불러오지 않는다.
  */
 export default async function StudentsPage() {
   await requireModuleAccess("students");

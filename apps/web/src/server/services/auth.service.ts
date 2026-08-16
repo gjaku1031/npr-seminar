@@ -2,15 +2,14 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { canAccessModule, type ModuleKey, type User } from "@/entities/user";
 import { fetchAdminActor } from "../auth/session";
-import { ForbiddenError } from "./errors";
 
 /**
  * ★ 인증 이음새 (설계 §8) ★ — 명세 v4.0 §1.1 · flows ADMIN-F1.
  *
  * 이 파일이 예고했던 교체가 실제로 일어난 지점이다: 예전 구현은 위조 가능한 `npr-user`
- * 쿠키를 읽었고("쿠키를 위조하면 입장할 수 있다"), 이제는 Nest 프로젝트 세션을 매 요청
- * 확인한다 (계약 GET /api/v1/auth/me). 호출부(페이지·액션)는 그대로다 — 예고대로
- * 이 파일 내부만 바뀌었다.
+ * 쿠키를 읽었고("쿠키를 위조하면 입장할 수 있다"), 이제는 Nest 세션을 매 요청 확인한다
+ * (계약 GET /api/v1/auth/me). 호출부인 `(main)` 레이아웃과 각 페이지는 그대로다 —
+ * 예고대로 이 파일 내부만 바뀌었다.
  *
  * 판정은 언제나 서버가 Nest 에 되물어 얻은 `role` 로 한다. ADMIN 이 아닌 세션(SCANNER
  * 포함)은 콘솔에 존재하지 않는 것과 같다.
@@ -38,15 +37,5 @@ export async function requireModuleAccess(module: ModuleKey): Promise<User> {
   const user = await currentUser();
   if (!user) redirect("/login");
   if (!canAccessModule(user.role, module)) redirect("/");
-  return user;
-}
-
-/** Server Action용 확인 — 리다이렉트 대신 도메인 에러 (폼 상태로 반환해야 하므로, 설계 §7) */
-export async function assertModuleAccess(module: ModuleKey): Promise<User> {
-  const user = await currentUser();
-  if (!user) throw new ForbiddenError("로그인이 필요합니다.");
-  if (!canAccessModule(user.role, module)) {
-    throw new ForbiddenError("이 모듈에 접근할 권한이 없습니다.");
-  }
   return user;
 }
