@@ -45,6 +45,15 @@ export interface EnsureTestBookingResult {
   readonly action: "CREATED" | "UNCHANGED" | "QR_REISSUED";
   readonly familyBookingId: string;
   readonly seminarSessionId: string;
+  /**
+   * 이 예약을 여는 개인 링크. 원문 토큰은 **fragment 로만** 실린다 — path·query 에 담으면
+   * 서버 로그·리퍼러에 남는다.
+   *
+   * 링크만으로는 열리지 않는다: 교환에 연락처(010-0000-7147)가 함께 필요하다. 그래서 이
+   * 값을 한 번 출력하는 것이 자격 자체를 넘겨주는 것과 같지 않다. 그래도 테스트 예약에만
+   * 쓰고 실제 가족 링크를 이렇게 뽑지 않는다.
+   */
+  readonly accessUrl: string;
 }
 
 export async function ensureTestBooking(
@@ -53,6 +62,7 @@ export async function ensureTestBooking(
   qrTokens: QrTokenProtector,
   sessionPublicId: string,
   branchCode: string,
+  publicBaseUrl: string,
 ): Promise<EnsureTestBookingResult> {
   const session = await prisma.seminarSession.findUnique({
     where: { publicId: sessionPublicId },
@@ -70,11 +80,14 @@ export async function ensureTestBooking(
     });
 
     if (existing !== null) {
+      // 접근 링크는 매번 새로 낸다. 원문 토큰은 저장하지 않으므로 기존 자격의 URL 은 다시
+      // 만들어 낼 수 없고, 리허설하려면 지금 쓸 수 있는 링크가 하나 필요하다.
+      const accessUrl = await issueAccessCredential(transaction, publicBaseUrl, existing.id, expiresAt);
       if (existing.qrCredentials.length > 0) {
-        return { action: "UNCHANGED", familyBookingId: existing.publicId, seminarSessionId: session.publicId };
+        return { action: "UNCHANGED", familyBookingId: existing.publicId, seminarSessionId: session.publicId, accessUrl };
       }
       await issueCredential(transaction, qrTokens, existing.id, expiresAt);
-      return { action: "QR_REISSUED", familyBookingId: existing.publicId, seminarSessionId: session.publicId };
+      return { action: "QR_REISSUED", familyBookingId: existing.publicId, seminarSessionId: session.publicId, accessUrl };
     }
 
     // 예약은 OTP 증빙을 반드시 가리켜야 한다(FK). 테스트 예약도 예외를 만들지 않고
@@ -140,7 +153,8 @@ export async function ensureTestBooking(
     });
 
     await issueCredential(transaction, qrTokens, booking.id, expiresAt);
-    return { action: "CREATED", familyBookingId: booking.publicId, seminarSessionId: session.publicId };
+    const accessUrl = await issueAccessCredential(transaction, publicBaseUrl, booking.id, expiresAt);
+    return { action: "CREATED", familyBookingId: booking.publicId, seminarSessionId: session.publicId, accessUrl };
   });
 }
 
@@ -169,6 +183,37 @@ async function issueCredential(
   });
 }
 
+/**
+ * 개인 접근 자격을 새로 내고 그 링크를 돌려준다. 이전 ACTIVE 자격은 폐기한다 —
+ * 리허설용 링크가 여러 개 살아 있을 이유가 없다.
+ *
+ * 서버는 digest 만 보관하므로 원문은 지금 이 순간에만 존재한다. 그래서 링크를 여기서
+ * 만들어 돌려주고, 저장하거나 다시 만들어 내려 하지 않는다.
+ */
+async function issueAccessCredential(
+  transaction: Prisma.TransactionClient,
+  publicBaseUrl: string,
+  familyBookingId: bigint,
+  expiresAt: Date,
+): Promise<string> {
+  await transaction.bookingAccessCredential.updateMany({
+    where: { familyBookingId, status: "ACTIVE" },
+    data: { status: "REVOKED", revokedAt: new Date() },
+  });
+  // 계약 형식: 정확히 43자 base64url (32바이트).
+  const rawToken = randomBytes(32).toString("base64url");
+  await transaction.bookingAccessCredential.create({
+    data: {
+      familyBookingId,
+      tokenDigest: prismaBytes(createHash("sha256").update(rawToken).digest()),
+      status: "ACTIVE",
+      issuedAt: new Date(),
+      expiresAt,
+    },
+  });
+  return `${publicBaseUrl.replace(/\/+$/, "")}/booking/access#token=${rawToken}`;
+}
+
 async function main(): Promise<void> {
   const [, , sessionPublicId, branchCode] = process.argv;
   if (sessionPublicId === undefined || branchCode === undefined) {
@@ -176,12 +221,15 @@ async function main(): Promise<void> {
   }
   const context = await NestFactory.createApplicationContext(EnsureTestBookingModule, { logger: false });
   try {
+    const publicBaseUrl = process.env.PUBLIC_BASE_URL;
+    if (publicBaseUrl === undefined || publicBaseUrl === "") throw new Error("PUBLIC_BASE_URL is required");
     const result = await ensureTestBooking(
       context.get(PrismaService),
       context.get(PhoneProtector),
       context.get(QrTokenProtector),
       sessionPublicId,
       branchCode,
+      publicBaseUrl,
     );
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {
