@@ -5,6 +5,15 @@ import { SheetWorkerService } from "../../src/modules/google-sheets/sheet-worker
 import { SmsWorkerService } from "../../src/modules/sms/sms-worker.service.js";
 import { WorkerAppModule } from "../../src/worker-app.module.js";
 
+/**
+ * 이 테스트가 지우고 복원하는 env 키.
+ *
+ * ⚠️ ConfigModule 은 NODE_ENV 가 production 이 아닐 때 `apps/api/.env` 를 읽는다(worker-app.module.ts).
+ * vitest 의 NODE_ENV 는 test 이므로, 개발자 로컬 `.env` 의 **api 역할** 값이 그대로 새어 들어온다.
+ * 그 상태로 worker 를 부팅하면 environmentProvider 의 역할 격리 검사(POSTER_STORAGE_DIR 등)에
+ * 걸려 실패한다 — 검사 자체는 정상 동작이고, 테스트가 환경을 충분히 비우지 않은 것이다.
+ * 따라서 worker 가 받아서는 안 되는 api 전용 키까지 전부 여기서 지운다.
+ */
 const environmentKeys = [
   "APP_ENV",
   "PROCESS_ROLE",
@@ -23,6 +32,20 @@ const environmentKeys = [
   "GOOGLE_SHEETS_ENABLED",
   "GOOGLE_SHEETS_SPREADSHEET_ID",
   "GOOGLE_APPLICATION_CREDENTIALS",
+  // ── api 역할 전용 — worker 프로세스에 주입되면 안 되는 값들 ──
+  "POSTER_STORAGE_DIR",
+  "GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT",
+  "REDIS_URL",
+  "SESSION_SECRET",
+  "PHONE_HMAC_KEY",
+  "OTP_PEPPER",
+  "SCANNER_PAIRING_HMAC_KEY",
+  "QR_ENCRYPTION_KEY",
+  "TONG_WIRE_CONTRACT_CONFIRMED",
+  "TONG_WIRE_CONTRACT_JSON",
+  "TONG_BASE_URL",
+  "TONG_USERNAME",
+  "TONG_PASSWORD",
 ] as const;
 
 describe("WorkerAppModule boot", () => {
@@ -57,7 +80,12 @@ describe("WorkerAppModule boot", () => {
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    context = await NestFactory.createApplicationContext(WorkerAppModule, { logger: false });
+    // abortOnError: false — 기본값이면 부팅 실패가 process.abort() 로 vitest worker 를 통째로
+    // 죽여서 원인 메시지가 사라진다. 실패는 이 테스트의 실패로만 드러나야 한다.
+    context = await NestFactory.createApplicationContext(WorkerAppModule, {
+      abortOnError: false,
+      logger: false,
+    });
 
     expect(context.get(SmsWorkerService)).toBeInstanceOf(SmsWorkerService);
     expect(context.get(SheetWorkerService)).toBeInstanceOf(SheetWorkerService);
