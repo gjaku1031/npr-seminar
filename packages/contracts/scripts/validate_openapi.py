@@ -1555,6 +1555,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     check_in_results = set(schema(document, "CheckInResult").get("enum", []))
     if check_in_results != EXPECTED_CHECK_IN_RESULTS:
         fail("CheckInResult must contain the precise canonical result enum")
+    _validate_check_in_result_database_constraint(check_in_results)
 
     sync_conflicts = set(schema(document, "SyncConflictType").get("enum", []))
     if sync_conflicts != EXPECTED_SYNC_CONFLICTS:
@@ -2434,6 +2435,42 @@ def main(argv: list[str] | None = None) -> int:
         f"{ephemeral_count} ephemeral mutations)"
     )
     return 0
+
+
+
+def _validate_check_in_result_database_constraint(contract_results: set[str]) -> None:
+    """The database has the final say on CheckInResult, so it must agree with the contract.
+
+    check_in_events.result carries a CHECK constraint listing every allowed value. Adding a
+    result to the contract without widening that constraint compiles, typechecks, passes the
+    contract audit, deploys — and then throws a 500 the first time the new result is written,
+    because the row is rejected at INSERT. That happened once; this exists so it cannot happen
+    silently again.
+
+    The newest migration that defines the constraint wins, mirroring how migrations replay.
+    """
+    repository = Path(__file__).resolve().parents[3]
+    migrations = sorted((repository / "apps" / "api" / "prisma" / "migrations").glob("*/migration.sql"))
+    definitions = [
+        sql
+        for path in migrations
+        for sql in [path.read_text(encoding="utf-8")]
+        if "check_in_events_result_check" in sql and "add constraint" in sql.lower()
+    ]
+    if not definitions:
+        fail("no migration defines check_in_events_result_check")
+    latest = definitions[-1]
+    # 제약 정의 이후 구간의 대문자 리터럴만 읽는다 — 그 앞의 주석·다른 구문은 보지 않는다.
+    tail = latest[latest.lower().rindex("check_in_events_result_check"):]
+    allowed = set(re.findall(r"'([A-Z_]+)'", tail))
+    if allowed != contract_results:
+        missing = sorted(contract_results - allowed)
+        extra = sorted(allowed - contract_results)
+        fail(
+            "check_in_events.result CHECK constraint disagrees with CheckInResult"
+            + (f"; missing in database: {missing}" if missing else "")
+            + (f"; missing in contract: {extra}" if extra else "")
+        )
 
 
 if __name__ == "__main__":
