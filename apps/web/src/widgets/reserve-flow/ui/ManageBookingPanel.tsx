@@ -7,9 +7,10 @@
  *   쿠키 없음). 목록에서 예약 하나를 고르면 그 예약에 한해 이미 메모리에 있는 전체 연락처로
  *   **읽기 세션**(`read-session`, 쿠키)을 세워 마스킹 상세와 현재 QR 을 복구한다. 그 세션은 읽기
  *   전용이라 변경·취소·설문에는 절대 쓰이지 않는다 — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
- * - `direct`  (문자 링크 `/booking/{id}`): 최초 BOOKING_MANAGE OTP 로 읽기 proof 를 얻어 이 예약
- *   하나만 상세 조회하고 현재 QR 을 복구한다. 그 읽기 proof 는 **첫 변경**에 쓸 수 있고, 한 번
- *   성공하면 소비돼 다음 작업엔 새 OTP 가 필요하다.
+ * - `direct`  (문자 링크 `/booking/{id}`): **인증번호 없이** 예약 연락처만 대조해 읽기 세션을
+ *   세우고(`read-session`), 이 예약 하나만 상세 조회하고 현재 QR 을 복구한다. 링크(추측 불가능한
+ *   UUID)가 "가진 것", 연락처가 "아는 것"이다. 그 세션은 `access` 와 똑같이 읽기 전용이라
+ *   변경·취소·설문에는 쓰이지 않는다.
  * - `access` (SMS 개인 링크 교환 세션): 쿠키 세션으로 마스킹 상세 GET·QR 복구만 한다.
  *   변경·취소·설문은 **절대 세션으로 인증하지 않는다** — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
  *
@@ -177,6 +178,10 @@ export function ManageBookingPanel({
   const [lookupContact, setLookupContact] = useState("");
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  // direct 모드(문자 링크) 본인 확인 입력 — 인증번호 없이 이 연락처 하나로 대조한다.
+  const [directContact, setDirectContact] = useState("");
+  const [directBusy, setDirectBusy] = useState(false);
+  const [directError, setDirectError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   // lookup 목록에서 고른 예약에 읽기 세션을 세우는 중 — 그 항목만 진행 표시하고 목록 전체는 잠근다.
   const [selectingId, setSelectingId] = useState<string | null>(null);
@@ -194,12 +199,10 @@ export function ManageBookingPanel({
   const [hasRetainedMutation, setHasRetainedMutation] = useState(false);
 
   const proof = useBookingProof();
-  const clearProof = proof.clear;
   const mutationIntents = useKeyedOperationIntents<ManageMutationIntent>();
   // 변경 intent 와 **별개** 키다 — 읽기 세션(POST)의 결과 미상 재시도가 변경과 섞이지 않게 한다.
   const readSessionIntents = useKeyedOperationIntents<ReadSessionIntent>();
   const pendingActionRef = useRef<PendingAction | null>(null);
-  const readOtpRestartRef = useRef<() => void>(() => {});
 
   const sessionOf = useCallback(
     (booking: PublicMaskedFamilyBooking) =>
@@ -330,47 +333,56 @@ export function ManageBookingPanel({
     return () => controller.abort();
   }, [mode, accessBookingId, loadQr]);
 
-  /** direct 모드: 대상 예약 하나만 범위 조회 + QR 복구(읽기 proof). */
-  const loadOne = useCallback(
-    async (issued: BookingProof, bookingId: string) => {
+  /**
+   * direct 모드 본인 확인 — **인증번호 없이 연락처 대조만** 한다.
+   *
+   * 문자로 나가는 `/booking/{id}` 링크는 접근 링크(`/booking/access`)와 같은 수준으로 열린다:
+   * 링크(추측 불가능한 UUID)는 "가진 것", 예약 연락처는 "아는 것"이다. 서버가 그 예약 하나에
+   * 대해 연락처 digest 를 대조하고(read-session), 맞을 때만 읽기 세션을 세운다.
+   *
+   * 브루트포스는 서버가 막는다 — 예약당 10회·연락처당 10회·IP 30회·전역 600회/분이고,
+   * 없는 예약·연락처 불일치·취소된 예약이 모두 같은 오류로 돌아와 열거 단서를 주지 않는다.
+   *
+   * ★ 이 세션은 **읽기 전용**이다. 회차 변경·취소·설문은 여전히 새 BOOKING_MANAGE proof 를
+   *   요구한다 — 링크를 주운 사람이 남의 예약을 취소할 수 있게 되면 안 된다.
+   */
+  const submitDirectAuth = useCallback(
+    async (bookingId: string) => {
+      const contact = normalizeContactDigits(directContact);
+      const operation = readSessionIntents.begin(READ_SESSION_TARGET, { familyBookingId: bookingId, contact });
+      if (!operation.ok) {
+        setDirectError(
+          operation.reason === "diverged"
+            ? "직전 확인의 결과를 아직 알지 못합니다. 같은 연락처로 그대로 다시 시도해 주세요."
+            : "확인하지 못한 요청이 남아 있습니다. 잠시 후 다시 시도해 주세요.",
+        );
+        return;
+      }
+
+      setDirectBusy(true);
+      setDirectError(null);
       setListError(null);
       setActionError(null);
       try {
-        const found = await getPublicFamilyBooking(bookingId, { bookingProof: issued.value });
+        await establishFamilyBookingContactReadSession(operation.intent.familyBookingId, operation.intent.contact, {
+          idempotencyKey: operation.key,
+        });
+        readSessionIntents.settle(READ_SESSION_TARGET);
+        const found = await getPublicFamilyBooking(bookingId, { session: "management" });
         setSelected(found);
+        setHasRetainedMutation(mutationIntents.retained(`booking:${found.familyBookingId}`) !== null);
         setStage("detail");
-        await loadQr(found, { bookingProof: issued.value });
+        await loadQr(found, { session: "management" });
       } catch (caught) {
-        // 검증 요청 자체는 이미 성공해 challenge 가 소진됐다. 상세 GET 이 실패한 뒤
-        // `verifying` 단계에 그대로 두면 재시도할 수 없으므로 proof 를 버리고 OTP를 다시 연다.
-        clearProof();
-        readOtpRestartRef.current();
-        setListError(
-          isApiError(caught) && (caught.status === 403 || caught.status === 404)
-            ? "이 예약을 찾을 수 없거나 조회 권한이 없습니다. 예약하신 연락처가 맞는지 확인해 주세요."
-            : defaultErrorMessage(caught),
-        );
-        setStage("auth");
+        if (isAborted(caught)) return;
+        readSessionIntents.settle(READ_SESSION_TARGET, caught);
+        setDirectError(readSessionErrorMessage(caught));
+      } finally {
+        setDirectBusy(false);
       }
     },
-    [loadQr, clearProof],
+    [directContact, readSessionIntents, mutationIntents, loadQr],
   );
-
-  /* ── direct 모드 최초 본인 확인 OTP → 읽기 proof ── */
-  const readOtp = useOtpFlow({
-    purpose: "BOOKING_MANAGE",
-    onVerified: (issued) => {
-      proof.adopt(issued);
-      if (initialBookingId) void loadOne(issued, initialBookingId);
-    },
-  });
-
-  useEffect(() => {
-    readOtpRestartRef.current = readOtp.restart;
-    return () => {
-      readOtpRestartRef.current = () => {};
-    };
-  }, [readOtp.restart]);
 
   /** 변경 성공 공통 처리 — proof 소비 + 선택·목록 항목을 반환 마스킹 DTO 로 갱신 + 성공 안내. */
   const applyMutation = useCallback(
@@ -506,7 +518,7 @@ export function ManageBookingPanel({
 
   /** 이미 메모리에 있는 전체 연락처 — 변경 경계 OTP 발송 입력을 미리 채운다. */
   const manageContact =
-    mode === "lookup" ? lookupContact : mode === "access" ? (prefillContact ?? "") : readOtp.contact;
+    mode === "lookup" ? lookupContact : mode === "access" ? (prefillContact ?? "") : directContact;
 
   /**
    * 변경 작업 시작 — 선택을 마친 직후 호출한다.
@@ -613,7 +625,7 @@ export function ManageBookingPanel({
       </div>
     );
 
-  /* ── direct 모드 최초 본인 확인 (OTP) ── */
+  /* ── direct 모드(문자 링크) 본인 확인 — 인증번호 없이 연락처 대조만 ── */
   if (stage === "auth")
     return (
       <div data-screen-label="모바일 — 예약 조회" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -622,10 +634,20 @@ export function ManageBookingPanel({
           <div style={{ padding: "8px 4px 16px" }}>
             <h2 style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.35 }}>본인 확인이 필요합니다</h2>
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
-              링크만으로는 예약 내용을 보여드릴 수 없습니다. 예약하신 <b>학부모 연락처</b>로 본인 확인을 해 주세요.
+              링크만으로는 예약 내용을 보여드릴 수 없습니다. 예약하신 <b>학부모 연락처</b>를 입력해 주세요.
             </p>
           </div>
-          <OtpFields otp={readOtp} hint="예약하실 때 사용한 학부모 연락처를 입력해 주세요." />
+          <ContactEntryForm
+            value={directContact}
+            onChange={(v) => { setDirectContact(v); setDirectError(null); }}
+            onSubmit={() => { if (initialBookingId) void submitDirectAuth(initialBookingId); }}
+            submitting={directBusy}
+            canSubmit={isCompleteContact(normalizeContactDigits(directContact)) && !directBusy}
+            submitLabel="예약 확인"
+            submittingLabel="확인하는 중입니다…"
+            hint="예약하실 때 사용한 학부모 연락처를 입력해 주세요."
+            error={directError}
+          />
           <ErrorNote message={listError} />
         </div>
         <FlowToast message={toast} />
