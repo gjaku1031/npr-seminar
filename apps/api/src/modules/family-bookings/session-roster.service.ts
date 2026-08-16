@@ -44,6 +44,8 @@ interface RosterDatabaseRow {
   readonly mother_phone_ciphertext: Uint8Array | null;
   readonly father_phone_ciphertext: Uint8Array | null;
   readonly guest_contact_ciphertext: Uint8Array | null;
+  /** 정렬 전용 — 화면에 나가는 값은 booking 투영의 isTest 다. */
+  readonly is_test: boolean;
 }
 
 interface RosterFacetRow { readonly teachers: string[]; readonly unmatched_unit_count: number; }
@@ -267,6 +269,7 @@ export class SessionRosterService {
                fbs.branch_code_at_booking branch,fbs.class_name_snapshot class_name,
                fbs.school_name_snapshot school_name,fbs.grade_snapshot grade,
                fb.contact_ciphertext guest_contact_ciphertext,fb.contact_last4 guest_contact_last4,
+               fb.is_test,
                row_number() over (
                  partition by fb.contact_digest,lower(btrim(normalize(fbs.student_name_snapshot,NFKC))),fbs.branch_code_at_booking
                  order by case when fb.status in ('RESERVED','CHECKED_IN') then 0 else 1 end,
@@ -295,7 +298,8 @@ export class SessionRosterService {
                  else null
                end primary_teacher,
                s.mother_phone_ciphertext,s.father_phone_ciphertext,null::bytea guest_contact_ciphertext,
-               s.mother_phone_last4,s.father_phone_last4,null::text guest_contact_last4
+               s.mother_phone_last4,s.father_phone_last4,null::text guest_contact_last4,
+               false is_test
           from students s
           join branches b on b.id=s.branch_id
           left join lateral (
@@ -338,7 +342,8 @@ export class SessionRosterService {
                guest_child_internal_id,guest_child_internal_ids,source_student_no,name,branch,class_name,
                null::text,'{}'::text[],
                school_name,grade,null::text,null::text,null::bytea,null::bytea,
-               guest_contact_ciphertext,null::text,null::text,guest_contact_last4
+               guest_contact_ciphertext,null::text,null::text,guest_contact_last4,
+               is_test
           from guest_ranked where selection_rank=1
       )`;
   }
@@ -386,9 +391,12 @@ export class SessionRosterService {
       select roster_entry_id,participant_type,student_id,family_booking_student_id,
              student_internal_id,guest_child_internal_id,guest_child_internal_ids,source_student_no,name,branch,class_name,
              math_class_name,science_class_names,school_name,grade,unit_name,primary_teacher,mother_phone_ciphertext,
-             father_phone_ciphertext,guest_contact_ciphertext
+             father_phone_ciphertext,guest_contact_ciphertext,is_test
         from roster_filtered
-       order by case branch
+       -- 테스트 예약은 언제나 맨 앞이다. QR 재테스트용이라 운영자가 매번 찾아 들어가야 하고,
+       -- 캠퍼스·단위 정렬에 섞이면 회차마다 다른 자리로 흩어진다.
+       order by is_test desc,
+                case branch
                   when 'CAMPUS_A' then 1
                   when 'CAMPUS_B' then 2
                   when 'CAMPUS_C' then 3
@@ -435,6 +443,9 @@ export class SessionRosterService {
            )
           join family_bookings booking
             on booking.id=child.family_booking_id and booking.session_id=child.session_id
+           -- 테스트 예약은 명단에 **행으로는 보이지만** 모니터링 숫자에는 들어가지 않는다.
+           -- 운영자가 세는 것은 실제로 올 사람 수다.
+           and not booking.is_test
       ),
       selected_roster_bookings as (
         select family_booking_id,status,attendance_party
@@ -445,7 +456,7 @@ export class SessionRosterService {
         select distinct family_booking_id,status,attendance_party
           from selected_roster_bookings
       )
-      select (select count(*)::bigint from roster_filtered) roster_row_count,
+      select (select count(*)::bigint from roster_filtered where not is_test) roster_row_count,
              (select count(*)::bigint from selected_roster_bookings) student_count,
              count(*)::bigint family_booking_count,
              coalesce(sum(case attendance_party when 'BOTH' then 2 else 1 end),0)::bigint attendee_count
@@ -474,6 +485,8 @@ export class SessionRosterService {
           attendanceParty: true,
           bookingSource: true,
           seatCount: true,
+          attendedCount: true,
+          isTest: true,
           checkedInAt: true,
           cancelledAt: true,
           createdAt: true,
@@ -546,6 +559,8 @@ export class SessionRosterService {
       attendanceParty: link.familyBooking.attendanceParty,
       bookingSource: link.familyBooking.bookingSource,
       seatCount: link.familyBooking.seatCount,
+      attendedCount: link.familyBooking.attendedCount,
+      isTest: link.familyBooking.isTest,
       checkedInAt: link.familyBooking.checkedInAt,
       cancelledAt: link.familyBooking.cancelledAt,
       version: Number(link.familyBooking.version),

@@ -24,6 +24,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "node dist/commands/bootstrap-admin.js",
     "db:seed:qa": "node dist/commands/seed-synthetic-qa.js",
+    "db:ensure-test-booking": "node dist/commands/ensure-test-booking.js",
     "db:reset:qa": "node dist/commands/reset-synthetic-qa.js",
     "db:studio": "prisma studio",
     "migrate:deploy": "prisma migrate deploy",

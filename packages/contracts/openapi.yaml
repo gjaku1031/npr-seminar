@@ -2572,6 +2572,54 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/admin/family-bookings/{familyBookingId}/check-in-rollback:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBookingId'
+    post:
+      operationId: rollbackAdminFamilyBookingCheckIn
+      tags: [Admin family bookings]
+      summary: Return a test booking to not-yet-entered
+      description: |
+        Restricted to bookings flagged isTest. Real entry records are never reversible:
+        an operator who mis-scans corrects the count, and an entry that happened stays
+        an entry. This exists so the gate hardware and the QR flow can be rehearsed
+        repeatedly against one booking without inventing a way to erase production
+        attendance.
+
+        Clears status, checkedInAt, and attendedCount, revokes nothing, and appends an
+        audit event. Rejected with 409 when the booking is not a test booking or is not
+        currently checked in. Test bookings are outside the Google Sheets projection, so
+        no outbox delivery is appended.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      x-hard-delete: forbidden
+      x-mutation-kind: durable
+      x-idempotency: required
+      x-requires-csrf: true
+      x-requires-same-origin: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/Origin'
+      responses:
+        '200':
+          description: Booking returned to RESERVED, or the idempotent current state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBooking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/admin/family-bookings/{familyBookingId}/events:
     parameters:
       - $ref: '#/components/parameters/FamilyBookingId'
@@ -4642,7 +4690,16 @@ components:
 
     SmsAudience:
       type: string
-      enum: [BOOKED_FAMILIES, RESERVED_FAMILIES, CHECKED_IN_FAMILIES, CANCELLED_FAMILIES]
+      description: |
+        Test bookings are excluded from every audience except TEST_ACCOUNTS, which
+        selects only them. Operators must be able to exercise the delivery path without
+        reaching a real family, and real sends must never reach a test row.
+      enum:
+        - BOOKED_FAMILIES
+        - RESERVED_FAMILIES
+        - CHECKED_IN_FAMILIES
+        - CANCELLED_FAMILIES
+        - TEST_ACCOUNTS
 
     SmsGatewayReadiness:
       type: object
@@ -7140,7 +7197,7 @@ components:
 
     SessionRosterBookingProjection:
       type: object
-      required: [familyBookingId, familyBookingStudentId, status, attendanceParty, bookingSource, seatCount, checkedInAt, cancelledAt, version]
+      required: [familyBookingId, familyBookingStudentId, status, attendanceParty, bookingSource, seatCount, attendedCount, isTest, checkedInAt, cancelledAt, version]
       properties:
         familyBookingId:
           type: string
@@ -7155,8 +7212,22 @@ components:
         bookingSource:
           $ref: '#/components/schemas/BookingSource'
         seatCount:
+          description: Booked party size. This product has no seat concept; the unit is people.
           type: integer
           enum: [1, 2]
+        attendedCount:
+          description: |
+            How many parents actually entered, decided at the gate. Null until the booking
+            checks in, and for every non-CHECKED_IN status. May be lower than seatCount
+            when a two-parent booking arrives with one parent.
+          type: [integer, 'null']
+          enum: [1, 2, null]
+        isTest:
+          description: |
+            QR rehearsal booking. Excluded from statistics, the Google Sheets projection,
+            and every SMS audience except TEST_ACCOUNTS; pinned to the top of the roster
+            and the only booking whose entry may be rolled back.
+          type: boolean
         checkedInAt:
           type: [string, 'null']
           format: date-time
@@ -7470,6 +7541,8 @@ components:
         - createdAt
         - updatedAt
         - checkedInAt
+        - attendedCount
+        - isTest
         - cancelledAt
       properties:
         familyBookingId:
@@ -7520,6 +7593,20 @@ components:
         cancelledAt:
           type: [string, 'null']
           format: date-time
+        attendedCount:
+          description: |
+            How many parents actually entered, decided at the gate. Null until the booking
+            checks in. Never exceeds seatCount and may be lower when a two-parent booking
+            arrives with one parent.
+          type: [integer, 'null']
+          enum: [1, 2, null]
+          readOnly: true
+        isTest:
+          description: |
+            QR rehearsal booking. Excluded from statistics, the Google Sheets projection,
+            and every SMS audience except TEST_ACCOUNTS.
+          type: boolean
+          readOnly: true
       additionalProperties: false
 
     PublicMaskedFamilyBookingParticipant:
@@ -8252,9 +8339,16 @@ components:
 
     CheckInResult:
       type: string
-      description: Precise persisted result for every family-level attempt.
+      description: |
+        Precise persisted result for every family-level attempt.
+
+        PARTY_SELECTION_REQUIRED is not a failure and not an entry. The QR, session, and
+        booking state are already valid, but the booking reserved two parents and the
+        request did not say how many actually arrived. The booking is left untouched;
+        the scanner asks the operator and retries with attendedCount.
       enum:
         - CHECKED_IN
+        - PARTY_SELECTION_REQUIRED
         - ALREADY_CHECKED_IN
         - CANCELLED
         - SESSION_MISMATCH
@@ -8263,6 +8357,16 @@ components:
         - INVALID_QR
         - RESERVATION_NOT_FOUND
         - NOT_AUTHORIZED
+
+    AttendedCount:
+      description: |
+        How many parents actually walked in, decided at the gate. This product has no
+        seat concept; the only unit is people. Omit it to let the server decide: a
+        one-parent booking checks in immediately, a two-parent booking answers
+        PARTY_SELECTION_REQUIRED without mutating anything. It can never exceed the
+        booked party size.
+      type: integer
+      enum: [1, 2]
 
     QrCheckInRequest:
       type: object
@@ -8274,6 +8378,8 @@ components:
           maxLength: 512
           writeOnly: true
           description: Raw family credential; never persisted or logged.
+        attendedCount:
+          $ref: '#/components/schemas/AttendedCount'
       additionalProperties: false
 
     ManualCheckInRequest:
@@ -8283,6 +8389,8 @@ components:
         familyBookingId:
           type: string
           format: uuid
+        attendedCount:
+          $ref: '#/components/schemas/AttendedCount'
       additionalProperties: false
 
     CheckInRepresentativeStudent:
@@ -8315,6 +8423,7 @@ components:
         - replayed
         - familyBookingId
         - familySeatCount
+        - attendedCount
         - attendanceParty
         - representativeStudentName
         - representativeStudent
@@ -8336,7 +8445,14 @@ components:
           type: [string, 'null']
           format: uuid
         familySeatCount:
-          description: Family aggregate seat count; null only when no family can be resolved.
+          description: Booked party size; null only when no family can be resolved.
+          type: [integer, 'null']
+          enum: [1, 2, null]
+        attendedCount:
+          description: |
+            How many parents this entry recorded. Set only for CHECKED_IN and
+            ALREADY_CHECKED_IN; null for every other result, including
+            PARTY_SELECTION_REQUIRED where nothing was recorded yet.
           type: [integer, 'null']
           enum: [1, 2, null]
         attendanceParty:

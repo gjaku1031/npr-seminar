@@ -284,6 +284,52 @@ export class FamilyBookingsManagementService {
       : this.attachContact(id, response as ReturnType<FamilyBookingsManagementService["mapCore"]>);
   }
 
+  /**
+   * 테스트 예약을 다시 미입장으로 되돌린다.
+   *
+   * **실제 입장 기록은 되돌릴 수 없다.** 오스캔은 인원을 고쳐 바로잡고, 일어난 입장은 일어난
+   * 것으로 남는다. 이 경로가 존재하는 이유는 하나뿐이다 — 게이트 장비와 QR 흐름을 같은 예약으로
+   * 반복 리허설하기 위해서다. 그래서 is_test 가 아닌 예약은 무조건 거절한다.
+   *
+   * QR 은 건드리지 않는다. 취소와 달리 예약은 살아 있고, 같은 QR 을 다시 찍어야 리허설이 된다.
+   */
+  public async rollbackCheckIn(id: string, actorSubject: string, key: string) {
+    return this.idempotency.execute("FAMILY_BOOKING_CHECK_IN_ROLLBACK", key, { id }, async (transaction) => {
+      const snapshot = await transaction.familyBooking.findUnique({
+        where: { publicId: id },
+        select: { id: true, sessionId: true },
+      });
+      if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
+      await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
+      const rows = await transaction.$queryRaw<Array<{ id: bigint; status: string; is_test: boolean }>>`
+        select id,status,is_test from family_bookings where id=${snapshot.id} for update`;
+      const booking = rows[0]!;
+      if (!booking.is_test) this.fail(409, "CHECK_IN_ROLLBACK_REQUIRES_TEST_BOOKING");
+      // 이미 미입장이면 되돌릴 것이 없다 — 같은 상태를 그대로 돌려준다.
+      if (booking.status !== "CHECKED_IN") return this.load(transaction, booking.id);
+
+      await transaction.familyBooking.update({
+        where: { id: booking.id },
+        data: {
+          status: "RESERVED",
+          checkedInAt: null,
+          attendedCount: null,
+          version: { increment: 1 },
+          updatedAt: new Date(),
+        },
+      });
+      await transaction.bookingEvent.create({
+        data: {
+          familyBookingId: booking.id,
+          eventType: "UPDATED",
+          actorSubject,
+          safeMetadata: { change: "CHECK_IN_ROLLBACK", testBooking: true },
+        },
+      });
+      return this.load(transaction, booking.id);
+    });
+  }
+
   public cancel(
     id: string, expectedVersion: number, cancellationType: BookingCancellationType,
     actorSubject: null, key: string, proofValue: string, legacyPublicReason?: string, request?: Request,
@@ -615,6 +661,8 @@ export class FamilyBookingsManagementService {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       checkedInAt: row.checkedInAt,
+      attendedCount: row.attendedCount ?? null,
+      isTest: row.isTest === true,
       cancelledAt: row.cancelledAt,
     };
   }

@@ -123,6 +123,9 @@ AUDIT_OPERATION_IDS = {
 }
 EXPECTED_CHECK_IN_RESULTS = {
     "CHECKED_IN",
+    # Neither an entry nor a failure: a two-parent booking scanned without an
+    # attendedCount. Nothing is mutated; the gate operator answers and retries.
+    "PARTY_SELECTION_REQUIRED",
     "ALREADY_CHECKED_IN",
     "CANCELLED",
     "SESSION_MISMATCH",
@@ -1530,13 +1533,16 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     ):
         fail("family child snapshot is missing Sheets projection identity fields")
 
+    # attendedCount is the operator's own answer at the gate, not scanner context, so it
+    # is the one field a client may add. Everything else about the scanner (device,
+    # session, gate, branch) stays server-derived and must never be client-supplied.
     qr_request_properties = set(schema_properties(document, "QrCheckInRequest"))
-    if qr_request_properties != {"qrToken"}:
-        fail("QR check-in request may contain only qrToken; scanner context is server-derived")
+    if qr_request_properties != {"qrToken", "attendedCount"}:
+        fail("QR check-in request may contain only qrToken and attendedCount; scanner context is server-derived")
     manual_request_properties = set(schema_properties(document, "ManualCheckInRequest"))
-    if manual_request_properties != {"familyBookingId"}:
+    if manual_request_properties != {"familyBookingId", "attendedCount"}:
         fail(
-            "manual check-in request may contain only familyBookingId; "
+            "manual check-in request may contain only familyBookingId and attendedCount; "
             "scanner context is server-derived"
         )
     manual_candidate_fields = set(schema_properties(document, "ManualCheckInCandidate"))

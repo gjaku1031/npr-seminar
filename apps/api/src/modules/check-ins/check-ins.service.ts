@@ -10,8 +10,14 @@ import { SheetOutboxService } from "../google-sheets/sheet-outbox.service.js";
 import { currentOrHistoricMathHomeroomTeacher } from "../student-sync/student-homeroom-policy.js";
 
 type CheckInSource = "QR" | "MANUAL";
-type CheckInResult = "CHECKED_IN" | "ALREADY_CHECKED_IN" | "CANCELLED" | "SESSION_MISMATCH"
-  | "EXPIRED_QR" | "REVOKED_QR" | "INVALID_QR" | "RESERVATION_NOT_FOUND" | "NOT_AUTHORIZED";
+type CheckInResult = "CHECKED_IN" | "PARTY_SELECTION_REQUIRED" | "ALREADY_CHECKED_IN" | "CANCELLED"
+  | "SESSION_MISMATCH" | "EXPIRED_QR" | "REVOKED_QR" | "INVALID_QR" | "RESERVATION_NOT_FOUND" | "NOT_AUTHORIZED";
+
+/**
+ * 게이트에서 확정한 실제 입장 학부모 수. 이 제품에 좌석 개념은 없다 — 세는 단위는 사람뿐이다.
+ * 예약 인원(seat_count)보다 작을 수 있다: 2명 예약에 한 분만 오는 경우가 있다.
+ */
+export type AttendedCount = 1 | 2;
 
 interface ScannerContext {
   readonly id: bigint;
@@ -39,6 +45,8 @@ export interface CheckInOutcome {
   readonly replayed: boolean;
   readonly familyBookingId: string | null;
   readonly familySeatCount: number | null;
+  /** 이 입장이 기록한 인원. CHECKED_IN·ALREADY_CHECKED_IN 에서만 값이 있다. */
+  readonly attendedCount: number | null;
   readonly attendanceParty: AttendanceParty | null;
   readonly representativeStudentName: string | null;
   readonly seminarSessionId: string;
@@ -205,15 +213,25 @@ export class CheckInsService {
     };
   }
 
-  public async byQr(actor: AuthenticatedActor, qrToken: string, idempotencyKey: string): Promise<CheckInOutcome> {
+  public async byQr(
+    actor: AuthenticatedActor,
+    qrToken: string,
+    idempotencyKey: string,
+    attendedCount?: AttendedCount,
+  ): Promise<CheckInOutcome> {
     if (qrToken.length < 43 || qrToken.length > 512 || !/^[A-Za-z0-9_-]+$/.test(qrToken)) {
-      return this.perform(actor, "QR", null, null, idempotencyKey, "INVALID_QR");
+      return this.perform(actor, "QR", null, null, idempotencyKey, attendedCount, "INVALID_QR");
     }
-    return this.perform(actor, "QR", this.crypto.digest(qrToken), null, idempotencyKey);
+    return this.perform(actor, "QR", this.crypto.digest(qrToken), null, idempotencyKey, attendedCount);
   }
 
-  public byManual(actor: AuthenticatedActor, familyBookingId: string, idempotencyKey: string): Promise<CheckInOutcome> {
-    return this.perform(actor, "MANUAL", null, familyBookingId, idempotencyKey);
+  public byManual(
+    actor: AuthenticatedActor,
+    familyBookingId: string,
+    idempotencyKey: string,
+    attendedCount?: AttendedCount,
+  ): Promise<CheckInOutcome> {
+    return this.perform(actor, "MANUAL", null, familyBookingId, idempotencyKey, attendedCount);
   }
 
   public async listEvents(filters: {
@@ -264,6 +282,7 @@ export class CheckInsService {
     tokenDigest: Buffer | null,
     familyBookingId: string | null,
     idempotencyKey: string,
+    attendedCount?: AttendedCount,
     forcedResult?: CheckInResult,
   ): Promise<CheckInOutcome> {
     if (idempotencyKey.trim().length < 8 || idempotencyKey.length > 200) this.fail(400, "IDEMPOTENCY_KEY_INVALID");
@@ -275,6 +294,9 @@ export class CheckInsService {
         source,
         tokenDigest: tokenDigest?.toString("base64url") ?? null,
         familyBookingId,
+        // 인원이 다이제스트에 들어가야 한다. 같은 키로 인원만 바꿔 다시 부르면 그건 재시도가
+        // 아니라 다른 요청이므로, 조용히 리플레이하지 않고 키 재사용으로 거절해야 한다.
+        attendedCount: attendedCount ?? null,
         scannerSessionId: scanner.sessionPublicId,
         scannerDeviceId: scanner.publicId,
       }));
@@ -288,7 +310,7 @@ export class CheckInsService {
 
       let booking: {
         id: bigint; public_id: string; session_id: bigint; status: string; seat_count: number;
-        attendance_party: AttendanceParty; checked_in_at: Date | null;
+        attendance_party: AttendanceParty; checked_in_at: Date | null; attended_count: number | null;
       } | undefined;
       let credential: { id: bigint; status: string; expires_at: Date } | undefined;
       let located: { bookingId: bigint; sessionId: bigint; credentialId: bigint | null } | undefined;
@@ -320,8 +342,9 @@ export class CheckInsService {
         if (lockedSessions.length !== sessionIds.length) this.fail(409, "SEMINAR_SESSION_NOT_FOUND");
         const bookings = await transaction.$queryRaw<Array<{
           id: bigint; public_id: string; session_id: bigint; status: string; seat_count: number;
-          attendance_party: AttendanceParty; checked_in_at: Date | null;
-        }>>`select id,public_id,session_id,status,seat_count,attendance_party,checked_in_at from family_bookings
+          attendance_party: AttendanceParty; checked_in_at: Date | null; attended_count: number | null;
+        }>>`select id,public_id,session_id,status,seat_count,attendance_party,checked_in_at,attended_count
+              from family_bookings
              where id=${located.bookingId} for update`;
         booking = bookings[0];
         if (booking !== undefined && located.credentialId !== null && tokenDigest !== null) {
@@ -335,13 +358,43 @@ export class CheckInsService {
       }
 
       let result = forcedResult ?? this.resultFor(source, scanner, booking, credential);
+
+      /**
+       * 실제 입장 인원 확정.
+       *
+       * 1명 예약은 물을 것이 없다 — 온 사람은 그 한 분이다.
+       * 2명 예약인데 인원을 받지 못했으면 **아무것도 바꾸지 않고** 스캐너에 되묻는다.
+       * 2명 예약했지만 한 분만 오는 경우가 있어서, 예약 인원을 실제 입장으로 단정하면
+       * 통계가 조용히 틀어진다. 여기서 멈추는 편이 잘못된 숫자를 남기는 것보다 낫다.
+       *
+       * 인원이 예약보다 많으면 거절한다 — 예약하지 않은 사람을 입장시키는 경로가 되면 안 된다.
+       */
+      let recordedCount: number | null = null;
       if (result === "CHECKED_IN" && booking !== undefined) {
+        if (attendedCount !== undefined && attendedCount > booking.seat_count) {
+          this.fail(409, "ATTENDED_COUNT_EXCEEDS_BOOKING");
+        }
+        const resolved = attendedCount ?? (booking.seat_count === 1 ? 1 : undefined);
+        if (resolved === undefined) result = "PARTY_SELECTION_REQUIRED";
+        else recordedCount = resolved;
+      }
+
+      if (result === "CHECKED_IN" && booking !== undefined && recordedCount !== null) {
         const updated = await transaction.familyBooking.updateMany({
           where: { id: booking.id, status: "RESERVED", checkedInAt: null },
-          data: { status: "CHECKED_IN", checkedInAt: new Date(), version: { increment: 1 }, updatedAt: new Date() },
+          data: {
+            status: "CHECKED_IN",
+            checkedInAt: new Date(),
+            attendedCount: recordedCount,
+            version: { increment: 1 },
+            updatedAt: new Date(),
+          },
         });
-        if (updated.count !== 1) result = "ALREADY_CHECKED_IN";
-        else {
+        if (updated.count !== 1) {
+          // 경합에서 밀렸다 — 이 호출은 아무것도 기록하지 않았다.
+          result = "ALREADY_CHECKED_IN";
+          recordedCount = null;
+        } else {
           const bookingEvent = await transaction.bookingEvent.create({
             data: {
               familyBookingId: booking.id,
@@ -349,6 +402,7 @@ export class CheckInsService {
               actorSubject: actor.subject,
               safeMetadata: {
                 source,
+                attendedCount: recordedCount,
                 ...scannerCheckInMetadata(scanner),
               },
             },
@@ -396,12 +450,14 @@ export class CheckInsService {
           sessionId: scanner.sessionId,
           source,
           result,
+          // seatCount 는 **예약 인원**이다(기존 의미 유지). 실제 입장 인원은 별도로 남긴다 —
+          // 감사 로그에서 "2명 예약, 1명 입장"을 구분할 수 있어야 한다.
           seatCount: booking?.seat_count ?? 0,
           scannerDeviceId: scanner.id,
           gateCode: scanner.gateCode,
           actorSubject: actor.subject,
           idempotencyKeyDigest: this.bytes(keyDigest),
-          safeMetadata: scannerCheckInMetadata(scanner),
+          safeMetadata: { ...scannerCheckInMetadata(scanner), attendedCount: recordedCount },
         },
       });
       const representativeStudent = booking === undefined
@@ -413,6 +469,8 @@ export class CheckInsService {
         replayed: false,
         familyBookingId: booking?.public_id ?? null,
         familySeatCount: booking?.seat_count ?? null,
+        // 방금 기록한 인원, 아니면 이미 입장한 건의 기존 인원. 그 외에는 기록이 없으므로 null.
+        attendedCount: recordedCount ?? (result === "ALREADY_CHECKED_IN" ? booking?.attended_count ?? null : null),
         attendanceParty: booking?.attendance_party ?? null,
         representativeStudentName: representativeStudent?.studentName ?? null,
         seminarSessionId: scanner.sessionPublicId,
