@@ -16,7 +16,7 @@ export const metadata: Metadata = {
  * - `이미 예약했나요? 예약 조회 · 변경 · 취소` → `/reserve?mode=manage`
  *
  * 예약 플로우(ReserveView · flows PARENT-P1~P5) 자체는 이제 `/reserve` 다. 관리자 콘솔은
- * `/admin` (`(main)` 레이아웃이 인증을 강제). 포스터 업로드 관리도 `/admin` 허브 패널에 있다.
+ * `/sessions` (`(main)` 레이아웃이 인증을 강제). 포스터 업로드 관리 패널도 `/sessions` 에 있다.
  */
 export default function PublicEntrancePage() {
   return <PosterEntranceView />;
