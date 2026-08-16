@@ -30,7 +30,7 @@ export function brandSeminarTitle(): string {
   return `${BRAND_NAME} ${BRAND_SEMINAR}`;
 }
 
-/** 로고=허브 복귀 링크의 접근성 이름 (예: "예시학원 입시설명회 홈"). */
+/** 로고=콘솔 홈 복귀 링크의 접근성 이름 (예: "예시학원 입시설명회 홈"). */
 export function brandHomeLabel(): string {
   return `${brandSeminarTitle()} 홈`;
 }

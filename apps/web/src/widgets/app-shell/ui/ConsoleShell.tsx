@@ -2,21 +2,22 @@
 
 /**
  * 콘솔 셸 (widgets/app-shell) — 설계 §8 예고대로 다도메인 조합 블록 첫 승격.
- * 와이어프레임 App 이식: 허브(/admin)는 미니멀 헤더, 모듈 화면은 TopNav 탭바 (명세 §1.1).
+ * 모듈 화면 위에 TopNav 탭바를 얹는다 (명세 §1.1).
  * 라우팅은 Next 라우터가 담당 — 와이어프레임의 npr-route 저장을 URL이 대체한다.
  *
- * 허브가 `/` 에서 `/admin` 으로 옮겨졌다(루트는 학부모 공개 앱). 모듈에 매칭되지 않는
- * `(main)` 경로(=`/admin`)가 미니멀 헤더 분기라는 규칙은 그대로다.
+ * 2026-08: 카드 런처 허브(`/admin`)를 제거했다. 콘솔의 실질 진입면은 `/sessions` 이고
+ * `/admin` 은 기존 링크 호환을 위한 리다이렉트만 남았다. 허브 전용이던 미니멀 헤더 분기도
+ * 함께 정리했다 — 이제 `(main)` 아래는 전부 탭바 하나로 통일된다.
  */
 
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { moduleLabel, ALL_MODULES } from "@/entities/user";
 import { AvatarMenu } from "@/features/auth";
-import { BrandMark, TopNav } from "@/shared/ui";
+import { TopNav } from "@/shared/ui";
 
-/** 콘솔 허브 — 로고 클릭·로그인 성공이 돌아오는 곳. */
-const ADMIN_HOME = "/admin";
+/** 콘솔 홈 — 로고 클릭이 돌아오는 곳. */
+const CONSOLE_HOME = "/sessions";
 
 const MODULE_ROUTE: Record<string, string> = {
   students: "/students",
@@ -41,25 +42,13 @@ export function ConsoleShell({ children, displayName }: { children: ReactNode; d
   const pathname = usePathname();
   const router = useRouter();
 
+  /**
+   * 어느 모듈에도 매칭되지 않을 수 있다 — 그때는 탭을 하나도 켜지 않는다.
+   * TopNav 의 `value` 는 선택 항목이라 undefined 면 필이 안 그려질 뿐 셸은 그대로 선다.
+   * 없는 탭을 임의로 켜서 사용자가 다른 화면에 있다고 오해하게 만들지 않는다.
+   */
   const current = ALL_MODULES.find((m) => matchesRoute(pathname, MODULE_ROUTE[m]));
 
-  // 허브(/admin) — 미니멀 헤더 (와이어프레임 hub 분기)
-  if (!current) {
-    return (
-      <div style={{ minHeight: "100vh" }}>
-        <header style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <BrandMark size={28} radius={9} />
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--violet-900)", letterSpacing: "-0.02em" }}>입시설명회</span>
-          </span>
-          <AvatarMenu displayName={displayName} />
-        </header>
-        <main key="hub" style={{ animation: "ds-fade-in var(--dur-base) var(--ease-out) both" }}>{children}</main>
-      </div>
-    );
-  }
-
-  // 모듈 — 상단 탭바 (명세 §1.1: 로고=허브 복귀)
   return (
     <div style={{ minHeight: "100vh" }}>
       <TopNav
@@ -67,10 +56,10 @@ export function ConsoleShell({ children, displayName }: { children: ReactNode; d
         items={ALL_MODULES.map((m) => ({ label: moduleLabel[m], value: m }))}
         value={current}
         onChange={(m) => router.push(MODULE_ROUTE[m])}
-        onBrandClick={() => router.push(ADMIN_HOME)}
+        onBrandClick={() => router.push(CONSOLE_HOME)}
         right={<AvatarMenu displayName={displayName} />}
       />
-      <main key={current} style={{ maxWidth: "var(--container-max)", margin: "0 auto", padding: "28px var(--container-pad) 60px", animation: "ds-fade-in var(--dur-base) var(--ease-out) both" }}>
+      <main key={current ?? "unmatched"} style={{ maxWidth: "var(--container-max)", margin: "0 auto", padding: "28px var(--container-pad) 60px", animation: "ds-fade-in var(--dur-base) var(--ease-out) both" }}>
         {children}
       </main>
     </div>

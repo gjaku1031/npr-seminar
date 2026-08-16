@@ -109,7 +109,7 @@
   --blur-veil: saturate(1.4) blur(14px);
 
   /* ── spacing · layout (핸드오프 tokens/spacing.css verbatim) ──
-     셸·허브·카드가 참조하는 컨테이너 폭/여백 — 누락 시 padding 선언 전체가 무효화되어
+     셸·화면·카드가 참조하는 컨테이너 폭/여백 — 누락 시 padding 선언 전체가 무효화되어
      전 화면이 가장자리에 붙는다 (2026-07-17 보완). */
   --space-1: 4px;
   --space-2: 8px;

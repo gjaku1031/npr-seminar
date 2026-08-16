@@ -4,7 +4,7 @@ import { ConsoleShell } from "@/widgets/app-shell";
 
 /**
  * 콘솔 레이아웃 — 로그인 확인 후 셸(widgets/app-shell)에 위임 (명세 §1.1).
- * 허브(/)는 미니멀 헤더, 모듈 화면은 TopNav 탭바 — 분기는 셸이 pathname으로 판단한다.
+ * 셸은 pathname 으로 현재 모듈을 골라 TopNav 탭바를 켠다.
  *
  * ★ 보호 경계 ★ — `(main)` 아래 모든 화면은 여기를 지나야 렌더된다. `currentUser()` 는
  * 매 요청 Nest 에 되물어(GET /auth/me) ADMIN 세션만 통과시킨다. 이 앱에 다른 인증 판정은
