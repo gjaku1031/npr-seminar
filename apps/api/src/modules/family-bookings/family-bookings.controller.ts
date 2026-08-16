@@ -187,6 +187,14 @@ export class FamilyBookingsController {
   @SensitiveResponse()
   public update(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: AdminUpdateDto, @Headers("idempotency-key") key: string | undefined, @CurrentActor() actor: AuthenticatedActor) { return this.management.update(id, body, actor.subject, this.key(key)); }
 
+  /** 테스트 예약 전용 — 실제 입장 기록은 되돌릴 수 없다 (서비스가 is_test 를 강제한다). */
+  @Post("admin/family-bookings/:familyBookingId/check-in-rollback") @HttpCode(200) @UseGuards(SessionGuard, RolesGuard, CsrfGuard) @Roles("ADMIN")
+  public rollbackCheckIn(
+    @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) { return this.management.rollbackCheckIn(id, actor.subject, this.key(key)); }
+
   @Post("admin/family-bookings/:familyBookingId/cancel") @HttpCode(200) @UseGuards(SessionGuard, RolesGuard, CsrfGuard) @Roles("ADMIN")
   @SensitiveResponse()
   public cancel(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: AdminCancelDto, @Headers("idempotency-key") key: string | undefined, @CurrentActor() actor: AuthenticatedActor) { return this.management.cancel(id, body.expectedVersion, body.cancellationType, actor.subject, this.key(key)); }

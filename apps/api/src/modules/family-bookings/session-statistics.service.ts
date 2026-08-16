@@ -82,7 +82,9 @@ export class SessionStatisticsService {
              coalesce(sum(case when status in ('RESERVED','CHECKED_IN')
                then case attendance_party when 'BOTH' then 2 else 1 end else 0 end),0)::bigint attendee_count
         from family_bookings
-       where session_id=${session.id}`);
+       -- 테스트 예약은 운영 숫자가 아니다. QR 재테스트가 참가자수·예약 건수를 늘리면
+       -- 그 회차의 통계가 사실과 달라진다.
+       where session_id=${session.id} and not is_test`);
     const row = rows[0] ?? EMPTY_OPERATIONS_SUMMARY;
     return {
       activeBookingCount: Number(row.active_booking_count),
@@ -152,6 +154,7 @@ export class SessionStatisticsService {
                fb.contact_digest,fb.created_at
           from family_bookings fb
          where fb.session_id=${session.id}
+           and not fb.is_test
            and ${scopeMatches}
            and (${branch}::text is null or exists (
              select 1 from family_booking_students scoped_child

@@ -33,6 +33,15 @@ export class SheetOutboxService {
   public constructor(private readonly protector: PhoneProtector) {}
 
   public async enqueueBookingEvent(transaction: Prisma.TransactionClient, input: SheetBookingEventInput): Promise<void> {
+    // 테스트 예약은 시트에 내보내지 않는다. QR 재테스트는 같은 예약을 몇 번이고 입장·취소하므로
+    // 그대로 두면 운영 예약명단 시트에 가짜 행과 중복 배송이 계속 쌓인다. 시트는 원장이 아니라
+    // 투영이므로, 투영에서 빼는 것으로 충분하다.
+    const booking = await transaction.familyBooking.findUnique({
+      where: { publicId: input.familyBookingPublicId },
+      select: { isTest: true },
+    });
+    if (booking?.isTest === true) return;
+
     const mapping = await transaction.sheetMapping.findUnique({
       where: { seminarSessionPublicId: input.seminarSessionPublicId },
       select: { id: true },
