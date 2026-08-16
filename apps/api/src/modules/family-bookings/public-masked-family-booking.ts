@@ -65,11 +65,11 @@ interface MaskableFamilyBookingCore {
   readonly cancelledAt: Date | string | null;
 }
 
-export function maskPhone(normalizedContact: string): string {
+function maskPhone(normalizedContact: string): string {
   return `${normalizedContact.slice(0, 3)}-****-${normalizedContact.slice(-4)}`;
 }
 
-export function maskPersonName(value: string): string {
+function maskPersonName(value: string): string {
   const characters = [...value.normalize("NFC").trim()];
   if (characters.length <= 1) return "*";
   if (characters.length === 2) return `${characters[0]}*`;

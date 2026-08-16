@@ -18,7 +18,7 @@ export interface User {
 }
 
 /**
- * 허브 모듈 (명세 §1.1) — v4.0에서 전화예약(phone) 모듈 삭제.
+ * 콘솔 모듈 (명세 §1.1) — TopNav 탭 목록의 진실원. v4.0에서 전화예약(phone) 모듈 삭제.
  * 모바일 프리뷰(preview)도 삭제했다: 학부모 앱이 루트(`/`)에서 실제로 돌아가므로
  * 콘솔 안에서 폰 프레임으로 시연할 이유가 없어졌다.
  */
@@ -46,10 +46,6 @@ export const moduleLabel: Record<ModuleKey, string> = {
   scanner: "QR 스캐너",
 };
 
-export const roleLabel: Record<UserRole, string> = {
-  admin: "관리자",
-};
-
 export const ALL_MODULES: ModuleKey[] = [
   "students",
   "student-status",
@@ -66,8 +62,4 @@ export const ALL_MODULES: ModuleKey[] = [
  */
 export function canAccessModule(role: UserRole, module: ModuleKey): boolean {
   return role === "admin" && ALL_MODULES.includes(module);
-}
-
-export function allowedModules(role: UserRole): ModuleKey[] {
-  return role === "admin" ? ALL_MODULES : [];
 }

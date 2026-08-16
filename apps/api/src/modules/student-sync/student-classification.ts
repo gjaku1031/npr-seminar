@@ -53,10 +53,6 @@ export function classifyStudentAssignment(
   return { included: true, exclusionReason: null };
 }
 
-export function isSpecialStudentClass(className: string): boolean {
-  return SPECIAL_CLASS_PATTERN.test(studentClassBaseName(className));
-}
-
 export function isScienceStudentClass(className: string): boolean {
   const baseClass = studentClassBaseName(className);
   return baseClass.startsWith("과") || SCIENCE_CLASS_PATTERN.test(baseClass);

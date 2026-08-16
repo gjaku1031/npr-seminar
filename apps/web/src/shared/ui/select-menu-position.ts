@@ -40,11 +40,11 @@ export interface SelectMenuPosition {
 /** 뷰포트 가장자리 최소 여백(8–12px 범위 안). */
 export const SELECT_MENU_MARGIN = 10;
 /** 트리거와 메뉴 사이 틈. */
-export const SELECT_MENU_GAP = 6;
+const SELECT_MENU_GAP = 6;
 /** 하한 폭 — 트리거가 더 좁아도 (자리가 있는 한) 이 아래로는 내려가지 않는다. */
 export const SELECT_MENU_MIN_WIDTH = 132;
 /** 상한 높이 — 기본 Select 메뉴와 같은 값. 남는 공간이 더 좁으면 그쪽에 맞춘다. */
-export const SELECT_MENU_MAX_HEIGHT = 280;
+const SELECT_MENU_MAX_HEIGHT = 280;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

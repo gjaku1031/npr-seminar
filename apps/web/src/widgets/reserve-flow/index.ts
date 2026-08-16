@@ -5,7 +5,7 @@ export type { ReserveFlowProps, ReserveInitialMode } from "./ui/ReserveFlow";
 export { ManageBookingPanel } from "./ui/ManageBookingPanel";
 export type { ManageBookingPanelProps } from "./ui/ManageBookingPanel";
 // 앱 크롬 중 외부 뷰(booking-access)에서 재사용하는 공개 요소만 노출한다.
-export { ErrorNote, FlowHeader } from "./ui/MobileChrome";
+export { FlowHeader } from "./ui/MobileChrome";
 // 루트 연락처 조회와 개인 링크 교환이 공유하는 연락처 입력 표현.
 export { ContactEntryForm } from "./ui/ContactEntry";
 export type { ContactEntryFormProps } from "./ui/ContactEntry";

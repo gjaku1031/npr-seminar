@@ -9,7 +9,7 @@
 /** offline ACTIVE 카드가 반드시 말해야 하는 고정 문구. */
 export const OFFLINE_PRESENCE_LABEL = "오프라인 · 페어링 유지";
 /** online 카드 문구 — 연결됨(heartbeat)·온라인 을 함께 말한다. */
-export const ONLINE_PRESENCE_LABEL = "연결됨 · 온라인";
+const ONLINE_PRESENCE_LABEL = "연결됨 · 온라인";
 
 export interface ScannerPresence {
   online: boolean;

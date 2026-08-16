@@ -13,13 +13,13 @@ import { ArrowLeft } from "lucide-react";
 import { BrandMark } from "@/shared/ui";
 
 /** 앱 뷰포트 폭 — ReserveView 의 max-width 480 과 같은 값. */
-export const APP_MAX_WIDTH = 480;
+const APP_MAX_WIDTH = 480;
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** 고정 요소를 앱 폭 안에 가둔다 (데스크톱에서 화면 전체로 퍼지지 않게). */
-export const appViewportStyle: CSSProperties = {
+const appViewportStyle: CSSProperties = {
   width: `min(100%, ${APP_MAX_WIDTH}px)`,
   left: "50%",
   transform: "translateX(-50%)",

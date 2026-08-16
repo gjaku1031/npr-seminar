@@ -1,12 +1,9 @@
 // features/manage-family-booking 공개 API (barrel).
-export { BOOKING_PAGE_SIZE, useBookableSessions, useFamilyBookings } from "./model/useFamilyBookings";
-export type { BookingFilters, FamilyBookingsState, SessionOptionsState } from "./model/useFamilyBookings";
+export { useBookableSessions } from "./model/useBookableSessions";
+export type { SessionOptionsState } from "./model/useBookableSessions";
 
 export { ROSTER_PAGE_SIZE, useSessionRoster } from "./model/useSessionRoster";
 export type { RosterFilters, SessionRosterState } from "./model/useSessionRoster";
-
-export { useBookingEvents } from "./model/useBookingEvents";
-export type { BookingEventsState } from "./model/useBookingEvents";
 
 export { useRosterEventLineage } from "./model/useRosterEventLineage";
 export type { RosterEventLineageState } from "./model/useRosterEventLineage";

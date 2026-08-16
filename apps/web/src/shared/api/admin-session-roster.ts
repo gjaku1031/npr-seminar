@@ -76,7 +76,7 @@ export async function listAdminSessionRoster(
  * 담은 ADMIN 전용 민감 데이터다 — Blob 을 로깅·저장하지 않는다.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-export const ROSTER_XLSX_CONTENT_TYPE =
+const ROSTER_XLSX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /** XLSX 내보내기가 받는 필터 — 목록과 같되 페이지 파라미터는 없다(서버가 전체를 뽑는다). */

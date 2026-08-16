@@ -36,10 +36,6 @@ export function sendScannerHeartbeat(
   });
 }
 
-export function getCurrentScannerShift(signal?: AbortSignal): Promise<ScannerShiftState> {
-  return apiRequest<ScannerShiftState>("/scanner/shifts/current", { method: "GET", signal });
-}
-
 /** 기기·지점·게이트는 서버가 세션에서 파생한다 — 회차만 고른다. */
 export function createScannerShiftLock(
   seminarSessionId: string,

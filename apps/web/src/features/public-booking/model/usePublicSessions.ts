@@ -7,12 +7,11 @@
  * 클라이언트가 예약 건수로 마감 여부를 추정하지 않는다.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   defaultErrorMessage,
   isAborted,
   listPublicSeminarSessions,
-  type Branch,
   type PublicSeminarSession,
 } from "@/shared/api";
 
@@ -60,23 +59,4 @@ export function usePublicSessions(): PublicSessionsState {
   }, []);
 
   return { sessions, loading, error, reload };
-}
-
-/**
- * 캠퍼스 노출 규칙 (계약):
- * - ALL 회차(branch=null)는 **모든 캠퍼스**에 보인다.
- * - BRANCH 회차는 **자기 지점**에만 보인다.
- */
-export function isVisibleAtBranch(session: PublicSeminarSession, branch: Branch): boolean {
-  return session.scope === "ALL" || session.branch === branch;
-}
-
-export function useSessionsByBranch(
-  sessions: PublicSeminarSession[],
-  branch: Branch | null,
-): PublicSeminarSession[] {
-  return useMemo(
-    () => (branch === null ? [] : sessions.filter((s) => isVisibleAtBranch(s, branch))),
-    [sessions, branch],
-  );
 }

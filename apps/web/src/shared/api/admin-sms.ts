@@ -228,7 +228,7 @@ export async function previewSmsTargets(
 /* ── 발송 ────────────────────────────────────────────────────────────────── */
 
 /** 프리뷰 이후 대상·본문·회차가 바뀌어 토큰이 무효해졌다 — **아무것도 큐에 들어가지 않았다**. */
-export const SMS_PREVIEW_TOKEN_CHANGED_CODE = "SMS_PREVIEW_TOKEN_CHANGED";
+const SMS_PREVIEW_TOKEN_CHANGED_CODE = "SMS_PREVIEW_TOKEN_CHANGED";
 
 /**
  * 실제 발송 — **확인 대화상자에서 사용자가 명시적으로 확인했을 때만** 호출한다.

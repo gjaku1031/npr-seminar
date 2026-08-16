@@ -1,6 +1,6 @@
 export const RESERVATION_SHEET_TITLE = "예약명단";
 export const RESERVATION_SHEET_ID = 1777564107;
-export const RESERVATION_SHEET_COLUMN_COUNT = 30;
+const RESERVATION_SHEET_COLUMN_COUNT = 30;
 
 export const FAMILY_SUMMARY_SHEET_TITLE = "예약집계";
 export const FAMILY_SUMMARY_SHEET_ID = 202607180;
@@ -43,7 +43,7 @@ export interface ExactSheetIdentity {
   readonly columnCount: number;
 }
 
-export function locateExactSheet(
+function locateExactSheet(
   sheets: readonly SheetIdentity[],
   expected: ExactSheetIdentity,
 ): SheetIdentity | null {
