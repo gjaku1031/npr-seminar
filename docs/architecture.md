@@ -2,6 +2,8 @@
 
 > **현재 상태(2026-07-17):** 저장소는 Next.js `apps/web` + NestJS `apps/api` 모노레포로 전환되었다. 이 문서는 전환 전 Next.js 풀스택 구현을 보존한 역사 문서이며, 현재 런타임이나 DB 소유권의 기준이 아니다. 현재 결정은 [monorepo.md](monorepo.md)와 [NestJS 인수인계서](specs/nestjs-backend-handoff.md)를 따른다.
 >
+> **⚠️ 2026-08:** 이 문서가 서술하는 코드는 **저장소에서 제거되었다** — `server/db`·`server/repositories`(drizzle·memory)·도메인 서비스·`features/<slice>/api/actions.ts`·`drizzle/` 마이그레이션이 모두 사라졌다. 경로를 찾아 헤매지 말 것. 지금도 유효한 것은 **§4 레이어 규율(FSD 단방향 의존·barrel 공개 API)** 뿐이고, 그 현재 형태는 [`apps/web/eslint.config.mjs`](../apps/web/eslint.config.mjs)와 각 레이어 README 가 정의한다. §6 DB 교체 격리 설계는 이제 해당 사항이 없다 — 데이터 소유자는 `apps/api` 다.
+>
 > **대상:** `apps/web` — 기존 Next.js **풀스택** 구현 (FE + 임시 서버 계층 + DB)
 > **참고 구조:** `fe-architecture-v2` (NPR ERP FE 모노레포) — **설계 뼈대(레이어·규율)만 승계, 디자인 시스템 제외**
 > **핵심 제약:** DB는 초기 Vercel 플러그인(Neon)으로 시작하되 **이후 1회 변경될 수 있음.** 변경 후에도 구현된 기능이 그대로 동작해야 함 → §6 격리 설계가 이 문서의 중심.
