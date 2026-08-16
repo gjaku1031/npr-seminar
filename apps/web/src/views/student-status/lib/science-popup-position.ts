@@ -41,7 +41,7 @@ export const SCIENCE_POPUP_MIN_WIDTH = 176;
 /** 뷰포트 가장자리 최소 여백. */
 export const SCIENCE_POPUP_MARGIN = 12;
 /** 트리거와 팝오버 사이 틈. */
-export const SCIENCE_POPUP_GAP = 8;
+const SCIENCE_POPUP_GAP = 8;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

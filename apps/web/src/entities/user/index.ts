@@ -2,8 +2,6 @@
 export {
   ALL_MODULES,
   canAccessModule,
-  allowedModules,
   moduleLabel,
-  roleLabel,
 } from "./model/user";
 export type { User, UserRole, ModuleKey } from "./model/user";

@@ -9,18 +9,9 @@
 /** 캠퍼스 3종 (명세 §2) */
 export type Campus = "A캠퍼스" | "B캠퍼스" | "C캠퍼스";
 
-export const CAMPUSES: Campus[] = ["A캠퍼스", "B캠퍼스", "C캠퍼스"];
-
 /** 캠퍼스별 발신번호·문의전화 — 발신번호 = 문의전화 (명세 §2 CAMPUS_INFO) */
 export const CAMPUS_INFO: Record<Campus, { sender: string; inquiry: string }> = {
   A캠퍼스: { sender: "02-000-0001", inquiry: "02-000-0001" },
   B캠퍼스: { sender: "02-000-0002", inquiry: "02-000-0002" },
   C캠퍼스: { sender: "02-000-0003", inquiry: "02-000-0003" },
 };
-
-export function isCampus(value: string): value is Campus {
-  return (CAMPUSES as string[]).includes(value);
-}
-
-/** 설명회의 캠퍼스 범위 — '전체'는 모든 캠퍼스 예약 화면에 노출 (명세 §10.1) */
-export type CampusScope = Campus | "전체";

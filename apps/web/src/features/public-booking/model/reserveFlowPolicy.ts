@@ -44,7 +44,7 @@ function isVisibleAtBranch(session: PublicSeminarSession, branch: Branch): boole
  * 유형별 회차 가시성 — GUEST 는 캠퍼스 가시성 + guestBookingEnabled=true 를 동시에 만족해야 한다.
  * ENROLLED 는 캠퍼스 가시성만 본다.
  */
-export function isSessionVisibleForType(
+function isSessionVisibleForType(
   session: PublicSeminarSession,
   branch: Branch,
   type: ParticipantType,

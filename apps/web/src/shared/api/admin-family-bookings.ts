@@ -36,7 +36,7 @@ export interface ListAdminFamilyBookingsParams {
   pageSize?: number;
 }
 
-export async function listAdminFamilyBookings(
+async function listAdminFamilyBookings(
   params: ListAdminFamilyBookingsParams = {},
   signal?: AbortSignal,
 ): Promise<FamilyBookingPage> {
@@ -60,6 +60,9 @@ export async function listAdminFamilyBookings(
  * 계약에 집계 엔드포인트가 없어 목록의 페이지 메타를 센다. pageSize=1 이라 한 행만 오지만
  * `totalItems` 는 필터 전체 기준이다 — 한 페이지를 전체인 척하는 것과 정반대다.
  * 상태별 숫자가 필요하면 status 별로 한 번씩 부른다(요청 수는 상태 수만큼으로 끝난다).
+ *
+ * 목록 자체를 그리는 화면은 없다 — 그래서 `listAdminFamilyBookings` 는 이 파일 밖으로
+ * 나가지 않는다. 통계 화면의 폴백 집계(admin-operations)가 유일한 소비자다.
  */
 export async function countAdminFamilyBookings(
   params: Omit<ListAdminFamilyBookingsParams, "page" | "pageSize"> = {},
@@ -82,7 +85,7 @@ export interface ListBookingEventsParams {
  * 행마다 미리 부르지 않는다 — 명단 한 페이지가 N+1 요청을 쏘게 된다. 사용자가 로그를
  * 열었을 때만 그 가족 1건을 부른다.
  */
-export async function listFamilyBookingEvents(
+async function listFamilyBookingEvents(
   familyBookingId: string,
   params: ListBookingEventsParams = {},
   signal?: AbortSignal,
@@ -352,8 +355,8 @@ export async function createAdminEnrolledFamilyBooking(
 
 /* ── 계약 제약 · 오류 코드 ──────────────────────────────────────────────── */
 
-export const BOOKING_REASON_MIN_LENGTH = 3;
-export const BOOKING_REASON_MAX_LENGTH = 500;
+const BOOKING_REASON_MIN_LENGTH = 3;
+const BOOKING_REASON_MAX_LENGTH = 500;
 
 export function isValidBookingReason(reason: string): boolean {
   const trimmed = reason.trim();
@@ -365,7 +368,3 @@ export const CONTACT_MAX_LENGTH = 40;
 
 /** 낙관적 잠금 실패 — 다른 사람이 먼저 바꿨다는 뜻이므로 다시 읽어야 한다. */
 export const BOOKING_VERSION_CONFLICT_CODE = "FAMILY_BOOKING_VERSION_CONFLICT";
-export const BOOKING_NOT_EDITABLE_CODE = "FAMILY_BOOKING_NOT_EDITABLE";
-export const ACTIVE_BOOKING_EXISTS_CODE = "ACTIVE_FAMILY_BOOKING_EXISTS";
-/** 고른 대표 연락처가 그 학생의 저장된 모/부 연락처와 다르다 — 추측하지 말고 다시 고르게 한다. */
-export const STUDENT_CONTACT_MISMATCH_CODE = "STUDENT_CONTACT_OWNERSHIP_MISMATCH";

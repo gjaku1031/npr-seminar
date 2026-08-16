@@ -265,7 +265,7 @@ export type ReviewReasonCode =
  * 사유 코드 → 고정 한글 라벨. 화면은 이 표로만 그린다 — 서버가 문구를 주지 않고 코드만 주기
  * 때문이다. 계약에 정의된 알려진 enum 전부를 덮는다.
  */
-export const REVIEW_REASON_LABELS: Record<ReviewReasonCode, string> = {
+const REVIEW_REASON_LABELS: Record<ReviewReasonCode, string> = {
   MULTIPLE_MATH_CLASS: "수학 정규반 중복",
   NO_RECOGNIZABLE_CLASS: "인식 가능한 반 없음",
   UNIT_UNRESOLVED: "단위 미확정",
@@ -453,13 +453,7 @@ export async function listReviewRequiredStudents(
  * `AdminStudentPage.summary` 를 쓰지 않는 이유: 그 요약은 분류별 분해라 대표 반 기준으로
  * 학생을 가른 수다. "조건에 맞는 학생이 몇 명인가"라는 단일 결과 수는 `page.totalItems` 다.
  */
-export async function countAdminStudents(
-  params: Omit<ListAdminStudentsParams, "page" | "pageSize"> = {},
-  signal?: AbortSignal,
-): Promise<number> {
-  const page = await listAdminStudents({ ...params, page: 1, pageSize: 1 }, signal);
-  return page.page.totalItems;
-}
+
 
 export async function getStudentSyncStatus(signal?: AbortSignal): Promise<StudentSyncStatus> {
   return apiRequest<StudentSyncStatus>("/admin/student-sync/status", { method: "GET", signal });
@@ -493,14 +487,6 @@ export async function startManualStudentSync(
 }
 
 /** 계약 reason 제약 — 화면이 보내기 전에 같은 기준으로 막는다. */
-export const SYNC_REASON_MIN_LENGTH = 3;
-export const SYNC_REASON_MAX_LENGTH = 500;
-
-export function isValidSyncReason(reason: string): boolean {
-  const trimmed = reason.trim();
-  return trimmed.length >= SYNC_REASON_MIN_LENGTH && trimmed.length <= SYNC_REASON_MAX_LENGTH;
-}
-
 /** 409 중 "지금은 시작할 수 없다" 를 뜻하는 계약 코드들. */
 export const SYNC_ALREADY_RUNNING_CODE = "STUDENT_SYNC_ALREADY_RUNNING";
 export const SYNC_CIRCUIT_OPEN_CODE = "TONG_AUTH_CIRCUIT_OPEN";

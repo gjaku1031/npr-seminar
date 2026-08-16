@@ -9,7 +9,7 @@ export type { BookingProof, BookingProofState } from "./model/useBookingProof";
 export { useOtpFlow } from "./model/useOtpFlow";
 export type { OtpFlowState, OtpStage, UseOtpFlowOptions } from "./model/useOtpFlow";
 
-export { isVisibleAtBranch, usePublicSessions, useSessionsByBranch } from "./model/usePublicSessions";
+export { usePublicSessions } from "./model/usePublicSessions";
 export type { PublicSessionsState } from "./model/usePublicSessions";
 
 export {
@@ -18,7 +18,6 @@ export {
   GUEST_BOOKING_DISABLED_MESSAGE,
   guestEntryState,
   isSessionBookableForType,
-  isSessionVisibleForType,
   manageErrorMessageForCode,
   moveTargetSessions,
   sessionsForType,

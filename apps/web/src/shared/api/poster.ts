@@ -21,19 +21,19 @@ import type { PosterDescriptor, PosterMediaType, PosterResource } from "./contra
 /* ── 상수 ─────────────────────────────────────────────────────────────────── */
 
 /** 계약 multipart 필드명 — 정확히 이 이름이어야 한다. */
-export const POSTER_UPLOAD_FIELD = "poster";
+const POSTER_UPLOAD_FIELD = "poster";
 
 /** 클라이언트 상한(계약과 동일) — 10,485,760 바이트(10 MiB). */
 export const MAX_POSTER_BYTES = 10_485_760;
 
 /** 허용 미디어 타입 — 이 순서로 `<input accept>` 에도 쓴다. */
-export const POSTER_ACCEPT_MEDIA_TYPES: readonly PosterMediaType[] = ["image/png", "image/jpeg", "image/webp"];
+const POSTER_ACCEPT_MEDIA_TYPES: readonly PosterMediaType[] = ["image/png", "image/jpeg", "image/webp"];
 
 /** `<input type="file" accept>` 속성값. */
 export const POSTER_ACCEPT_ATTR = POSTER_ACCEPT_MEDIA_TYPES.join(",");
 
 /** 공개 이미지 경로 접두 — imageUrl 은 반드시 이 뒤에 64 소문자 hex 가 온다. */
-export const POSTER_IMAGE_PATH_PREFIX = "/api/v1/public/poster/image/";
+const POSTER_IMAGE_PATH_PREFIX = "/api/v1/public/poster/image/";
 
 /** sha256 hex(버전) — 소문자 64자리. */
 const POSTER_VERSION_PATTERN = /^[0-9a-f]{64}$/;
