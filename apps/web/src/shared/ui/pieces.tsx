@@ -1,54 +1,12 @@
 "use client";
 
 /**
- * 콘솔 공용 조각 — QR 플레이스홀더·상태 배지·통계 카드·빈 상태·KV.
+ * 콘솔 공용 조각 — 통계 카드·빈 상태·KV.
  * 핸드오프 ui_kits/npr-admin/shared.jsx 이식 (window 전역 → 모듈).
- * status는 string으로 받는다 — shared는 도메인(entities)을 모른다 (설계 §4.1).
+ * shared 는 도메인(entities)을 모른다 (설계 §4.1).
  */
 
-import type { CSSProperties, ReactNode } from "react";
-import { Badge } from "./Badge";
-
-export function nprQrCells(code: string, n = 11): boolean[] {
-  let seed = 0;
-  for (let i = 0; i < code.length; i++) seed = (seed * 31 + code.charCodeAt(i)) >>> 0;
-  const out: boolean[] = [];
-  for (let i = 0; i < n * n; i++) {
-    seed = (seed * 1103515245 + 12345) >>> 0;
-    out.push((seed >> 16) % 2 === 0);
-  }
-  return out;
-}
-
-/** QR 이미지 플레이스홀더 (실 QR 연동 전 — 명세 §12) */
-export function QrBox({ code = "NPR-0000", size = 120, style }: { code?: string; size?: number; style?: CSSProperties }) {
-  const n = 11;
-  const cells = nprQrCells(code, n);
-  return (
-    <div
-      style={{
-        width: size, height: size, background: "#FFFFFF",
-        border: "1px solid var(--mint-200)", borderRadius: "var(--radius-xs)",
-        padding: size * 0.08,
-        display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 1,
-        boxSizing: "border-box", flexShrink: 0,
-        ...style,
-      }}
-    >
-      {cells.map((on, i) => (
-        <span key={i} style={{ background: on ? "var(--violet-950)" : "transparent", borderRadius: 0.5 }} />
-      ))}
-    </div>
-  );
-}
-
-/** 예약 상태 배지 — reserved/entered/no_show/cancelled (명세 §11 표기) */
-export function ResStatusBadge({ status, size = "md" }: { status: string; size?: "sm" | "md" }) {
-  if (status === "entered") return <Badge tone="success" dot size={size}>입장 완료</Badge>;
-  if (status === "cancelled") return <Badge tone="danger" size={size}>취소됨</Badge>;
-  if (status === "no_show") return <Badge tone="warning" size={size}>노쇼</Badge>;
-  return <Badge tone="warning" dot size={size}>미체크</Badge>;
-}
+import type { ReactNode } from "react";
 
 const STAT_TONES: Record<string, string> = {
   brand: "var(--violet-800)",

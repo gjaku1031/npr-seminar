@@ -19,7 +19,7 @@ export const ROSTER_FILTER_SPACER_WIDTH = ROSTER_FILTER_SEARCH_WIDTH;
 export const ROSTER_FILTER_LABEL_WIDTH = 46;
 
 /** 한 줄 안 요소 간격. */
-export const ROSTER_FILTER_ROW_GAP = 12;
+const ROSTER_FILTER_ROW_GAP = 12;
 
 /**
  * 필터 Tag 전용 치수 — 공용 Tag 보다 촘촘하게 죄어 두 줄 필터가 각 줄 안에서 자연스럽게

@@ -98,7 +98,7 @@ export interface ListSeminarsParams {
   pageSize?: number;
 }
 
-export async function listAdminSeminars(
+async function listAdminSeminars(
   params: ListSeminarsParams = {},
   signal?: AbortSignal,
 ): Promise<SeminarPage> {
@@ -119,7 +119,7 @@ export interface ListSeminarSessionsParams {
  * 한 설명회의 회차 한 페이지 — 계약대로 page/pageSize 를 보낸다. 각 항목의 operationsSummary 를
  * 서버 원시 필드명에서 화면 이름으로 정규화해 돌려준다.
  */
-export async function listSeminarSessions(
+async function listSeminarSessions(
   seminarId: string,
   params: ListSeminarSessionsParams = {},
   signal?: AbortSignal,

@@ -152,7 +152,6 @@ export function isFreshPairingCode(result: PairingCodeCreateResult): result is F
 }
 
 /** 계약 pattern: 혼동 문자(0,1,I,O)를 뺀 대문자 6자. */
-export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 6;
 export const PAIRING_CODE_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/;
 
@@ -1071,7 +1070,7 @@ export interface AdminFamilyBookingUpdateRequest {
  */
 export type AdminCancellationType = "PHONE" | "TEACHER" | "OTHER";
 
-export const ADMIN_CANCELLATION_TYPE_LABELS: Record<AdminCancellationType, string> = {
+const ADMIN_CANCELLATION_TYPE_LABELS: Record<AdminCancellationType, string> = {
   PHONE: "전화취소",
   TEACHER: "선생님취소",
   OTHER: "기타취소",
@@ -1411,9 +1410,7 @@ export interface ReplayedQrRotation {
 
 export type QrRotationResult = FreshQrRotation | ReplayedQrRotation;
 
-export function isFreshRotation(result: QrRotationResult): result is FreshQrRotation {
-  return result.replayed === false;
-}
+
 
 /** 계약 PublicSurveyResponseCreateRequest — 별점(필수)과 후기(선택)만 받는다. */
 export interface PublicSurveyResponseCreateRequest {

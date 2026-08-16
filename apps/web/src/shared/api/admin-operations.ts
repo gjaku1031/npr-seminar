@@ -101,32 +101,6 @@ export function operationsSummaryFrom(
   };
 }
 
-export async function getSessionOperationsSummary(
-  seminarSessionId: string,
-  signal?: AbortSignal,
-): Promise<SessionOperationsSummary> {
-  try {
-    const body = await apiRequest<OperationsSummaryResponse>(
-      `/admin/seminar-sessions/${encodeURIComponent(seminarSessionId)}/operations-summary`,
-      { method: "GET", signal },
-    );
-    return operationsSummaryFromServer(body);
-  } catch (error) {
-    if (!isAggregateEndpointUnavailable(error)) throw error;
-    // 폴백: 상태별 건수를 병렬로 센다. 각 요청은 pageSize=1 이지만 totalItems 는 필터 전체 기준이다.
-    const [reservedCount, checkedInCount, noShowCount, cancelledCount] = await Promise.all([
-      countAdminFamilyBookings({ sessionId: seminarSessionId, status: "RESERVED" }, signal),
-      countAdminFamilyBookings({ sessionId: seminarSessionId, status: "CHECKED_IN" }, signal),
-      countAdminFamilyBookings({ sessionId: seminarSessionId, status: "NO_SHOW" }, signal),
-      countAdminFamilyBookings({ sessionId: seminarSessionId, status: "CANCELLED" }, signal),
-    ]);
-    return operationsSummaryFrom({ reservedCount, checkedInCount, noShowCount, cancelledCount }, "derived");
-  }
-}
-
-/* ── 통계 (Stats 화면) ─────────────────────────────────────────────────── */
-
-/** 단위별 절대 집계 한 행. 기존 운영 건수도 호환을 위해 함께 둔다. */
 export interface UnitStat {
   /** 표시 라벨(전체·초등·중1…). 서버가 라벨을 정한다. */
   unit: string;

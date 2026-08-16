@@ -9,18 +9,9 @@
 /** 캠퍼스 3종 (명세 §2) */
 export type Campus = "송파캠퍼스" | "위례캠퍼스" | "광진캠퍼스";
 
-export const CAMPUSES: Campus[] = ["송파캠퍼스", "위례캠퍼스", "광진캠퍼스"];
-
 /** 캠퍼스별 발신번호·문의전화 — 발신번호 = 문의전화 (명세 §2 CAMPUS_INFO) */
 export const CAMPUS_INFO: Record<Campus, { sender: string; inquiry: string }> = {
   송파캠퍼스: { sender: "02-413-2652", inquiry: "02-413-2652" },
   위례캠퍼스: { sender: "02-425-2652", inquiry: "02-425-2652" },
   광진캠퍼스: { sender: "02-422-2652", inquiry: "02-422-2652" },
 };
-
-export function isCampus(value: string): value is Campus {
-  return (CAMPUSES as string[]).includes(value);
-}
-
-/** 설명회의 캠퍼스 범위 — '전체'는 모든 캠퍼스 예약 화면에 노출 (명세 §10.1) */
-export type CampusScope = Campus | "전체";

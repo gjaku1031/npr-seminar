@@ -32,32 +32,24 @@ export type { SessionMutationOptions } from "./auth";
 
 export {
   createScannerPairingCode,
-  getScannerDevice,
   listAllScannerDevices,
-  listScannerDevices,
-  reconcileScannerRevoke,
-  revokeScannerDevice,
 } from "./scanner-admin";
 export type {
   DurableCallOptions,
   ListScannerDevicesParams,
-  RevokeReconciliation,
 } from "./scanner-admin";
 
 /* ── 관리자 학생 현황 ──────────────────────────────────────────────────── */
 
 export {
   campusScopedLabel,
-  countAdminStudents,
   evaluateManualSyncGate,
   getStudentSyncStatus,
-  isValidSyncReason,
   listAdminStudents,
   listReviewRequiredStudents,
   resolveHomeroomTeacher,
   resolveStudentSummaryCounts,
   REVIEW_REASON_FALLBACK_LABEL,
-  REVIEW_REASON_LABELS,
   reviewReasonLabel,
   startManualStudentSync,
   studentReservationLabel,
@@ -66,8 +58,6 @@ export {
   SYNC_BLOCKED_CIRCUIT_OPEN,
   SYNC_BLOCKED_SOURCE_NOT_READY,
   SYNC_CIRCUIT_OPEN_CODE,
-  SYNC_REASON_MAX_LENGTH,
-  SYNC_REASON_MIN_LENGTH,
 } from "./admin-students";
 export type {
   AdminStudentCanonicalTeacher,
@@ -89,9 +79,7 @@ export type {
 /* ── 관리자 설명회 · 회차 ──────────────────────────────────────────────── */
 
 export {
-  listAdminSeminars,
   listBookableSessions,
-  listSeminarSessions,
   listSessionSurveyResponses,
   normalizeAdminSeminarSession,
   normalizeSessionOperationsSummary,
@@ -135,25 +123,17 @@ export type {
 } from "./admin-session-roster";
 
 export {
-  ACTIVE_BOOKING_EXISTS_CODE,
-  BOOKING_NOT_EDITABLE_CODE,
-  BOOKING_REASON_MAX_LENGTH,
   BOOKING_EVENT_PAGE_LIMIT_MAX,
-  BOOKING_REASON_MIN_LENGTH,
   BOOKING_VERSION_CONFLICT_CODE,
   cancelAdminFamilyBooking,
   changeFamilyBookingAttendanceParty,
   collectFamilyBookingEvents,
   CONTACT_MAX_LENGTH,
   CONTACT_MIN_LENGTH,
-  countAdminFamilyBookings,
   createAdminEnrolledFamilyBooking,
   createAdminGuestFamilyBooking,
   getAdminFamilyBooking,
   isValidBookingReason,
-  listAdminFamilyBookings,
-  listFamilyBookingEvents,
-  STUDENT_CONTACT_MISMATCH_CODE,
 } from "./admin-family-bookings";
 export type {
   AdminBookingMutationOptions,
@@ -180,7 +160,6 @@ export {
   removeSmsTemplate,
   SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE,
   SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE,
-  SMS_PREVIEW_TOKEN_CHANGED_CODE,
   SMS_TEMPLATE_KEY_CONFLICT_CODE,
   SMS_TEMPLATE_VERSION_CONFLICT_CODE,
   smsContentErrorMessage,
@@ -218,14 +197,11 @@ export {
   checkInFamilyManually,
   createScannerShiftLock,
   getCurrentScanner,
-  getCurrentScannerShift,
   listScannerCheckInSessions,
   listScannerManualCandidates,
   sendScannerHeartbeat,
 } from "./scanner-device";
 
-export { releaseCurrentScannerShift } from "./scanner-shift-release";
-export type { ReleaseShiftOutcome } from "./scanner-shift-release";
 
 export { reconcileScannerUnpair, unpairCurrentScanner } from "./scanner-device-unpair";
 export type { UnpairReconciliation } from "./scanner-device-unpair";
@@ -246,9 +222,6 @@ export {
   parsePosterResource,
   parseUploadedPoster,
   POSTER_ACCEPT_ATTR,
-  POSTER_ACCEPT_MEDIA_TYPES,
-  POSTER_IMAGE_PATH_PREFIX,
-  POSTER_UPLOAD_FIELD,
   posterFileRejectionMessage,
   posterUploadErrorMessage,
   publicPosterErrorMessage,

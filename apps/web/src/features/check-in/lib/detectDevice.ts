@@ -8,7 +8,7 @@
 
 export type ScannerDeviceType = "iPad" | "iPhone" | "Android 폰" | "Android 태블릿" | "Mac" | "PC";
 
-export function detectScannerDeviceType(): ScannerDeviceType {
+function detectScannerDeviceType(): ScannerDeviceType {
   if (typeof navigator === "undefined") return "PC";
 
   const ua = navigator.userAgent;

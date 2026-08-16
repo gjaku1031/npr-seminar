@@ -60,7 +60,7 @@ function parseActor(value: unknown): CurrentActor | null {
  * 왕복이 줄고 무엇보다 한 화면이 서로 다른 actor 를 보는 일이 없어진다.
  * fetch 자체는 `no-store` 라 세션 판정이 요청을 넘어 재사용되지 않는다.
  */
-export const fetchCurrentActor = cache(async (): Promise<CurrentActor | null> => {
+const fetchCurrentActor = cache(async (): Promise<CurrentActor | null> => {
   const requestHeaders = await headers();
 
   // 쿠키가 아예 없으면 세션도 없다 — 왕복을 아낀다. (쿠키 '존재'를 인증으로 쓰는 것이 아니라,

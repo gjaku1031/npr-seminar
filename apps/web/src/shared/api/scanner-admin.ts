@@ -12,7 +12,6 @@ import { apiRequest } from "./client";
 import { isApiError } from "./problem";
 import type {
   Branch,
-  DeviceRevocationRequest,
   PairingCodeCreateRequest,
   PairingCodeCreateResult,
   ScannerDevice,
@@ -35,7 +34,7 @@ export interface ListScannerDevicesParams {
   pageSize?: number;
 }
 
-export function listScannerDevices(
+function listScannerDevices(
   params: ListScannerDevicesParams = {},
   signal?: AbortSignal,
 ): Promise<ScannerDevicePage> {
@@ -71,7 +70,7 @@ export async function listAllScannerDevices(
   return [first, ...rest].flatMap((page) => page.items);
 }
 
-export function getScannerDevice(deviceId: string, signal?: AbortSignal): Promise<ScannerDeviceDetail> {
+function getScannerDevice(deviceId: string, signal?: AbortSignal): Promise<ScannerDeviceDetail> {
   return apiRequest<ScannerDeviceDetail>(`/admin/scanner-devices/${encodeURIComponent(deviceId)}`, {
     method: "GET",
     signal,
@@ -104,65 +103,6 @@ export function createScannerPairingCode(
  *
  * 연결 해제 — durable 상태 전이(hard delete 아님).
  * 세션·presence·shift lock 이 즉시 무효화되고 기기 identity 와 이력은 보존된다.
- */
-export function revokeScannerDevice(
-  deviceId: string,
-  body: DeviceRevocationRequest,
-  options: DurableCallOptions,
-): Promise<ScannerDevice> {
-  return apiRequest<ScannerDevice>(`/admin/scanner-devices/${encodeURIComponent(deviceId)}/revoke`, {
-    method: "POST",
-    body,
-    idempotencyKey: options.idempotencyKey,
-    signal: options.signal,
-  });
-}
-
-/**
- * 해제 결과가 미상일 때(네트워크·5xx) 기기 상세로 실제 상태를 되묻는다.
- * 응답 유실 ≠ 실패 — 서버가 이미 해제했을 수 있다.
- * `active`/`unknown` 이면 호출부는 **같은 키를 유지**하고 재시도를 제공해야 한다.
- */
-export type RevokeReconciliation =
-  /** durable 상태가 REVOKED 로 전이됐다 — 이 해제가 적용됐다. */
-  | { kind: "revoked"; device: ScannerDevice }
-  /**
-   * 기기가 스스로 해제해 UNPAIRED 다. 더는 연결돼 있지 않지만 **관리자 해제가 적용된 것은
-   * 아니다**(감사 이벤트가 UNPAIRED_BY_DEVICE 로 다르다). 성공이라고 말하지 않는다.
-   */
-  | { kind: "unpaired-by-device"; device: ScannerDevice }
-  /** 아직 ACTIVE — 해제되지 않았다. */
-  | { kind: "active"; device: ScannerDevice }
-  /** 확인 자체가 실패했다. */
-  | { kind: "unknown" };
-
-export async function reconcileScannerRevoke(
-  deviceId: string,
-  signal?: AbortSignal,
-): Promise<RevokeReconciliation> {
-  try {
-    const detail = await getScannerDevice(deviceId, signal);
-
-    switch (detail.device.status) {
-      case "REVOKED":
-        return { kind: "revoked", device: detail.device };
-      case "UNPAIRED":
-        return { kind: "unpaired-by-device", device: detail.device };
-      default:
-        return { kind: "active", device: detail.device };
-    }
-  } catch {
-    return { kind: "unknown" };
-  }
-}
-
-/**
- * 기기 하드 삭제 — 계약 DELETE /api/v1/admin/scanner-devices/{deviceId}.
- *
- * revoke 와 다르다: durable 상태 전이가 아니라 기기 identity·페어링이 영구 삭제된다.
- * 이미 기록된 체크인은 남는다(다른 소유 테이블). 계약상 204 이며 멱등이라, 응답이 유실돼
- * 같은 Idempotency-Key 로 다시 보내도 두 번 삭제되지 않고 리플레이로 처리된다.
- * `apiRequest` 를 그대로 타므로 X-CSRF-Token·Idempotency-Key 가 함께 나간다.
  */
 export function deleteScannerDevice(deviceId: string, options: DurableCallOptions): Promise<void> {
   return apiRequest<void>(`/admin/scanner-devices/${encodeURIComponent(deviceId)}`, {
