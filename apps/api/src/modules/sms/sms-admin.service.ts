@@ -14,7 +14,9 @@ export type SmsAudience =
   | "BOOKED_FAMILIES"
   | "RESERVED_FAMILIES"
   | "CHECKED_IN_FAMILIES"
-  | "CANCELLED_FAMILIES";
+  | "CANCELLED_FAMILIES"
+  /** 테스트 예약만. 발송 경로를 실제 가족에게 닿지 않고 확인하기 위한 대상이다. */
+  | "TEST_ACCOUNTS";
 
 interface TargetRequest {
   readonly branch: SmsBranch;
@@ -496,6 +498,8 @@ export class SmsAdminService {
       where: {
         sessionId: session.id,
         status: { in: statuses },
+        // 실제 발송이 테스트 행에 닿아서도, 테스트 발송이 실제 가족에게 닿아서도 안 된다.
+        isTest: input.audience === "TEST_ACCOUNTS",
         students: { some: input.audience === "CANCELLED_FAMILIES"
           ? { branchCodeAtBooking: input.branch, releasedAt: { not: null } }
           : { branchCodeAtBooking: input.branch, active: true } },
@@ -573,6 +577,9 @@ export class SmsAdminService {
       case "RESERVED_FAMILIES": return ["RESERVED"];
       case "CHECKED_IN_FAMILIES": return ["CHECKED_IN"];
       case "CANCELLED_FAMILIES": return ["CANCELLED"];
+      // 테스트 예약은 취소 말고 어떤 상태든 대상이다 — 재테스트 도중 어느 상태에 있든
+      // 발송을 확인할 수 있어야 한다.
+      case "TEST_ACCOUNTS": return ["RESERVED", "CHECKED_IN", "NO_SHOW"];
     }
   }
 

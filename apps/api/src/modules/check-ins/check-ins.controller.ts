@@ -11,13 +11,24 @@ import type { AuthenticatedActor } from "../../common/auth/authenticated-actor.j
 import { DomainError } from "../../common/errors/domain-error.js";
 import { CheckInsService } from "./check-ins.service.js";
 
-class QrCheckInDto { @IsString() @Length(43, 512) public qrToken!: string; }
-class ManualCheckInDto { @IsUUID() public familyBookingId!: string; }
+/**
+ * 실제 입장 인원. 스캐너 컨텍스트(기기·세션·게이트)와 달리 이 값은 **현장 스태프의 답변**이라
+ * 클라이언트가 보낸다. 생략하면 서버가 정한다: 1명 예약은 즉시 입장, 2명 예약은
+ * PARTY_SELECTION_REQUIRED 로 되물어 예약을 건드리지 않는다.
+ */
+class QrCheckInDto {
+  @IsString() @Length(43, 512) public qrToken!: string;
+  @IsOptional() @Type(() => Number) @IsIn([1, 2]) public attendedCount?: 1 | 2;
+}
+class ManualCheckInDto {
+  @IsUUID() public familyBookingId!: string;
+  @IsOptional() @Type(() => Number) @IsIn([1, 2]) public attendedCount?: 1 | 2;
+}
 class ListEventsQueryDto {
   @IsOptional() @IsUUID() public familyBookingId?: string;
   @IsOptional() @IsUUID() public sessionId?: string;
   @IsOptional() @IsUUID() public deviceId?: string;
-  @IsOptional() @IsIn(["CHECKED_IN", "ALREADY_CHECKED_IN", "CANCELLED", "SESSION_MISMATCH", "EXPIRED_QR", "REVOKED_QR", "INVALID_QR", "RESERVATION_NOT_FOUND", "NOT_AUTHORIZED"])
+  @IsOptional() @IsIn(["CHECKED_IN", "PARTY_SELECTION_REQUIRED", "ALREADY_CHECKED_IN", "CANCELLED", "SESSION_MISMATCH", "EXPIRED_QR", "REVOKED_QR", "INVALID_QR", "RESERVATION_NOT_FOUND", "NOT_AUTHORIZED"])
   public result?: string;
   @IsOptional() @Matches(/^\d+$/) public afterSequence?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) public limit?: number;
@@ -44,7 +55,7 @@ export class CheckInsController {
     @CurrentActor() actor: AuthenticatedActor,
     @Headers("idempotency-key") key: string | undefined,
     @Body() body: QrCheckInDto,
-  ) { return this.service.byQr(actor, body.qrToken, this.key(key)); }
+  ) { return this.service.byQr(actor, body.qrToken, this.key(key), body.attendedCount); }
 
   @Post("scanner/check-ins/manual")
   @HttpCode(200)
@@ -53,7 +64,7 @@ export class CheckInsController {
     @CurrentActor() actor: AuthenticatedActor,
     @Headers("idempotency-key") key: string | undefined,
     @Body() body: ManualCheckInDto,
-  ) { return this.service.byManual(actor, body.familyBookingId, this.key(key)); }
+  ) { return this.service.byManual(actor, body.familyBookingId, this.key(key), body.attendedCount); }
 
   @Get("admin/check-in-events")
   @UseGuards(SessionGuard, RolesGuard) @Roles("ADMIN")

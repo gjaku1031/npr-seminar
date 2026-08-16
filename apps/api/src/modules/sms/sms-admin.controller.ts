@@ -12,7 +12,7 @@ import type { SmsSource } from "./sms-outbox.service.js";
 
 const branches = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const;
 const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP", "SURVEY"] as const;
-const audiences = ["BOOKED_FAMILIES", "RESERVED_FAMILIES", "CHECKED_IN_FAMILIES", "CANCELLED_FAMILIES"] as const;
+const audiences = ["BOOKED_FAMILIES", "RESERVED_FAMILIES", "CHECKED_IN_FAMILIES", "CANCELLED_FAMILIES", "TEST_ACCOUNTS"] as const;
 const messageStatuses = [
   "PENDING", "CLAIMED", "SENDING", "SENT", "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST",
   "FAILED_PERMANENT", "DELIVERY_UNKNOWN", "DEAD", "CANCELLED",
