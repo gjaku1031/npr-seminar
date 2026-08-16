@@ -90,6 +90,8 @@ const booking: FamilyBooking = {
   attendanceParty: "MOTHER",
   bookingSource: "WEB_APP",
   seatCount: 1,
+  attendedCount: null,
+  isTest: false,
   status: "RESERVED",
   students: [],
   qrStatus: "ACTIVE",

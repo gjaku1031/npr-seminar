@@ -42,6 +42,10 @@ export function panelSoundKind(panel: CheckInPanel): CheckInSoundKind | null {
     case "idle":
     case "processing":
       return null;
+    // 인원 선택은 **스태프의 주의를 요구한다** — 성공음으로 들리면 끝난 일로 오해하고
+    // 그대로 지나친다. 경고음으로 "아직 네가 할 일이 남았다"를 들려준다.
+    case "party":
+      return "warning";
     case "error":
       return "error";
     case "backlog":

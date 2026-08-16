@@ -34,6 +34,13 @@ export type CheckInPanel =
   | { kind: "outcome"; outcome: CheckInOutcome }
   | { kind: "error"; message: string }
   /**
+   * 2명 예약이 스캔됐고 **아직 입장이 아니다**. QR·회차·예약 검증은 이미 끝났고, 실제로 몇 분이
+   * 왔는지만 남았다. 스태프가 고를 때까지 서버는 예약을 건드리지 않는다.
+   *
+   * `confirming` 은 선택 후 확정 요청이 나가는 중 — 두 선택지를 모두 잠가 이중 확정을 막는다.
+   */
+  | { kind: "party"; token: string; outcome: CheckInOutcome; confirming: boolean }
+  /**
    * 결과 미상 건이 상한만큼 쌓여 **새 QR** 을 보낼 수 없다.
    * 이미 스캔한 QR 의 재시도는 계속 가능하다 (기존 키를 그대로 쓴다).
    */
@@ -43,6 +50,10 @@ export interface QrCheckInState {
   panel: CheckInPanel;
   handleScan: (decodedText: string) => void;
   showOutcome: (outcome: CheckInOutcome) => void;
+  /** 인원을 확정해 입장시킨다. 새 Idempotency-Key 로 나간다 — 본문이 달라진 요청이다. */
+  confirmParty: (attendedCount: 1 | 2) => void;
+  /** 인원을 고르지 않고 물러난다. 예약은 그대로 미입장이다. */
+  cancelParty: () => void;
   reset: () => void;
 }
 
@@ -50,6 +61,8 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
   const [panel, setPanel] = useState<CheckInPanel>({ kind: "idle" });
   const lastTokenRef = useRef("");
   const processingRef = useRef(false);
+  /** 인원 선택이 열려 있는 동안 새 스캔을 막는 문. state 로 두면 콜백이 낡은 값을 본다. */
+  const partyOpenRef = useRef(false);
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const checkInKeys = useKeyedOperationKeys();
 
@@ -65,6 +78,9 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
       const token = extractQrToken(decodedText);
       // 쿨다운 중이거나 이미 처리 중이면 무시한다.
       if (!token || token === lastTokenRef.current || processingRef.current) return;
+      // 인원 선택이 떠 있는 동안은 카메라가 무엇을 읽든 무시한다 — 스태프가 답하기 전에
+      // 다음 QR 이 화면을 밀어내면 그 가족은 입장 처리가 되지 않은 채 넘어간다.
+      if (partyOpenRef.current) return;
 
       /**
        * 이 토큰의 키 — 결과 미상 뒤 재스캔하면 같은 키가 다시 나가 서버가 리플레이한다.
@@ -92,8 +108,14 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
       void (async () => {
         try {
           const outcome = await checkInFamilyByQr(token, { idempotencyKey: lookup.key });
-          // 확정 결과 — 키를 놓아준다.
+          // 확정 결과 — 키를 놓아준다. PARTY_SELECTION_REQUIRED 도 확정 응답이다(서버가
+          // 아무것도 바꾸지 않았다). 놓아줘야 확정 요청이 **새 키**를 받는다.
           checkInKeys.settle(token);
+          if (outcome.result === "PARTY_SELECTION_REQUIRED") {
+            partyOpenRef.current = true;
+            setPanel({ kind: "party", token, outcome, confirming: false });
+            return;
+          }
           setPanel({ kind: "outcome", outcome });
         } catch (caught) {
           // 확정 4xx 면 키를 버리고, network·5xx·abort 면 유지한다(같은 토큰 재스캔이 리플레이되도록).
@@ -118,6 +140,50 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
   }, []);
 
   /**
+   * 고른 인원으로 입장을 확정한다.
+   *
+   * 첫 스캔과 **다른 본문**이 나가므로 반드시 새 키여야 한다 — 앞에서 settle 로 놓아줬기에
+   * `keyFor` 가 새 키를 만들어 준다. 같은 키로 보내면 서버가 키 재사용으로 거절한다.
+   */
+  const confirmParty = useCallback(
+    (attendedCount: 1 | 2) => {
+      setPanel((current) => {
+        if (current.kind !== "party" || current.confirming) return current;
+        const { token } = current;
+        const lookup = checkInKeys.keyFor(token);
+        if (!lookup.ok) return { kind: "backlog" };
+
+        void (async () => {
+          try {
+            const outcome = await checkInFamilyByQr(token, { idempotencyKey: lookup.key }, attendedCount);
+            checkInKeys.settle(token);
+            partyOpenRef.current = false;
+            setPanel({ kind: "outcome", outcome });
+          } catch (caught) {
+            checkInKeys.settle(token, caught);
+            if (isAborted(caught)) return;
+            partyOpenRef.current = false;
+            setPanel({
+              kind: "error",
+              message: `${defaultErrorMessage(caught)} 같은 QR을 다시 스캔해 주세요.`,
+            });
+          }
+        })();
+
+        return { ...current, confirming: true };
+      });
+    },
+    [checkInKeys],
+  );
+
+  /** 고르지 않고 물러난다 — 예약은 미입장 그대로다. 같은 QR 을 다시 찍으면 이어서 할 수 있다. */
+  const cancelParty = useCallback(() => {
+    partyOpenRef.current = false;
+    lastTokenRef.current = "";
+    setPanel({ kind: "idle" });
+  }, []);
+
+  /**
    * 화면 상태만 되돌린다.
    *
    * 미확정 키 맵은 **일부러 건드리지 않는다**: 서버 결과가 확정되지 않은 조작은 UI 를
@@ -125,9 +191,10 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
    * 이중 체크인이 된다. 키는 오직 확정 결과(`settle`)로만 사라진다.
    */
   const reset = useCallback(() => {
+    partyOpenRef.current = false;
     lastTokenRef.current = "";
     setPanel({ kind: "idle" });
   }, []);
 
-  return { panel, handleScan, showOutcome, reset };
+  return { panel, handleScan, showOutcome, confirmParty, cancelParty, reset };
 }

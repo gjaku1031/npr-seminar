@@ -11,7 +11,7 @@
  * - 세션은 HttpOnly 쿠키 — 토큰·세션·원문 코드를 웹 스토리지에 쓰지 않는다.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { RefreshCw, Settings, Volume2, VolumeX, WifiOff } from "lucide-react";
 import {
@@ -32,6 +32,7 @@ import {
   subscribeToHydration,
 } from "@/features/check-in";
 import {
+  AttendanceCountOverlay,
   CheckInResultOverlay,
   CheckInResultPanel,
   PairingCodeInput,
@@ -86,6 +87,20 @@ export function ScannerConnectView() {
   // 수동 조회·검증·처리 실패는 로컬 오류 상태에 머물러 공용 패널을 거치지 않는다.
   // 이 콜백으로 그런 실패마다 오류음을 한 번 울린다(값 인자 없음 — 민감 정보 차단).
   const handleManualError = useCallback(() => playSound("error"), [playSound]);
+
+  /**
+   * 인원 선택을 취소하면 **입장이 되지 않았다는 사실**을 말해 줘야 한다. 오버레이가 그냥
+   * 사라지면 스태프는 처리가 끝난 것으로 읽는다.
+   */
+  const [partyNotice, setPartyNotice] = useState(false);
+  const partyNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (partyNoticeTimer.current !== null) clearTimeout(partyNoticeTimer.current); }, []);
+  const handlePartyCancel = useCallback(() => {
+    checkIn.cancelParty();
+    setPartyNotice(true);
+    if (partyNoticeTimer.current !== null) clearTimeout(partyNoticeTimer.current);
+    partyNoticeTimer.current = setTimeout(() => setPartyNotice(false), 4000);
+  }, [checkIn]);
 
   // 이미 페어링 + 회차 잠금까지 끝난 채로 진입하면(예: 새로고침) 페어링·회차 시작 클릭이 없어
   // 결과음 AudioContext 가 잠긴 채 남는다. 그럴 때 다음 사용자 제스처(포인터·키) **한 번의 콜스택
@@ -367,6 +382,31 @@ export function ScannerConnectView() {
 
           <ScannerManualPanel enabled={locked} onOutcome={checkIn.showOutcome} onError={handleManualError} />
         </div>
+      )}
+
+      {partyNotice && (
+        <p
+          role="status"
+          style={{
+            position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 90,
+            margin: 0, padding: "10px 16px", borderRadius: "var(--radius-pill)",
+            border: "1px solid rgba(249,192,89,0.45)", background: "rgba(20,16,6,0.94)",
+            color: "var(--status-warning-on-dark)", fontSize: 13, fontWeight: 700, textAlign: "center",
+          }}
+        >
+          입장 처리하지 않았어요. 다시 스캔하면 이어서 할 수 있어요.
+        </p>
+      )}
+
+      {/* 2명 예약은 인원을 고르기 전까지 입장이 아니다. 이 오버레이만 자동으로 닫히지 않는다 —
+          스태프가 답해야 넘어간다. 결과 오버레이보다 위에 둔다. */}
+      {checkIn.panel.kind === "party" && (
+        <AttendanceCountOverlay
+          outcome={checkIn.panel.outcome}
+          confirming={checkIn.panel.confirming}
+          onSelect={checkIn.confirmParty}
+          onCancel={handlePartyCancel}
+        />
       )}
 
       {/* QR·수동 체크인의 최종 결과를 공용 오버레이로 표시하고 3000ms 뒤 자동으로 닫는다. */}

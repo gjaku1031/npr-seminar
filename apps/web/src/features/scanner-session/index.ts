@@ -21,6 +21,8 @@ export type { CheckInSoundKind } from "./lib/check-in-sound";
 
 export { PairingCodeInput } from "./ui/PairingCodeInput";
 export { CheckInResultPanel } from "./ui/CheckInResultPanel";
+export { AttendanceCountOverlay } from "./ui/AttendanceCountOverlay";
+export type { AttendanceCountOverlayProps } from "./ui/AttendanceCountOverlay";
 export { CheckInResultOverlay } from "./ui/CheckInResultOverlay";
 export { ScannerShiftPanel } from "./ui/ScannerShiftPanel";
 export { ScannerManualPanel } from "./ui/ScannerManualPanel";

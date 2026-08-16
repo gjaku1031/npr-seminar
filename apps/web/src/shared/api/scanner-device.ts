@@ -69,10 +69,20 @@ export function listScannerManualCandidates(
  * QR 체크인 — 본문은 원문 credential 뿐이고 나머지(기기·지점·게이트·회차)는
  * 서버가 세션과 shift lock 에서 파생한다. 원문 QR 은 저장·로깅하지 않는다.
  */
-export function checkInFamilyByQr(qrToken: string, options: DurableCallOptions): Promise<CheckInOutcome> {
+/**
+ * @param attendedCount 실제로 들어온 학부모 수. 생략하면 서버가 정한다 — 1명 예약은 즉시
+ *   입장, 2명 예약은 아무것도 바꾸지 않고 `PARTY_SELECTION_REQUIRED` 로 되묻는다.
+ *   ★ 인원을 바꿔 다시 부를 때는 **반드시 새 Idempotency-Key** 를 써야 한다. 본문이 달라진
+ *     요청은 재시도가 아니라 다른 요청이라 서버가 키 재사용으로 거절한다.
+ */
+export function checkInFamilyByQr(
+  qrToken: string,
+  options: DurableCallOptions,
+  attendedCount?: 1 | 2,
+): Promise<CheckInOutcome> {
   return apiRequest<CheckInOutcome>("/scanner/check-ins/qr", {
     method: "POST",
-    body: { qrToken },
+    body: attendedCount === undefined ? { qrToken } : { qrToken, attendedCount },
     idempotencyKey: options.idempotencyKey,
     signal: options.signal,
   });

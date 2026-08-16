@@ -126,6 +126,7 @@ export {
   BOOKING_EVENT_PAGE_LIMIT_MAX,
   BOOKING_VERSION_CONFLICT_CODE,
   cancelAdminFamilyBooking,
+  rollbackFamilyBookingCheckIn,
   changeFamilyBookingAttendanceParty,
   collectFamilyBookingEvents,
   CONTACT_MAX_LENGTH,
