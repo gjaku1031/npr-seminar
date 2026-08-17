@@ -45,8 +45,7 @@ describe("admin seminar session list", () => {
     expect(groupBy).toHaveBeenCalledTimes(1);
     expect(groupBy).toHaveBeenCalledWith({
       by: ["sessionId", "status", "attendanceParty"],
-      // 테스트 예약은 운영 숫자가 아니므로 집계에서 빠진다.
-      where: { sessionId: { in: [11n, 12n] }, isTest: false },
+      where: { sessionId: { in: [11n, 12n] } },
       _count: { _all: true },
       _sum: { attendedCount: true },
     });

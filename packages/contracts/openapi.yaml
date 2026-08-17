@@ -4691,9 +4691,10 @@ components:
     SmsAudience:
       type: string
       description: |
-        Test bookings are excluded from every audience except TEST_ACCOUNTS, which
-        selects only them. Operators must be able to exercise the delivery path without
-        reaching a real family, and real sends must never reach a test row.
+        Test bookings are excluded from every audience except TEST_ACCOUNTS, which selects
+        only them. This split is about delivery, not counting: operators must be able to
+        exercise the send path without reaching a real family, and a real send must never
+        reach a test row. Statistics count test bookings normally.
       enum:
         - BOOKED_FAMILIES
         - RESERVED_FAMILIES
@@ -7012,7 +7013,6 @@ components:
             Parents who actually walked in, summed from the per-booking attendedCount the
             gate confirmed. Distinct from attendeeCount, which is what the bookings expect:
             a two-parent booking that arrives with one parent contributes 2 there and 1 here.
-            Test bookings are excluded, as they are from every count in this summary.
       additionalProperties: false
 
     AttendanceMonitoring:
@@ -7233,9 +7233,12 @@ components:
           enum: [1, 2, null]
         isTest:
           description: |
-            QR rehearsal booking. Excluded from statistics, the Google Sheets projection,
-            and every SMS audience except TEST_ACCOUNTS; pinned to the top of the roster
-            and the only booking whose entry may be rolled back.
+            QR rehearsal booking. Counted in statistics and roster monitoring like any other
+            booking, so operators can confirm the aggregates actually move before the event;
+            the rehearsal booking is cancelled once that check is done. Still excluded from
+            the Google Sheets projection and from every SMS audience except TEST_ACCOUNTS —
+            those leave the system, and a rehearsal must not reach a real sheet or phone.
+            Pinned to the top of the roster and the only booking whose entry may be rolled back.
           type: boolean
         checkedInAt:
           type: [string, 'null']
@@ -7612,8 +7615,8 @@ components:
           readOnly: true
         isTest:
           description: |
-            QR rehearsal booking. Excluded from statistics, the Google Sheets projection,
-            and every SMS audience except TEST_ACCOUNTS.
+            QR rehearsal booking. Counted in statistics like any other booking; excluded from
+            the Google Sheets projection and from every SMS audience except TEST_ACCOUNTS.
           type: boolean
           readOnly: true
       additionalProperties: false

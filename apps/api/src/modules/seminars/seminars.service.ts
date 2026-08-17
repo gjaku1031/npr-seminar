@@ -118,8 +118,10 @@ export class SeminarsService {
     });
     const statusCounts = rows.length === 0 ? [] : await this.prisma.familyBooking.groupBy({
       by: ["sessionId", "status", "attendanceParty"],
-      // 테스트 예약은 운영 숫자가 아니다 — 통계·명단 모니터링과 같은 규칙을 여기서도 지킨다.
-      where: { sessionId: { in: rows.map((row) => row.id) }, isTest: false },
+      // 테스트 예약도 집계에 **포함**한다 — 당일 전에 숫자가 실제로 움직이는지 확인해야 하고,
+      // 그 확인은 실제 화면의 실제 집계로만 된다. 확인이 끝나면 그 예약을 취소해 정리한다.
+      // (구글시트 투영과 문자 대상은 여전히 분리한다 — 그건 집계가 아니라 외부로 나가는 것이다.)
+      where: { sessionId: { in: rows.map((row) => row.id) } },
       _count: { _all: true },
       _sum: { attendedCount: true },
     });

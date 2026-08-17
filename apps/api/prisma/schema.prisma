@@ -434,7 +434,8 @@ model FamilyBooking {
   /// 실제로 입장한 학부모 수. 예약 인원(seatCount)과 다를 수 있다 — 2명 예약에 1명만 오는
   /// 경우가 있어 게이트에서 스태프가 고른다. 미입장이면 null.
   attendedCount      Int?                       @map("attended_count")
-  /// QR 재테스트용 예약. 통계·Google Sheets·일반 문자 대상에서 제외되고 명단 맨 앞에 고정된다.
+  /// QR 재테스트용 예약. 통계에는 다른 예약과 똑같이 잡히고(집계가 도는지 확인해야 하므로),
+  /// Google Sheets 투영과 일반 문자 대상에서만 빠진다. 명단 맨 앞에 고정된다.
   isTest             Boolean                    @default(false) @map("is_test")
   cancelledAt        DateTime?                  @map("cancelled_at") @db.Timestamptz(6)
   createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
