@@ -28,6 +28,7 @@ interface RawSessionOperationsSummary {
   uncheckedBookingCount: number;
   cancelledBookingCount: number;
   noShowBookingCount: number;
+  attendedPeopleCount: number;
 }
 
 /** 목록 엔드포인트 원시 회차 — operationsSummary 필드명이 서버 형태(…BookingCount) 그대로다. */
@@ -52,6 +53,7 @@ export function normalizeSessionOperationsSummary(
     uncheckedCount: raw?.uncheckedBookingCount ?? 0,
     cancelledCount: raw?.cancelledBookingCount ?? 0,
     noShowCount: raw?.noShowBookingCount ?? 0,
+    attendedPeopleCount: raw?.attendedPeopleCount ?? 0,
   };
 }
 

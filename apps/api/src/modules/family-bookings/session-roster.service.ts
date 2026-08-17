@@ -187,6 +187,8 @@ export class SessionRosterService {
       { header: "예약경로", key: "bookingSource", width: 12 },
       { header: "참석자", key: "attendanceParty", width: 10 },
       { header: "예약인원", key: "seatCount", width: 10 },
+      // 예약인원 바로 오른쪽 — 예약한 수와 실제 온 수를 나란히 놓고 봐야 의미가 있다.
+      { header: "입장인원", key: "attendedCount", width: 10 },
       { header: "예약상태", key: "reservationStatus", width: 14 },
       { header: "체크인상태", key: "checkInStatus", width: 14 },
       { header: "체크인일시", key: "checkedInAt", width: 22 },
@@ -220,6 +222,8 @@ export class SessionRosterService {
         bookingSource: neutralizeSpreadsheetText(this.bookingSourceLabel(item.booking.bookingSource)),
         attendanceParty: neutralizeSpreadsheetText(this.attendancePartyLabel(item.booking.attendanceParty)),
         seatCount: item.booking.seatCount,
+        // 미입장이면 0 이 아니라 빈 칸이다 — 0 명 입장과 아직 안 온 것은 다른 사실이다.
+        attendedCount: item.booking.attendedCount ?? null,
         reservationStatus: neutralizeSpreadsheetText(this.reservationStatus(item.booking.status)),
         checkInStatus: neutralizeSpreadsheetText(this.checkInStatus(item.booking.status)),
         checkedInAt: neutralizeSpreadsheetText(this.formatSeoulDate(item.booking.checkedInAt)),
