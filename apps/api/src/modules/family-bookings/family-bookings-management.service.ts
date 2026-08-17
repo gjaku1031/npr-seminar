@@ -285,6 +285,52 @@ export class FamilyBookingsManagementService {
   }
 
   /**
+   * 테스트 예약의 캠퍼스를 바꾼다 — 테스트 예약만.
+   *
+   * 문자 발송은 캠퍼스별로 대상을 고르므로, 세 캠퍼스 발송을 확인하려면 리허설 예약이
+   * 캠퍼스를 옮겨 다닐 수 있어야 한다. 캠퍼스마다 테스트 예약을 하나씩 만들면 명단·집계에
+   * 가짜 행이 셋 생기므로, 하나를 옮기는 편이 낫다.
+   *
+   * **실제 예약에는 쓸 수 없다.** 실제 가족의 캠퍼스는 예약 시점의 사실이고, 그것을 바꾸면
+   * 이미 나간 문자·시트 투영과 어긋난다. 그래서 is_test 가 아니면 거절한다.
+   *
+   * 캠퍼스는 참가자 행(branch_code_at_booking)에 있다 — 테스트 예약은 GUEST 한 명뿐이라
+   * 그 한 행만 옮기면 된다.
+   */
+  public async changeTestBookingBranch(id: string, branch: string, actorSubject: string, key: string) {
+    return this.idempotency.execute("FAMILY_BOOKING_TEST_BRANCH", key, { id, branch }, async (transaction) => {
+      const snapshot = await transaction.familyBooking.findUnique({
+        where: { publicId: id },
+        select: { id: true, sessionId: true },
+      });
+      if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
+      await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
+      const rows = await transaction.$queryRaw<Array<{ id: bigint; is_test: boolean }>>`
+        select id,is_test from family_bookings where id=${snapshot.id} for update`;
+      const booking = rows[0]!;
+      if (!booking.is_test) this.fail(409, "BRANCH_CHANGE_REQUIRES_TEST_BOOKING");
+
+      await transaction.familyBookingStudent.updateMany({
+        where: { familyBookingId: booking.id, active: true },
+        data: { branchCodeAtBooking: branch },
+      });
+      await transaction.familyBooking.update({
+        where: { id: booking.id },
+        data: { version: { increment: 1 }, updatedAt: new Date() },
+      });
+      await transaction.bookingEvent.create({
+        data: {
+          familyBookingId: booking.id,
+          eventType: "UPDATED",
+          actorSubject,
+          safeMetadata: { change: "TEST_BRANCH", branch, testBooking: true },
+        },
+      });
+      return this.load(transaction, booking.id);
+    });
+  }
+
+  /**
    * 테스트 예약을 다시 미입장으로 되돌린다.
    *
    * **실제 입장 기록은 되돌릴 수 없다.** 오스캔은 인원을 고쳐 바로잡고, 일어난 입장은 일어난

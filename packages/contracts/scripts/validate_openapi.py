@@ -2108,6 +2108,9 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
                 "message",
                 "title",
                 "previewToken",
+                # 예약 발송 시각. 대상 선택(branch·audience·session)이 아니라 **언제 나갈지**라
+                # 이 목록에 함께 둔다 — 발송 요청이 받는 필드의 전부가 여기여야 한다.
+                "scheduledAt",
             },
         ),
     ):

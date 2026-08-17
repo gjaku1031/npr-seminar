@@ -18,6 +18,7 @@ import {
   useSmsLogs,
   useSmsSendFlow,
   useSmsTemplates,
+  useSmsAudienceCounts,
 } from "@/features/send-sms";
 import { useSeminarSessions } from "@/features/admin-overview";
 import {
@@ -150,6 +151,8 @@ export function SmsView() {
   const { templateId, name, body, purpose } = current;
 
   const sessionId = sessionChoice ?? sessions.options[0]?.session.seminarSessionId ?? "";
+  // 대상 탭에 붙일 실제 수신 인원 — 캠퍼스·회차가 바뀌면 다시 센다.
+  const audienceCounts = useSmsAudienceCounts(branch, sessionId === "" ? null : sessionId);
   const session = sessions.options.find((option) => option.session.seminarSessionId === sessionId);
   const campus = BRANCH_CAMPUS[branch];
   const campusInfo = CAMPUS_INFO[campus];
@@ -498,17 +501,35 @@ export function SmsView() {
               disabled={sessions.loading || sessions.options.length === 0}
               style={{ flex: 1, minWidth: 220 }}
             />
+            {/*
+              대상 탭에 실제 수신 인원을 함께 붙인다 — 발송이 쓰는 것과 같은 선택 로직으로
+              서버가 센 값이다. 인원을 모르는 동안에는 **0 을 그리지 않는다**: 0명과
+              "아직 모름"은 다른 사실이고, 발송 화면에서 그 둘을 섞으면 위험하다.
+            */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {SMS_AUDIENCE_OPTIONS.map((option) => (
-                <Tag
-                  key={option.value}
-                  selected={audience === option.value}
-                  onClick={() => setAudience(option.value)}
-                  style={{ height: 32 }}
-                >
-                  {option.label}
-                </Tag>
-              ))}
+              {SMS_AUDIENCE_OPTIONS.map((option) => {
+                const count = audienceCounts.countOf(option.value);
+                return (
+                  <Tag
+                    key={option.value}
+                    selected={audience === option.value}
+                    onClick={() => setAudience(option.value)}
+                    style={{ height: 32 }}
+                  >
+                    {option.label}
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontFeatureSettings: '"tnum"',
+                        fontWeight: 800,
+                        opacity: count === null ? 0.45 : 0.85,
+                      }}
+                    >
+                      {count === null ? (audienceCounts.loading ? "…" : "–") : `${count.toLocaleString("ko-KR")}명`}
+                    </span>
+                  </Tag>
+                );
+              })}
             </div>
           </div>
 

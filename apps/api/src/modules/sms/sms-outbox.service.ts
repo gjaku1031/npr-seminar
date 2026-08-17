@@ -20,6 +20,14 @@ export interface EnqueueSmsInput {
   readonly title?: string | null;
   readonly actorSubject?: string | null;
   readonly safeMetadata?: Readonly<Record<string, string | number | boolean | null>>;
+  /**
+   * 이 시각 전에는 워커가 집지 않는다 — 예약 발송의 전부다.
+   *
+   * 워커는 이미 `status='PENDING' and next_attempt_at <= now()` 로만 집으므로, 별도의 스케줄러도
+   * 상태값도 필요 없다. 미래 시각을 넣으면 그때까지 큐에 조용히 앉아 있다가 평소 경로로 나간다.
+   * 생략하면 기본값(now)이라 즉시 발송이다.
+   */
+  readonly notBefore?: Date | null;
 }
 
 @Injectable()
@@ -40,13 +48,13 @@ export class SmsOutboxService {
       insert into sms_outbox(
         event_key_digest,source,branch_code,seminar_session_public_id,family_booking_public_id,
         recipient_ciphertext,recipient_digest,recipient_last4,message_ciphertext,title_ciphertext,
-        message_type,message_bytes,title_bytes,actor_subject,safe_metadata
+        message_type,message_bytes,title_bytes,actor_subject,safe_metadata,next_attempt_at
       ) values (
         ${this.bytes(eventKeyDigest)},${input.source},${input.branch},${input.seminarSessionPublicId ?? null}::uuid,
         ${input.familyBookingPublicId ?? null}::uuid,${this.bytes(input.recipientCiphertext)},${this.bytes(input.recipientDigest)},
         ${input.recipientLast4},${this.bytes(messageCiphertext)},${titleCiphertext === null ? null : this.bytes(titleCiphertext)},
         ${classification.messageType},${classification.messageBytes},${classification.titleBytes},${input.actorSubject ?? null},
-        ${safeMetadata}::jsonb
+        ${safeMetadata}::jsonb,coalesce(${input.notBefore ?? null}::timestamptz, now())
       ) on conflict(event_key_digest) do nothing`;
   }
 

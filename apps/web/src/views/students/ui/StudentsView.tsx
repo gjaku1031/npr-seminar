@@ -379,6 +379,11 @@ export function StudentsView() {
           const familyBookingId = row.booking?.familyBookingId;
           if (familyBookingId !== undefined) void mutations.rollbackCheckIn(familyBookingId);
         }}
+        // 테스트 계정 전용 — 확인 대화상자를 거치지 않는다. 되돌려도 잃는 것이 없다.
+        onChangeTestBranch={(row, branch) => {
+          const familyBookingId = row.booking?.familyBookingId;
+          if (familyBookingId !== undefined) void mutations.changeTestBranch(familyBookingId, branch);
+        }}
         onBook={openBookingDraft}
         onOpenEvents={setEventsFor}
       />
@@ -764,6 +769,7 @@ function RosterTable({
   onBook,
   onOpenEvents,
   onRollbackCheckIn,
+  onChangeTestBranch,
 }: {
   roster: ReturnType<typeof useSessionRoster>;
   rows: readonly SessionRosterRow[];
@@ -774,6 +780,7 @@ function RosterTable({
   onBook: (row: SessionRosterRow, party: AttendanceParty | null) => void;
   onOpenEvents: (row: SessionRosterRow) => void;
   onRollbackCheckIn: (row: SessionRosterRow) => void;
+  onChangeTestBranch: (row: SessionRosterRow, branch: Branch) => void;
 }) {
   const { page, loading, refreshing, error, filtered } = roster;
   const cols = gridCols(showBranchColumn);
@@ -851,6 +858,7 @@ function RosterTable({
                   onBook={onBook}
                   onOpenEvents={onOpenEvents}
                   onRollbackCheckIn={onRollbackCheckIn}
+                  onChangeTestBranch={onChangeTestBranch}
                 />
               ))}
 
@@ -918,6 +926,7 @@ function RosterRow({
   onCancel,
   onBook,
   onOpenEvents,
+  onChangeTestBranch,
   onRollbackCheckIn,
 }: {
   row: SessionRosterRow;
@@ -931,6 +940,7 @@ function RosterRow({
   onBook: (row: SessionRosterRow, party: AttendanceParty | null) => void;
   onOpenEvents: (row: SessionRosterRow) => void;
   onRollbackCheckIn: (row: SessionRosterRow) => void;
+  onChangeTestBranch: (row: SessionRosterRow, branch: Branch) => void;
 }) {
   const control = rosterBookingControl(row);
   const guest = row.participantType === "GUEST";
@@ -963,7 +973,37 @@ function RosterRow({
         {guest ? faint(null) : row.sourceStudentNo}
       </span>
 
-      {showBranchColumn && <span style={{ fontSize: 12 }}>{BRANCH_LABELS[row.branch]}</span>}
+      {showBranchColumn && (
+        /*
+          테스트 계정만 캠퍼스를 바꿀 수 있다 — 캠퍼스별 문자 발송을 확인하려면 리허설 예약이
+          옮겨 다녀야 하기 때문이다. 실제 예약에는 드롭다운이 아예 나오지 않는다: 서버도 막지만,
+          고를 수 있게 두는 것만으로 "바꿔도 되는 값"이라는 잘못된 기대가 생긴다.
+        */
+        row.booking?.isTest === true ? (
+          <select
+            aria-label="테스트 계정 캠퍼스"
+            value={row.branch}
+            disabled={pending}
+            onChange={(event) => onChangeTestBranch(row, event.target.value as Branch)}
+            style={{
+              fontFamily: "inherit",
+              fontSize: 12,
+              padding: "3px 6px",
+              borderRadius: "var(--radius-xs)",
+              border: "1px solid var(--border-soft)",
+              background: "var(--surface-card)",
+              color: "var(--text-strong)",
+              cursor: pending ? "progress" : "pointer",
+            }}
+          >
+            {(Object.keys(BRANCH_LABELS) as Branch[]).map((code) => (
+              <option key={code} value={code}>{BRANCH_LABELS[code]}</option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ fontSize: 12 }}>{BRANCH_LABELS[row.branch]}</span>
+        )
+      )}
 
       {/* 비재원생임은 수학반·과학반·학번·단위로 이미 드러난다 — 이름 옆에 딱지를 덧붙이지 않는다. */}
       <span style={{ fontWeight: 700, color: "var(--text-strong)", fontSize: 12.5 }}>{row.name}</span>

@@ -185,6 +185,36 @@ export async function removeSmsTemplate(
   });
 }
 
+/* ── 대상별 수신 인원 ────────────────────────────────────────────────────── */
+
+export interface SmsAudienceCount {
+  audience: SmsAudience;
+  recipientCount: number;
+}
+
+export interface SmsTargetCounts {
+  branch: Branch;
+  seminarSessionId: string;
+  counts: SmsAudienceCount[];
+}
+
+/**
+ * 대상 탭에 붙일 수신 인원 — 발송이 쓰는 것과 **같은 선택 로직**으로 서버가 센 값이다.
+ *
+ * 프리뷰와 달리 previewToken 을 만들지 않는다. 캠퍼스·회차를 바꿀 때마다 부르는 값이라,
+ * 이 호출이 발송 자격을 남기면 안 된다.
+ */
+export async function countSmsTargets(
+  input: { branch: Branch; seminarSessionId: string },
+  signal?: AbortSignal,
+): Promise<SmsTargetCounts> {
+  return apiRequest<SmsTargetCounts>("/admin/sms/targets/counts", {
+    method: "GET",
+    query: { branch: input.branch, seminarSessionId: input.seminarSessionId },
+    signal,
+  });
+}
+
 /* ── 대상 프리뷰 ─────────────────────────────────────────────────────────── */
 
 export interface SmsTargetRequest {
@@ -239,14 +269,41 @@ const SMS_PREVIEW_TOKEN_CHANGED_CODE = "SMS_PREVIEW_TOKEN_CHANGED";
 export async function enqueueSmsSend(
   input: SmsTargetRequest,
   previewToken: string,
-  options: { idempotencyKey: string; signal?: AbortSignal },
+  options: { idempotencyKey: string; signal?: AbortSignal; scheduledAt?: string },
 ): Promise<SmsEnqueueAccepted> {
   return apiRequest<SmsEnqueueAccepted>("/admin/sms/sends", {
     method: "POST",
-    body: { ...input, previewToken },
+    body: options.scheduledAt === undefined
+      ? { ...input, previewToken }
+      : { ...input, previewToken, scheduledAt: options.scheduledAt },
     idempotencyKey: options.idempotencyKey,
     signal: options.signal,
   });
+}
+
+export interface SmsBatchCancellation {
+  batchId: string;
+  /** 아직 안 나가서 막은 건수. */
+  cancelledCount: number;
+  /** 이미 워커가 쥐었거나 발송된 건수 — 이건 못 막는다. */
+  alreadyLeftCount: number;
+  totalCount: number;
+}
+
+/**
+ * 예약 발송 취소 — 아직 나가지 않은 건만 막는다.
+ *
+ * 보낸 문자는 되돌릴 수 없으므로, 화면은 `cancelledCount` 와 `alreadyLeftCount` 를 **함께**
+ * 말해야 한다. "취소했습니다" 한 줄만 보여 주면 부분 차단을 전부 막은 것으로 읽는다.
+ */
+export async function cancelSmsBatch(
+  batchId: string,
+  options: { idempotencyKey: string; signal?: AbortSignal },
+): Promise<SmsBatchCancellation> {
+  return apiRequest<SmsBatchCancellation>(
+    `/admin/sms/sends/${encodeURIComponent(batchId)}/cancel`,
+    { method: "POST", idempotencyKey: options.idempotencyKey, signal: options.signal },
+  );
 }
 
 /**

@@ -46,7 +46,8 @@ export interface SmsSendFlowState {
   /** 기본 버튼: 프리뷰만 부른다. */
   requestPreview: () => void;
   /** 확인 버튼: 얼려 둔 본문 + 같은 토큰/키로 실제 발송. */
-  confirmSend: () => void;
+  /** @param scheduledAt 예약 발송 시각(ISO). 생략하면 즉시 발송. */
+  confirmSend: (scheduledAt?: string) => void;
   /** 취소 — 아무것도 보내지 않고 확인 화면만 닫는다. */
   cancel: () => void;
 }
@@ -137,7 +138,13 @@ export function useSmsSendFlow(
     })();
   }, [request, sendKey]);
 
-  const confirmSend = useCallback(() => {
+  /**
+   * 예약 발송 시각(ISO) 또는 null(즉시 발송).
+   *
+   * ★ 프리뷰가 아니라 **확인 시점**에 읽는다. 프리뷰는 "누구에게 무엇을"을 얼리는 것이고,
+   *   언제 보낼지는 그 뒤에 정해도 대상이 달라지지 않는다.
+   */
+  const confirmSend = useCallback((scheduledAt?: string) => {
     const frozen = frozenRef.current;
     const token = preview?.previewToken;
     // 토큰 없이는 발송하지 않는다 — 프리뷰를 건너뛴 발송 경로를 만들지 않기 위해서다.
@@ -150,7 +157,10 @@ export function useSmsSendFlow(
 
     void (async () => {
       try {
-        const accepted = await enqueueSmsSend(frozen, token, { idempotencyKey: sendKey.current() });
+        const accepted = await enqueueSmsSend(frozen, token, {
+          idempotencyKey: sendKey.current(),
+          ...(scheduledAt === undefined ? {} : { scheduledAt }),
+        });
         sendKey.settle();
         sendingRef.current = false;
         // 발송이 끝났으니 이 프리뷰·토큰은 소진됐다 — 다시 보내려면 다시 확인받아야 한다.

@@ -127,6 +127,7 @@ export {
   BOOKING_VERSION_CONFLICT_CODE,
   cancelAdminFamilyBooking,
   rollbackFamilyBookingCheckIn,
+  changeTestBookingBranch,
   changeFamilyBookingAttendanceParty,
   collectFamilyBookingEvents,
   CONTACT_MAX_LENGTH,
@@ -155,6 +156,8 @@ export {
   getSmsGatewayReadiness,
   isSmsSendDisabled,
   listSmsMessages,
+  countSmsTargets,
+  cancelSmsBatch,
   listSmsTemplates,
   previewSmsTargets,
   primarySample,
@@ -171,6 +174,9 @@ export {
   updateSmsTemplate,
 } from "./admin-sms";
 export type {
+  SmsTargetCounts,
+  SmsAudienceCount,
+  SmsBatchCancellation,
   CreateSmsTemplateInput,
   ListSmsMessagesParams,
   SmsLogRow,
