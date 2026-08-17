@@ -916,6 +916,9 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "cancelledBookingCount",
         "noShowBookingCount",
         "attendeeCount",
+        # 예상 참석 인원(attendeeCount)과 실제 입장 인원은 다른 값이다 — 2명 예약에 한 분만
+        # 오면 예상은 2, 실제는 1이다. 운영 화면이 둘을 섞지 않도록 계약에서 갈라 둔다.
+        "attendedPeopleCount",
     }
     operations_schema = schema(document, "SessionOperationsSummary")
     if (

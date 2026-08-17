@@ -1017,6 +1017,11 @@ export interface SeminarSessionOperationsSummary {
   cancelledCount: number;
   /** 노쇼 = NO_SHOW. active·unchecked·cancelled 어디에도 안 들어간다. */
   noShowCount: number;
+  /**
+   * **실제로 입장한 사람 수** — 게이트가 확정한 인원의 합. 위 값들이 전부 예약 **건수**인 것과
+   * 달리 이것만 **명수**다. 2명 예약에 한 분만 오면 입장 완료는 1건, 입장인원은 1명이다.
+   */
+  attendedPeopleCount: number;
 }
 
 /**

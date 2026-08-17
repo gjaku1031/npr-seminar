@@ -24,6 +24,7 @@ describe("normalizeSessionOperationsSummary — 서버 …BookingCount 를 화�
       uncheckedBookingCount: 11,
       cancelledBookingCount: 4,
       noShowBookingCount: 2,
+      attendedPeopleCount: 0,
     });
     assert.deepEqual(summary, {
       activeCount: 18,
@@ -31,6 +32,7 @@ describe("normalizeSessionOperationsSummary — 서버 …BookingCount 를 화�
       uncheckedCount: 11,
       cancelledCount: 4,
       noShowCount: 2,
+      attendedPeopleCount: 0,
     });
   });
 
@@ -41,6 +43,7 @@ describe("normalizeSessionOperationsSummary — 서버 …BookingCount 를 화�
       uncheckedCount: 0,
       cancelledCount: 0,
       noShowCount: 0,
+      attendedPeopleCount: 0,
     });
   });
 });
@@ -72,6 +75,7 @@ describe("normalizeAdminSeminarSession — operationsSummary 만 정규화하고
         uncheckedBookingCount: 90,
         cancelledBookingCount: 6,
         noShowBookingCount: 3,
+        attendedPeopleCount: 0,
       },
     });
     assert.equal(session.operationsSummary.activeCount, 130);
@@ -101,7 +105,7 @@ describe("updateAdminSeminarSession — 비재원생 토글 PATCH", () => {
     bookingClosesAt: "2026-08-20T00:00:00.000Z",
     status: "OPEN",
     guestBookingEnabled: true,
-    operationsSummary: { activeCount: 0, checkedInCount: 0, uncheckedCount: 0, cancelledCount: 0, noShowCount: 0 },
+    operationsSummary: { activeCount: 0, checkedInCount: 0, uncheckedCount: 0, cancelledCount: 0, noShowCount: 0, attendedPeopleCount: 0 },
     version: 4,
     createdAt: "2026-07-01T00:00:00.000Z",
     updatedAt: "2026-07-10T00:00:00.000Z",

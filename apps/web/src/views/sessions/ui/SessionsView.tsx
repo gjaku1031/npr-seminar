@@ -8,7 +8,7 @@
  *   보여 주느니 **비활성(disabled)** 으로 원래 자리에 두고 "API 연결 전"을 스크린리더까지 알린다.
  *   가짜 성공을 만들지 않는다.
  *
- * ★ 4개 카드(총 예약·입장 완료·미체크·취소)와 좌측 모든 회차의 숫자는 회차 목록이 함께 주는
+ * ★ 4개 카드(총 예약·입장 완료·입장인원·취소)와 좌측 모든 회차의 숫자는 회차 목록이 함께 주는
  *   `operationsSummary` 실집계다. 정원·예약률·좌석 원장은 운영 화면에 노출하지 않는다.
  *
  * ★ 설문 결과 표는 계약 GET survey-responses 의 실데이터다 — 응답마다 `participant`(캠퍼스·단위·
@@ -257,13 +257,20 @@ export function SessionsView() {
           </Card>
 
           {/*
-            현황 스탯 (명세 §6.3) — POC 의 총 예약·입장 완료·미체크·취소.
-            전부 **가족 예약 건수**다. 목록 항목의 operationsSummary 실집계(노쇼 제외)다.
+            현황 스탯 — 총 예약·입장 완료·입장인원·취소. 목록 항목의 operationsSummary
+            실집계다(노쇼·테스트 예약 제외).
+
+            ★ 단위가 섞여 있다. 총 예약·입장 완료·취소는 **가족 예약 건수**이고,
+              입장인원만 **사람 수**다. 그래서 suffix 로 건/명을 분명히 갈라 둔다 —
+              한 가족이 두 명 들어오면 입장 완료 1건에 입장인원 2명이다.
+
+            미체크(RESERVED 건수)를 뺀 자리다. 운영 중 실제로 묻는 것은 "지금 안에 몇 명
+            있나"이고, 안 온 사람 수는 총 예약에서 빼면 나온다.
           */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <StatCard label="총 예약" value={summary.activeCount} suffix="건" tone="brand" icon={<Icons.ticket size={15} />} delay={0} />
             <StatCard label="입장 완료" value={summary.checkedInCount} suffix="건" tone="success" icon={<Icons.check size={15} />} delay={50} />
-            <StatCard label="미체크" value={summary.uncheckedCount} suffix="건" tone="accent" icon={<Icons.clock size={15} />} delay={100} />
+            <StatCard label="입장인원" value={summary.attendedPeopleCount} suffix="명" tone="accent" icon={<Icons.users size={15} />} delay={100} />
             <StatCard label="취소" value={summary.cancelledCount} suffix="건" tone="danger" icon={<Icons.x size={15} />} delay={150} />
           </div>
 
