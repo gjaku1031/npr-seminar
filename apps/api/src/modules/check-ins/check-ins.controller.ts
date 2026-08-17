@@ -9,20 +9,21 @@ import { RolesGuard } from "../../common/auth/roles.guard.js";
 import { SessionGuard } from "../../common/auth/session.guard.js";
 import type { AuthenticatedActor } from "../../common/auth/authenticated-actor.js";
 import { DomainError } from "../../common/errors/domain-error.js";
-import { CheckInsService } from "./check-ins.service.js";
+import { CheckInsService, MAX_ATTENDED_COUNT } from "./check-ins.service.js";
 
 /**
  * 실제 입장 인원. 스캐너 컨텍스트(기기·세션·게이트)와 달리 이 값은 **현장 스태프의 답변**이라
- * 클라이언트가 보낸다. 생략하면 서버가 정한다: 1명 예약은 즉시 입장, 2명 예약은
- * PARTY_SELECTION_REQUIRED 로 되물어 예약을 건드리지 않는다.
+ * 클라이언트가 보낸다. 생략하면 서버가 PARTY_SELECTION_REQUIRED 로 되묻고 예약을 건드리지 않는다.
+ *
+ * 예약 인원과 무관하다 — 1명 예약에 두 분이 오기도 한다. 상한은 숫자패드 오타만 막는다.
  */
 class QrCheckInDto {
   @IsString() @Length(43, 512) public qrToken!: string;
-  @IsOptional() @Type(() => Number) @IsIn([1, 2]) public attendedCount?: 1 | 2;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_ATTENDED_COUNT) public attendedCount?: number;
 }
 class ManualCheckInDto {
   @IsUUID() public familyBookingId!: string;
-  @IsOptional() @Type(() => Number) @IsIn([1, 2]) public attendedCount?: 1 | 2;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_ATTENDED_COUNT) public attendedCount?: number;
 }
 class ListEventsQueryDto {
   @IsOptional() @IsUUID() public familyBookingId?: string;

@@ -7449,7 +7449,8 @@ components:
             checks in, and for every non-CHECKED_IN status. May be lower than seatCount
             when a two-parent booking arrives with one parent.
           type: [integer, 'null']
-          enum: [1, 2, null]
+          minimum: 1
+          maximum: 20
         isTest:
           description: |
             QR rehearsal booking. Counted in statistics and roster monitoring like any other
@@ -7830,7 +7831,8 @@ components:
             checks in. Never exceeds seatCount and may be lower when a two-parent booking
             arrives with one parent.
           type: [integer, 'null']
-          enum: [1, 2, null]
+          minimum: 1
+          maximum: 20
           readOnly: true
         isTest:
           description: |
@@ -8591,13 +8593,19 @@ components:
 
     AttendedCount:
       description: |
-        How many parents actually walked in, decided at the gate. This product has no
-        seat concept; the only unit is people. Omit it to let the server decide: a
-        one-parent booking checks in immediately, a two-parent booking answers
-        PARTY_SELECTION_REQUIRED without mutating anything. It can never exceed the
-        booked party size.
+        How many people actually walked in, decided at the gate. This product has no seat
+        concept; the only unit is people.
+
+        Independent of what was booked. A one-person booking can arrive as two, and a
+        two-person booking can arrive as one — the gate records what happened, because an
+        operator who cannot write down the truth will either give up on the number or write
+        something false, and both ruin the totals.
+
+        Omit it and the server changes nothing, answering PARTY_SELECTION_REQUIRED so the
+        scanner can ask. The upper bound only stops a keypad typo; it is not a policy.
       type: integer
-      enum: [1, 2]
+      minimum: 1
+      maximum: 20
 
     QrCheckInRequest:
       type: object
@@ -8678,14 +8686,16 @@ components:
         familySeatCount:
           description: Booked party size; null only when no family can be resolved.
           type: [integer, 'null']
-          enum: [1, 2, null]
+          minimum: 1
+          maximum: 20
         attendedCount:
           description: |
             How many parents this entry recorded. Set only for CHECKED_IN and
             ALREADY_CHECKED_IN; null for every other result, including
             PARTY_SELECTION_REQUIRED where nothing was recorded yet.
           type: [integer, 'null']
-          enum: [1, 2, null]
+          minimum: 1
+          maximum: 20
         attendanceParty:
           description: Family attendance party retained for scanner confirmation; null when no booking resolves.
           oneOf:
@@ -9269,7 +9279,8 @@ components:
           $ref: '#/components/schemas/CheckInResult'
         familySeatCount:
           type: [integer, 'null']
-          enum: [1, 2, null]
+          minimum: 1
+          maximum: 20
         deviceId:
           type: [string, 'null']
           format: uuid

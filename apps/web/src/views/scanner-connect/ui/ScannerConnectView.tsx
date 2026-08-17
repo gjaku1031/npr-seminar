@@ -50,7 +50,13 @@ import {
 const PAGE_STYLES = `
   .npr-connect-scan {
     display: grid;
-    grid-template-columns: minmax(320px, 430px) minmax(320px, 1fr);
+    /*
+      카메라가 남는 폭을 전부 가져간다. 이 화면에서 실제로 오래 보는 것은 카메라이고,
+      수동 입장은 QR 이 안 읽힐 때만 쓰는 보조 경로다. 예전에는 반대로 카메라가 430px 에
+      묶이고 수동 패널이 1fr 로 늘어나 있었다.
+      수동 패널은 3열 숫자패드가 눌리는 최소 폭(260px)만 지키고 300px 에서 멈춘다.
+    */
+    grid-template-columns: minmax(360px, 1fr) minmax(260px, 300px);
     gap: 18px;
     align-items: start;
     max-width: 1060px;

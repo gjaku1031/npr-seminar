@@ -51,7 +51,7 @@ export interface QrCheckInState {
   handleScan: (decodedText: string) => void;
   showOutcome: (outcome: CheckInOutcome) => void;
   /** 인원을 확정해 입장시킨다. 새 Idempotency-Key 로 나간다 — 본문이 달라진 요청이다. */
-  confirmParty: (attendedCount: 1 | 2) => void;
+  confirmParty: (attendedCount: number) => void;
   /** 인원을 고르지 않고 물러난다. 예약은 그대로 미입장이다. */
   cancelParty: () => void;
   reset: () => void;
@@ -146,7 +146,7 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
    * `keyFor` 가 새 키를 만들어 준다. 같은 키로 보내면 서버가 키 재사용으로 거절한다.
    */
   const confirmParty = useCallback(
-    (attendedCount: 1 | 2) => {
+    (attendedCount: number) => {
       setPanel((current) => {
         if (current.kind !== "party" || current.confirming) return current;
         const { token } = current;
