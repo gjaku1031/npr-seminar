@@ -14,10 +14,14 @@ type CheckInResult = "CHECKED_IN" | "PARTY_SELECTION_REQUIRED" | "ALREADY_CHECKE
   | "SESSION_MISMATCH" | "EXPIRED_QR" | "REVOKED_QR" | "INVALID_QR" | "RESERVATION_NOT_FOUND" | "NOT_AUTHORIZED";
 
 /**
- * 게이트에서 확정한 실제 입장 학부모 수. 이 제품에 좌석 개념은 없다 — 세는 단위는 사람뿐이다.
- * 예약 인원(seat_count)보다 작을 수 있다: 2명 예약에 한 분만 오는 경우가 있다.
+ * 게이트에서 확정한 실제 입장 인원. 이 제품에 좌석 개념은 없다 — 세는 단위는 사람뿐이다.
+ * 예약 인원(seat_count)보다 작을 수도, 클 수도 있다: 2명 예약에 한 분만 오기도 하고
+ * 1명 예약에 가족이 더 붙어 오기도 한다. 사실을 그대로 적는다.
  */
-export type AttendedCount = 1 | 2;
+export type AttendedCount = number;
+
+/** 숫자패드 오타(1 대신 111)만 막는 상한. 정책이 아니라 방어다. DB 제약과 같은 값이어야 한다. */
+export const MAX_ATTENDED_COUNT = 20;
 
 interface ScannerContext {
   readonly id: bigint;
@@ -362,21 +366,21 @@ export class CheckInsService {
       /**
        * 실제 입장 인원 확정.
        *
-       * 1명 예약은 물을 것이 없다 — 온 사람은 그 한 분이다.
-       * 2명 예약인데 인원을 받지 못했으면 **아무것도 바꾸지 않고** 스캐너에 되묻는다.
-       * 2명 예약했지만 한 분만 오는 경우가 있어서, 예약 인원을 실제 입장으로 단정하면
-       * 통계가 조용히 틀어진다. 여기서 멈추는 편이 잘못된 숫자를 남기는 것보다 낫다.
+       * **예약 인원과 무관하게 언제나 되묻는다.** 처음에는 1명 예약이면 물을 것이 없다고
+       * 보았는데 현장이 그렇지 않다: 1명으로 예약하고 두 분이 오거나 가족이 더 붙어 온다.
+       * 예약 인원을 실제 입장으로 단정하면 그만큼 조용히 틀린 숫자가 쌓인다.
        *
-       * 인원이 예약보다 많으면 거절한다 — 예약하지 않은 사람을 입장시키는 경로가 되면 안 된다.
+       * 인원을 받지 못했으면 **아무것도 바꾸지 않고** 스캐너에 되묻는다. 여기서 멈추는 편이
+       * 잘못된 숫자를 남기는 것보다 낫다.
+       *
+       * 예약보다 많은 인원도 그대로 받는다 — 실제로 온 사람 수가 사실이고, 게이트가 사실을
+       * 적지 못하면 운영자는 숫자를 포기하거나 거짓으로 적게 된다. 상한은 DB 제약(1~20)이
+       * 숫자패드 오타만 막는다.
        */
       let recordedCount: number | null = null;
       if (result === "CHECKED_IN" && booking !== undefined) {
-        if (attendedCount !== undefined && attendedCount > booking.seat_count) {
-          this.fail(409, "ATTENDED_COUNT_EXCEEDS_BOOKING");
-        }
-        const resolved = attendedCount ?? (booking.seat_count === 1 ? 1 : undefined);
-        if (resolved === undefined) result = "PARTY_SELECTION_REQUIRED";
-        else recordedCount = resolved;
+        if (attendedCount === undefined) result = "PARTY_SELECTION_REQUIRED";
+        else recordedCount = attendedCount;
       }
 
       if (result === "CHECKED_IN" && booking !== undefined && recordedCount !== null) {

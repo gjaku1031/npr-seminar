@@ -266,7 +266,7 @@ export interface CheckInOutcome {
   familyBookingId: string | null;
   familySeatCount: 1 | 2 | null;
   /** 이 입장이 기록한 인원. CHECKED_IN·ALREADY_CHECKED_IN 에서만 값이 있다. */
-  attendedCount: 1 | 2 | null;
+  attendedCount: number | null;
   /** 가족 참석 학부모 — 예약을 못 찾으면 null. 스캐너 확인 문구에 그대로 쓴다. */
   attendanceParty: AttendanceParty | null;
   /** 대표(최고학년) 학생 이름 — 확인 문구 전용. 예약을 못 찾으면 null. */
@@ -282,6 +282,9 @@ export interface CheckInOutcome {
 
 /** 계약 enum. 좌석 수는 서버가 파생한다 (x-server-seat-count: MOTHER 1 / FATHER 1 / BOTH 2). */
 export type AttendanceParty = "MOTHER" | "FATHER" | "BOTH";
+
+/** 숫자패드 오타만 막는 상한 — 정책이 아니다. 서버 DB 제약과 같은 값이어야 한다. */
+export const MAX_ATTENDED_COUNT = 20;
 
 export const ATTENDANCE_PARTY_LABELS: Record<AttendanceParty, string> = {
   MOTHER: "모",
@@ -781,8 +784,8 @@ export interface FamilyBooking {
   bookingSource: BookingSource;
   /** 서버 파생 — MOTHER=1 / FATHER=1 / BOTH=2. 자녀 수로 늘어나지 않는다. */
   seatCount: 1 | 2;
-  /** 실제 입장 인원 — 게이트에서 정한다. 미입장이면 null. */
-  attendedCount: 1 | 2 | null;
+  /** 실제 입장 인원 — 게이트에서 정한다. 미입장이면 null. 예약 인원과 무관하다. */
+  attendedCount: number | null;
   /** QR 리허설용 예약. 통계에는 그대로 잡히고, 시트·일반 문자에서만 빠진다. */
   isTest: boolean;
   status: FamilyBookingStatus;
@@ -1185,10 +1188,10 @@ export interface SessionRosterBookingProjection {
   /** 예약 인원. 계약 enum [1, 2]. */
   seatCount: number;
   /**
-   * 실제로 입장한 인원 — 게이트에서 정한다. 미입장이면 null 이고, 2명 예약에 한 분만
-   * 온 경우 seatCount 보다 작다.
+   * 실제로 입장한 인원 — 게이트에서 정한다. 미입장이면 null.
+   * 예약 인원(seatCount)보다 작을 수도 클 수도 있다: 사실을 그대로 적는다.
    */
-  attendedCount: 1 | 2 | null;
+  attendedCount: number | null;
   /** QR 리허설용 예약. 통계에는 그대로 잡히고, 시트·일반 문자에서만 빠진다. 명단 맨 앞 고정. */
   isTest: boolean;
   checkedInAt: string | null;
