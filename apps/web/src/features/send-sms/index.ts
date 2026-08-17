@@ -4,6 +4,8 @@
 // 로컬 메모리에 쓰고도 "발송했어요"를 띄울 수 있어서, 남겨 두는 것만으로 위험했다.
 // 이제 이 슬라이스는 계약(tag: Admin SMS)만 호출한다.
 
+export { useSmsAudienceCounts } from "./model/useSmsAudienceCounts";
+export type { SmsAudienceCountsState } from "./model/useSmsAudienceCounts";
 export { useSmsGateway } from "./model/useSmsGateway";
 export type { SmsGatewayState } from "./model/useSmsGateway";
 

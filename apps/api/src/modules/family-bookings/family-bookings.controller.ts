@@ -58,6 +58,10 @@ export class AdminUpdateDto extends PublicUpdateDto {
   @IsUUID("4", { each: true }) public studentIds?: string[];
   @IsString() @Length(3, 500) public reason!: string;
 }
+class TestBranchDto {
+  @IsIn(["SONGPA", "WIRYE", "GWANGJIN"]) public branch!: "SONGPA" | "WIRYE" | "GWANGJIN";
+}
+
 export class AdminCancelDto {
   @IsInt() @Min(1) public expectedVersion!: number;
   @IsIn(ADMIN_BOOKING_CANCELLATION_TYPES) public cancellationType!: AdminBookingCancellationType;
@@ -186,6 +190,15 @@ export class FamilyBookingsController {
   @Patch("admin/family-bookings/:familyBookingId") @UseGuards(SessionGuard, RolesGuard, CsrfGuard) @Roles("ADMIN")
   @SensitiveResponse()
   public update(@Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string, @Body() body: AdminUpdateDto, @Headers("idempotency-key") key: string | undefined, @CurrentActor() actor: AuthenticatedActor) { return this.management.update(id, body, actor.subject, this.key(key)); }
+
+  /** 테스트 예약 전용 — 캠퍼스별 문자 발송을 확인하려면 리허설 예약이 옮겨 다녀야 한다. */
+  @Post("admin/family-bookings/:familyBookingId/test-branch") @HttpCode(200) @UseGuards(SessionGuard, RolesGuard, CsrfGuard) @Roles("ADMIN")
+  public changeTestBranch(
+    @Param("familyBookingId", new ParseUUIDPipe({ version: "4" })) id: string,
+    @Body() body: TestBranchDto,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) { return this.management.changeTestBookingBranch(id, body.branch, actor.subject, this.key(key)); }
 
   /** 테스트 예약 전용 — 실제 입장 기록은 되돌릴 수 없다 (서비스가 is_test 를 강제한다). */
   @Post("admin/family-bookings/:familyBookingId/check-in-rollback") @HttpCode(200) @UseGuards(SessionGuard, RolesGuard, CsrfGuard) @Roles("ADMIN")

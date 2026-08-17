@@ -23,12 +23,13 @@ import {
   BOOKING_VERSION_CONFLICT_CODE,
   cancelAdminFamilyBooking,
   rollbackFamilyBookingCheckIn,
+  changeTestBookingBranch,
   changeFamilyBookingAttendanceParty,
   createAdminEnrolledFamilyBooking,
   createAdminGuestFamilyBooking,
   useKeyedOperationIntents,
 } from "@/shared/api";
-import type { AdminCancellationType, AttendanceParty, CreateEnrolledBookingInput, CreateGuestBookingInput } from "@/shared/api";
+import type { AdminCancellationType, AttendanceParty, Branch, CreateEnrolledBookingInput, CreateGuestBookingInput } from "@/shared/api";
 import { defaultErrorMessage, isApiError } from "@/shared/api";
 import type { RetainedRetryOutcome } from "./retainedRetry";
 
@@ -57,6 +58,8 @@ export interface BookingMutationsState {
   }) => Promise<boolean>;
   /** 테스트 예약 전용 입장 취소. 서버가 isTest 가 아니면 409 로 막는다. */
   rollbackCheckIn: (familyBookingId: string) => Promise<boolean>;
+  /** 테스트 예약 전용 캠퍼스 변경. 서버가 isTest 가 아니면 409 로 막는다. */
+  changeTestBranch: (familyBookingId: string, branch: Branch) => Promise<boolean>;
   cancel: (input: {
     familyBookingId: string;
     expectedVersion: number;
@@ -90,6 +93,8 @@ type BookingIntent =
   | { action: "cancel"; familyBookingId: string; expectedVersion: number; cancellationType: AdminCancellationType }
   /** 테스트 예약만 — 서버가 isTest 가 아닌 예약을 거절한다. 버전을 실지 않는다(되돌림은 상태 하나뿐). */
   | { action: "rollbackCheckIn"; familyBookingId: string }
+  /** 테스트 예약만 — 캠퍼스별 문자 발송을 확인하려고 리허설 예약을 옮긴다. */
+  | { action: "changeTestBranch"; familyBookingId: string; branch: Branch }
   | {
       action: "createEnrolled";
       /**
@@ -120,6 +125,7 @@ function intentTarget(intent: BookingIntent): string {
     case "changeParty":
     case "cancel":
     case "rollbackCheckIn":
+    case "changeTestBranch":
       return `booking:${intent.familyBookingId}`;
     case "createEnrolled":
       return `enrolled:${intent.input.seminarSessionId}:${intent.primaryStudentId}`;
@@ -152,6 +158,8 @@ function send(intent: BookingIntent, idempotencyKey: string): Promise<unknown> {
       );
     case "rollbackCheckIn":
       return rollbackFamilyBookingCheckIn(intent.familyBookingId, { idempotencyKey });
+    case "changeTestBranch":
+      return changeTestBookingBranch(intent.familyBookingId, intent.branch, { idempotencyKey });
     case "createEnrolled":
       return createAdminEnrolledFamilyBooking(intent.input, { idempotencyKey });
     case "createGuest":
@@ -163,6 +171,7 @@ const SUCCESS_NOTICE: Record<BookingIntent["action"], string> = {
   changeParty: "참석 학부모를 변경했어요.",
   cancel: "예약을 취소했어요.",
   rollbackCheckIn: "입장을 취소했어요. 같은 QR로 다시 테스트할 수 있어요.",
+  changeTestBranch: "테스트 계정의 캠퍼스를 옮겼어요.",
   createEnrolled: "예약을 추가했어요.",
   createGuest: "비재원생 예약을 추가했어요.",
 };
@@ -262,6 +271,11 @@ export function useBookingMutations(onChanged: () => void): BookingMutationsStat
     [run],
   );
 
+  const changeTestBranch: BookingMutationsState["changeTestBranch"] = useCallback(
+    (familyBookingId, branch) => run({ action: "changeTestBranch", familyBookingId, branch }),
+    [run],
+  );
+
   const addGuest: BookingMutationsState["addGuest"] = useCallback(
     (input) => (guestPending ? Promise.resolve(false) : run({ action: "createGuest", input })),
     [guestPending, run],
@@ -308,6 +322,7 @@ export function useBookingMutations(onChanged: () => void): BookingMutationsStat
     changeParty,
     cancel,
     rollbackCheckIn,
+    changeTestBranch,
     addGuest,
     guestPending,
     addEnrolled,
