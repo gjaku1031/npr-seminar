@@ -447,9 +447,6 @@ export class SessionRosterService {
            )
           join family_bookings booking
             on booking.id=child.family_booking_id and booking.session_id=child.session_id
-           -- 테스트 예약은 명단에 **행으로는 보이지만** 모니터링 숫자에는 들어가지 않는다.
-           -- 운영자가 세는 것은 실제로 올 사람 수다.
-           and not booking.is_test
       ),
       selected_roster_bookings as (
         select family_booking_id,status,attendance_party
@@ -460,7 +457,7 @@ export class SessionRosterService {
         select distinct family_booking_id,status,attendance_party
           from selected_roster_bookings
       )
-      select (select count(*)::bigint from roster_filtered where not is_test) roster_row_count,
+      select (select count(*)::bigint from roster_filtered) roster_row_count,
              (select count(*)::bigint from selected_roster_bookings) student_count,
              count(*)::bigint family_booking_count,
              coalesce(sum(case attendance_party when 'BOTH' then 2 else 1 end),0)::bigint attendee_count

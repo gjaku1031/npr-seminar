@@ -783,7 +783,7 @@ export interface FamilyBooking {
   seatCount: 1 | 2;
   /** 실제 입장 인원 — 게이트에서 정한다. 미입장이면 null. */
   attendedCount: 1 | 2 | null;
-  /** QR 리허설용 예약. 통계·시트·일반 문자에서 제외된다. */
+  /** QR 리허설용 예약. 통계에는 그대로 잡히고, 시트·일반 문자에서만 빠진다. */
   isTest: boolean;
   status: FamilyBookingStatus;
   students: FamilyBookingStudentSnapshot[];
@@ -1189,7 +1189,7 @@ export interface SessionRosterBookingProjection {
    * 온 경우 seatCount 보다 작다.
    */
   attendedCount: 1 | 2 | null;
-  /** QR 리허설용 예약. 통계·시트·일반 문자에서 빠지고 명단 맨 앞에 고정된다. */
+  /** QR 리허설용 예약. 통계에는 그대로 잡히고, 시트·일반 문자에서만 빠진다. 명단 맨 앞 고정. */
   isTest: boolean;
   checkedInAt: string | null;
   cancelledAt: string | null;
