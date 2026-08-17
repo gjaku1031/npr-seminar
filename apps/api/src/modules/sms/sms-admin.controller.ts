@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { Type } from "class-transformer";
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, Min, ValidateIf } from "class-validator";
+import { IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min, ValidateIf } from "class-validator";
 import { CsrfGuard } from "../../common/auth/csrf.guard.js";
 import { CurrentActor } from "../../common/auth/current-actor.decorator.js";
 import { Roles } from "../../common/auth/roles.decorator.js";
@@ -37,6 +37,11 @@ class UpdateTemplateDto {
   @IsString() @Matches(/^\d+$/) public version!: string;
 }
 
+class TargetCountsQueryDto {
+  @IsIn(branches) public branch!: "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
+  @IsUUID() public seminarSessionId!: string;
+}
+
 class TargetDto {
   @IsIn(branches) public branch!: "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
   @IsUUID() public seminarSessionId!: string;
@@ -48,6 +53,8 @@ class TargetDto {
 
 class EnqueueDto extends TargetDto {
   @IsString() @Length(20, 100) public previewToken!: string;
+  /** 예약 발송 시각(ISO 8601). 생략하면 즉시 발송. 과거·너무 먼 미래는 서비스가 거절한다. */
+  @IsOptional() @IsISO8601() public scheduledAt?: string;
 }
 
 class HistoryQueryDto {
@@ -94,6 +101,12 @@ export class SmsAdminController {
     return this.service.removeTemplate(templateId, version, actor.subject, key);
   }
 
+  /** 대상별 수신 인원 — 읽기 전용. previewToken 을 만들지 않으므로 발송 자격이 생기지 않는다. */
+  @Get("targets/counts")
+  public counts(@Query() query: TargetCountsQueryDto) {
+    return this.service.audienceCounts({ branch: query.branch, seminarSessionId: query.seminarSessionId });
+  }
+
   @Post("targets/preview")
   @HttpCode(200)
   @UseGuards(CsrfGuard)
@@ -104,6 +117,18 @@ export class SmsAdminController {
   @UseGuards(CsrfGuard)
   public enqueue(@Body() body: EnqueueDto, @CurrentActor() actor: AuthenticatedActor, @Headers("idempotency-key") key = "") {
     return this.service.enqueue(body, actor.subject, key, "ADMIN_GROUP");
+  }
+
+  /** 예약 발송 취소 — 아직 나가지 않은 건만. 이미 발송된 문자는 되돌릴 수 없다. */
+  @Post("sends/:batchId/cancel")
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  public cancelBatch(
+    @Param("batchId", new ParseUUIDPipe({ version: "4" })) batchId: string,
+    @CurrentActor() actor: AuthenticatedActor,
+    @Headers("idempotency-key") key = "",
+  ) {
+    return this.service.cancelScheduledBatch(batchId, actor.subject, key);
   }
 
   @Post("survey-sends")

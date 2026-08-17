@@ -272,6 +272,36 @@ export class SmsAdminService {
     );
   }
 
+  /**
+   * 대상별 수신 인원 — 발송 전에 "누구에게 몇 명 나가는지"를 화면이 미리 보여 주기 위한 읽기 전용 집계.
+   *
+   * ★ 근사하지 않는다. 실제 발송이 쓰는 targets() 를 대상마다 그대로 돌려 그 결과 수를 센다.
+   *   예약 상태만으로 세면 실제와 어긋난다 — 취소 대상은 마지막 해제 시각으로 학생을 다시
+   *   추리고, 그 결과 대상이 0명이 되는 예약이 있기 때문이다. 발송 직전에 보여 준 숫자와
+   *   실제로 나간 수가 다르면 그 숫자는 없느니만 못하다.
+   *
+   * preview() 와 달리 previewToken 을 만들지 않고 본문도 렌더하지 않는다 — 화면이 캠퍼스·회차를
+   * 바꿀 때마다 부르는 값이라, 발송 자격을 남기면 안 된다.
+   */
+  public async audienceCounts(input: { branch: SmsBranch; seminarSessionId: string }) {
+    const audiences: SmsAudience[] = [
+      "BOOKED_FAMILIES",
+      "RESERVED_FAMILIES",
+      "CHECKED_IN_FAMILIES",
+      "CANCELLED_FAMILIES",
+      "TEST_ACCOUNTS",
+    ];
+    const counted = await Promise.all(audiences.map(async (audience) => {
+      const { rows } = await this.targets({ ...input, audience });
+      return [audience, rows.length] as const;
+    }));
+    return {
+      branch: input.branch,
+      seminarSessionId: input.seminarSessionId,
+      counts: counted.map(([audience, recipientCount]) => ({ audience, recipientCount })),
+    };
+  }
+
   public async preview(input: TargetRequest) {
     const prepared = await this.prepare(input);
     const maximumMessageBytes = this.maximum(prepared.rows.map((row) => row.classification.messageBytes));
@@ -307,8 +337,14 @@ export class SmsAdminService {
     };
   }
 
+  /**
+   * @param input.scheduledAt 예약 발송 시각(ISO). 생략하면 즉시 발송이다.
+   *
+   * 예약은 아웃박스 행의 next_attempt_at 하나로 표현된다 — 워커가 이미 그 시각을 보고 집기
+   * 때문에 스케줄러도 새 상태값도 없다.
+   */
   public enqueue(
-    input: TargetRequest & { previewToken: string },
+    input: TargetRequest & { previewToken: string; scheduledAt?: string },
     actor: string,
     key: string,
     source: "ADMIN_GROUP" | "SURVEY",
@@ -316,6 +352,7 @@ export class SmsAdminService {
     return this.idempotency.execute(`SMS_${source}_ENQUEUE`, key, input, async (transaction) => {
       const prepared = await this.prepare(input, transaction);
       if (prepared.previewToken !== input.previewToken) this.fail(409, "SMS_PREVIEW_TOKEN_CHANGED");
+      const notBefore = this.scheduledSendTime(input.scheduledAt);
       const batchId = randomUUID();
       for (const row of prepared.rows) {
         await this.outbox.enqueue(transaction, {
@@ -330,8 +367,10 @@ export class SmsAdminService {
           message: row.message,
           title: row.title,
           actorSubject: actor,
+          notBefore,
           safeMetadata: {
             batchId,
+            scheduledAt: notBefore === null ? null : notBefore.toISOString(),
             templateId: prepared.payload.templateId,
             templateName: prepared.payload.templateName,
             templateVersion: prepared.payload.templateVersion,
@@ -479,6 +518,66 @@ export class SmsAdminService {
       templateVersion: null,
       purpose: null,
     };
+  }
+
+  /**
+   * 예약 발송을 취소한다 — 아직 나가지 않은 것만.
+   *
+   * 예약 발송에 취소가 없으면, 잘못 잡은 600명짜리 발송을 멈출 방법이 없다. 그게 이 기능이
+   * 존재하는 이유다.
+   *
+   * **PENDING 만 취소한다.** CLAIMED·SENDING 은 워커가 이미 손에 쥔 것이라 여기서 상태를
+   * 바꾸면 lease 불변식이 깨지고, SENT 는 이미 사람에게 도착했다 — 보낸 문자를 취소할 수는
+   * 없으므로 그런 척하지 않는다. 그래서 몇 건이 취소됐고 몇 건이 이미 손을 떠났는지 함께
+   * 돌려준다: 운영자가 "다 막았다"고 오해하면 안 된다.
+   */
+  public async cancelScheduledBatch(batchId: string, actor: string, key: string) {
+    return this.idempotency.execute("SMS_BATCH_CANCEL", key, { batchId }, async (transaction) => {
+      const rows = await transaction.$queryRaw<Array<{ status: string; count: bigint }>>`
+        select status,count(*)::bigint count
+          from sms_outbox
+         where safe_metadata->>'batchId' = ${batchId}
+         group by status`;
+      if (rows.length === 0) this.fail(404, "SMS_BATCH_NOT_FOUND");
+
+      const cancelled = await transaction.$executeRaw`
+        update sms_outbox
+           set status='CANCELLED',
+               last_error_code='ADMIN_CANCELLED_BEFORE_SEND',
+               updated_at=now()
+         where safe_metadata->>'batchId' = ${batchId}
+           and status='PENDING'`;
+
+      const total = rows.reduce((sum, row) => sum + Number(row.count), 0);
+      const alreadyLeft = rows
+        .filter((row) => row.status !== "PENDING")
+        .reduce((sum, row) => sum + Number(row.count), 0);
+      return {
+        batchId,
+        cancelledCount: cancelled,
+        alreadyLeftCount: alreadyLeft,
+        totalCount: total,
+        actorSubject: actor,
+      };
+    });
+  }
+
+  /**
+   * 예약 발송 시각 검증. 없으면 null(즉시 발송).
+   *
+   * 과거 시각은 거절한다 — "예약"이라고 눌렀는데 즉시 나가면 운영자가 의도한 것과 정반대다.
+   * 지금 보내려면 예약을 비우면 된다. 시계 오차를 감안해 1분 여유만 준다.
+   *
+   * 상한도 둔다. 오타 하나(2026 → 2036)로 문자가 10년 뒤에 나가는 큐를 남기지 않는다.
+   */
+  private scheduledSendTime(value: string | undefined): Date | null {
+    if (value === undefined) return null;
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) this.fail(400, "SMS_SCHEDULED_AT_INVALID");
+    const now = Date.now();
+    if (at.getTime() < now - 60_000) this.fail(409, "SMS_SCHEDULED_AT_IN_PAST");
+    if (at.getTime() > now + 180 * 86_400_000) this.fail(409, "SMS_SCHEDULED_AT_TOO_FAR");
+    return at;
   }
 
   private async targets(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {

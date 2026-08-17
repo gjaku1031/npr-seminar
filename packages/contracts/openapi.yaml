@@ -2572,6 +2572,64 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/admin/family-bookings/{familyBookingId}/test-branch:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBookingId'
+    post:
+      operationId: changeTestBookingBranch
+      tags: [Admin family bookings]
+      summary: Move a test booking to another campus
+      description: |
+        Restricted to bookings flagged isTest. SMS audiences are selected per campus, so
+        rehearsing all three campuses needs the rehearsal booking to move between them;
+        creating one test booking per campus would instead leave three synthetic rows in the
+        roster and the counts.
+
+        A real family's campus is a fact recorded at booking time, and changing it would
+        disagree with messages already sent and with the Sheets projection, so a non-test
+        booking is rejected with 409. The campus lives on the participant row, and a test
+        booking has exactly one.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      x-hard-delete: forbidden
+      x-mutation-kind: durable
+      x-idempotency: required
+      x-requires-csrf: true
+      x-requires-same-origin: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/Origin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branch]
+              properties:
+                branch:
+                  $ref: '#/components/schemas/Branch'
+              additionalProperties: false
+      responses:
+        '200':
+          description: Booking with the participant moved to the requested campus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBooking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/admin/family-bookings/{familyBookingId}/check-in-rollback:
     parameters:
       - $ref: '#/components/parameters/FamilyBookingId'
@@ -3734,6 +3792,52 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/admin/sms/targets/counts:
+    get:
+      operationId: countSmsTargets
+      tags: [Admin SMS]
+      summary: Count recipients per audience for one branch and session
+      description: |
+        How many people each audience would actually reach, so the operator sees the size
+        of a send before committing to it — and sees it on the tab itself, not only after
+        asking for a preview.
+
+        The counts come from the same recipient selection the send uses, not from booking
+        status alone: the cancelled audience re-derives its students from the latest release
+        time, which can leave a booking with no recipient at all. A number that disagrees
+        with what actually goes out is worse than no number.
+
+        Read-only. Unlike the preview it mints no preview token, so calling it while the
+        operator switches branch or session never creates authority to send.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      parameters:
+        - in: query
+          name: branch
+          required: true
+          schema:
+            $ref: '#/components/schemas/Branch'
+        - in: query
+          name: seminarSessionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Recipient count for every audience
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmsTargetCounts'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/admin/sms/targets/preview:
     post:
       operationId: previewSmsTargets
@@ -3820,6 +3924,57 @@ paths:
           $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/admin/sms/sends/{batchId}/cancel:
+    parameters:
+      - in: path
+        name: batchId
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelSmsBatch
+      tags: [Admin SMS]
+      summary: Cancel the messages of a batch that have not left yet
+      description: |
+        A scheduled send that cannot be stopped is a loaded gun; this is the safety.
+
+        Only PENDING messages are cancelled. Messages the worker already holds (CLAIMED,
+        SENDING) are left alone so the lease invariant is not broken mid-flight, and sent
+        messages are not touched at all — a delivered SMS cannot be recalled, and pretending
+        otherwise would be a lie to the operator. The response therefore reports both how
+        many were stopped and how many had already left, so nobody reads a partial stop as
+        a complete one.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      x-hard-delete: forbidden
+      x-mutation-kind: durable
+      x-idempotency: required
+      x-requires-csrf: true
+      x-requires-same-origin: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/Origin'
+      responses:
+        '200':
+          description: Cancellation outcome for the batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmsBatchCancellation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/admin/sms/survey-sends:
     post:
@@ -4688,6 +4843,54 @@ components:
       type: string
       enum: [SENT, BLOCKED_DISABLED, BLOCKED_ALLOWLIST, RETRYABLE, FAILED_PERMANENT, DELIVERY_UNKNOWN, DEAD]
 
+    SmsBatchCancellation:
+      type: object
+      description: |
+        What the cancellation actually stopped. cancelledCount and alreadyLeftCount are
+        reported separately because a partial stop must never read as a complete one.
+      required: [batchId, cancelledCount, alreadyLeftCount, totalCount]
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        cancelledCount:
+          type: integer
+          minimum: 0
+          description: Messages still PENDING that were stopped before sending.
+        alreadyLeftCount:
+          type: integer
+          minimum: 0
+          description: Messages already claimed, sending, sent, or otherwise past the point of stopping.
+        totalCount:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    SmsTargetCounts:
+      type: object
+      description: Recipient counts for every audience under one branch and session.
+      required: [branch, seminarSessionId, counts]
+      properties:
+        branch:
+          $ref: '#/components/schemas/Branch'
+        seminarSessionId:
+          type: string
+          format: uuid
+        counts:
+          type: array
+          description: One entry per audience, in the order the console shows them.
+          items:
+            type: object
+            required: [audience, recipientCount]
+            properties:
+              audience:
+                $ref: '#/components/schemas/SmsAudience'
+              recipientCount:
+                type: integer
+                minimum: 0
+            additionalProperties: false
+      additionalProperties: false
+
     SmsAudience:
       type: string
       description: |
@@ -4975,6 +5178,22 @@ components:
           type: string
           minLength: 20
           maxLength: 100
+        scheduledAt:
+          type: string
+          format: date-time
+          description: |
+            When the send should leave. Omit to send now.
+
+            Scheduling is one field on each queued message: the worker already claims only
+            rows whose next attempt time has arrived, so a future time simply waits in the
+            same queue and then travels the ordinary path. No separate scheduler exists, and
+            a scheduled batch is subject to the same allowlist and disabled-gateway rules at
+            the moment it actually sends, not at the moment it was scheduled.
+
+            A time in the past is rejected rather than sent immediately — pressing "schedule"
+            and having it go out at once is the opposite of what the operator asked for.
+            Times far in the future are rejected too, so one mistyped year cannot leave
+            messages queued for a decade.
       oneOf:
         - required: [templateId]
           not:

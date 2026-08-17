@@ -368,6 +368,26 @@ export const CONTACT_MAX_LENGTH = 40;
 
 /** 낙관적 잠금 실패 — 다른 사람이 먼저 바꿨다는 뜻이므로 다시 읽어야 한다. */
 /**
+ * 테스트 예약의 캠퍼스를 바꾼다 (계약 POST /admin/family-bookings/{id}/test-branch).
+ *
+ * 캠퍼스별 문자 발송을 확인하려면 리허설 예약이 캠퍼스를 옮겨 다녀야 한다. 캠퍼스마다
+ * 테스트 예약을 만들면 명단·집계에 가짜 행이 셋 생기므로 하나를 옮긴다.
+ *
+ * **실제 예약에는 쓸 수 없다** — 서버가 isTest 가 아닌 예약을 409 로 거절한다. 실제 가족의
+ * 캠퍼스는 예약 시점의 사실이고, 바꾸면 이미 나간 문자·시트 투영과 어긋난다.
+ */
+export async function changeTestBookingBranch(
+  familyBookingId: string,
+  branch: Branch,
+  options: AdminBookingMutationOptions,
+): Promise<FamilyBooking> {
+  return apiRequest<FamilyBooking>(
+    `/admin/family-bookings/${encodeURIComponent(familyBookingId)}/test-branch`,
+    { method: "POST", body: { branch }, idempotencyKey: options.idempotencyKey, signal: options.signal },
+  );
+}
+
+/**
  * 테스트 예약을 다시 미입장으로 되돌린다 (계약 POST /admin/family-bookings/{id}/check-in-rollback).
  *
  * **실제 입장 기록에는 쓸 수 없다** — 서버가 isTest 가 아닌 예약을 409 로 거절한다. 오스캔은

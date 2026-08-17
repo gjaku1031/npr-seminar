@@ -12,7 +12,7 @@
  */
 
 /** 변경 조작의 종류 — `useBookingMutations` 의 의도 action 과 1:1 이다. */
-export type BookingMutationKind = "changeParty" | "cancel" | "rollbackCheckIn" | "createEnrolled" | "createGuest";
+export type BookingMutationKind = "changeParty" | "cancel" | "rollbackCheckIn" | "changeTestBranch" | "createEnrolled" | "createGuest";
 
 /** 화면이 여닫는 변경 대화상자들. */
 export type MutationDialogId =
@@ -29,8 +29,10 @@ export function mutationDialogsForRetainedAction(action: BookingMutationKind): M
     case "changeParty":
     case "cancel":
       return ["confirm"];
-    // 입장 취소는 확인 대화상자를 거치지 않는다 — 테스트 예약에만 뜨고 되돌려도 잃는 것이 없다.
+    // 입장 취소·캠퍼스 변경은 확인 대화상자를 거치지 않는다 — 테스트 예약에만 뜨고
+    // 되돌려도 잃는 것이 없다.
     case "rollbackCheckIn":
+    case "changeTestBranch":
       return [];
     case "createEnrolled":
       return ["manualEnrolled"];
