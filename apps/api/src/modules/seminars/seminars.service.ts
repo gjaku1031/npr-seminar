@@ -22,7 +22,15 @@ export interface SessionOperationsSummary {
   uncheckedBookingCount: number;
   cancelledBookingCount: number;
   noShowBookingCount: number;
+  /** 예약 기준 예상 참석 인원(모/부 = 2). 실제로 온 사람 수가 아니다. */
   attendeeCount: number;
+  /**
+   * **실제로 입장한 사람 수.** 게이트에서 확정한 인원의 합이다.
+   *
+   * attendeeCount 와 다르다: 2명 예약에 한 분만 오면 예상은 2, 실제는 1이다. 운영 중에
+   * "지금 안에 몇 명 있나"를 답하는 것은 이 값뿐이다.
+   */
+  attendedPeopleCount: number;
 }
 
 @Injectable()
@@ -110,8 +118,10 @@ export class SeminarsService {
     });
     const statusCounts = rows.length === 0 ? [] : await this.prisma.familyBooking.groupBy({
       by: ["sessionId", "status", "attendanceParty"],
-      where: { sessionId: { in: rows.map((row) => row.id) } },
+      // 테스트 예약은 운영 숫자가 아니다 — 통계·명단 모니터링과 같은 규칙을 여기서도 지킨다.
+      where: { sessionId: { in: rows.map((row) => row.id) }, isTest: false },
       _count: { _all: true },
+      _sum: { attendedCount: true },
     });
     const summaries = new Map(rows.map((row) => [row.id.toString(), this.emptyOperationsSummary()]));
     for (const statusCount of statusCounts) {
@@ -128,6 +138,9 @@ export class SeminarsService {
           summary.activeBookingCount += count;
           summary.checkedInBookingCount += count;
           summary.attendeeCount += statusCount.attendanceParty === "BOTH" ? count * 2 : count;
+          // 실제 입장 인원은 예약 인원에서 파생하지 않는다 — 게이트가 확정한 값만 더한다.
+          // 도입 전 입장 건은 마이그레이션이 예약 인원으로 채웠으므로 null 이 남지 않는다.
+          summary.attendedPeopleCount += statusCount._sum?.attendedCount ?? 0;
           break;
         case "CANCELLED":
           summary.cancelledBookingCount += count;
@@ -274,6 +287,7 @@ export class SeminarsService {
       cancelledBookingCount: 0,
       noShowBookingCount: 0,
       attendeeCount: 0,
+      attendedPeopleCount: 0,
     };
   }
 

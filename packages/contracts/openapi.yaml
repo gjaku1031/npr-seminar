@@ -6979,6 +6979,7 @@ components:
         - cancelledBookingCount
         - noShowBookingCount
         - attendeeCount
+        - attendedPeopleCount
       properties:
         activeBookingCount:
           type: integer
@@ -7004,6 +7005,14 @@ components:
           type: integer
           minimum: 0
           description: Active RESERVED/CHECKED_IN parents; MOTHER=1, FATHER=1, BOTH=2. Children never increase this count.
+        attendedPeopleCount:
+          type: integer
+          minimum: 0
+          description: |
+            Parents who actually walked in, summed from the per-booking attendedCount the
+            gate confirmed. Distinct from attendeeCount, which is what the bookings expect:
+            a two-parent booking that arrives with one parent contributes 2 there and 1 here.
+            Test bookings are excluded, as they are from every count in this summary.
       additionalProperties: false
 
     AttendanceMonitoring:
