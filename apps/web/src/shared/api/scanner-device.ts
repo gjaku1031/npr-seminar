@@ -78,7 +78,7 @@ export function listScannerManualCandidates(
 export function checkInFamilyByQr(
   qrToken: string,
   options: DurableCallOptions,
-  attendedCount?: 1 | 2,
+  attendedCount?: number,
 ): Promise<CheckInOutcome> {
   return apiRequest<CheckInOutcome>("/scanner/check-ins/qr", {
     method: "POST",
