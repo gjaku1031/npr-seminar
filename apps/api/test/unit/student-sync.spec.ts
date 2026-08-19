@@ -294,6 +294,32 @@ describe("live student normalization", () => {
     expect(normalized.counts.ambiguousStudentCount).toBe(1);
   });
 
+  /**
+   * 회귀 방지: 9월 반이 통통통에 미리 생기자 634명의 대표 반이 한꺼번에 `09-…` 로 바뀌고
+   * 단위·담임이 비었다. 규칙이 아니라 정렬이 골랐다 — `"09-1M4A"` 가 `"1M4A"` 보다 앞선다.
+   */
+  it("다음 학기 반이 현재 반을 밀어내지 않는다", () => {
+    const normalizer = new StudentNormalizerService(new PhoneProtector(environment()));
+    const normalized = normalizer.normalize([
+      snapshot("SONGPA", [
+        // 원천이 주는 순서와 무관하게 현재 반이 뽑혀야 한다.
+        assignment({ sourceUniqueNo: "a1", classRegistrationNo: "r1", studentNo: "s1", className: "09-1M4A" }),
+        assignment({ sourceUniqueNo: "a2", classRegistrationNo: "r2", studentNo: "s1", className: "1M4A" }),
+      ]),
+      // 다음 학기 반만 가진 학생 — 개강 전에 등록한 재원생이다.
+      snapshot("WIRYE", [assignment({ sourceUniqueNo: "b1", studentNo: "s2", name: "학생2", className: "09-5M1B" })]),
+      snapshot("GWANGJIN", [assignment({ sourceUniqueNo: "c1", studentNo: "s3", name: "학생3", className: "6T3D" })]),
+    ]);
+    const selected = normalized.rows.filter((row) => row.primarySelected);
+    expect(selected.find((row) => row.sourceStudentNo === "s1"))
+      .toMatchObject({ className: "1M4A", classResolutionStatus: "ONE_REGULAR" });
+    expect(selected.find((row) => row.sourceStudentNo === "s2"))
+      .toMatchObject({ classResolutionReason: "FUTURE_TERM_ONLY" });
+    // 다음 학기 배정도 계속 저장한다 — 9월이 되면 그때의 현재 반이다.
+    expect(normalized.rows.find((row) => row.className === "09-1M4A"))
+      .toMatchObject({ included: true, primaryCandidate: false });
+  });
+
   it("excludes inactive and bracketed rows and reports global student-number conflicts without dropping assignments", () => {
     const normalizer = new StudentNormalizerService(new PhoneProtector(environment()));
     const normalized = normalizer.normalize([

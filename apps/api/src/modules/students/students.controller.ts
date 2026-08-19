@@ -17,7 +17,7 @@ export class StudentListQuery {
   @IsOptional() @IsString() @MaxLength(100) public representativeClass?: string;
   @IsOptional() @IsString() @MaxLength(100) public teacherName?: string;
   @IsOptional() @IsString() @MaxLength(100) public unitName?: string;
-  @IsOptional() @IsIn(["REGULAR", "SCIENCE_ALIAS", "MULTIPLE_REGULAR", "NO_CLASS"]) public resolution?: string;
+  @IsOptional() @IsIn(["REGULAR", "SCIENCE_ALIAS", "MULTIPLE_REGULAR", "NO_CLASS", "FUTURE_TERM_ONLY"]) public resolution?: string;
   @IsOptional() @Transform(({ value }) => value === "true" ? true : value === "false" ? false : value) @IsBoolean() public sourceActive?: boolean;
   @IsOptional() @Transform(({ value }) => value === "true" ? true : value === "false" ? false : value) @IsBoolean() public categorizedOnly?: boolean;
   @IsOptional() @IsUUID("4") public seminarSessionId?: string;

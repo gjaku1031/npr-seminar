@@ -44,7 +44,7 @@ export interface StagedSnapshotRow {
   readonly primaryCandidate: boolean;
   readonly primarySelected: boolean;
   readonly classResolutionStatus: "ONE_REGULAR" | "SCIENCE_ONLY" | "AMBIGUOUS_FALLBACK" | null;
-  readonly classResolutionReason: "MULTIPLE_REGULAR" | "NO_CLASS" | null;
+  readonly classResolutionReason: "MULTIPLE_REGULAR" | "NO_CLASS" | "FUTURE_TERM_ONLY" | null;
 }
 
 export interface SnapshotSafeSummary {
