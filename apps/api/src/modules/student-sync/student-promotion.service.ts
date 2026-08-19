@@ -68,6 +68,7 @@ export class StudentPromotionService {
         select gen_random_uuid(),st.source_student_no,st.branch_id,st.name,
                case when st.class_resolution_status='SCIENCE_ONLY' then '과학'
                     when st.class_resolution_reason='NO_CLASS' then '미분류'
+                    when st.class_resolution_reason='FUTURE_TERM_ONLY' then '비재원생'
                     else st.class_name end,
                st.school_name,st.grade,st.teacher_name,st.unit_name,st.mother_phone_ciphertext,
                st.mother_phone_digest,st.mother_phone_last4,st.father_phone_ciphertext,
@@ -82,6 +83,7 @@ export class StudentPromotionService {
           branch_id=st.branch_id,name=st.name,
           class_name=case when st.class_resolution_status='SCIENCE_ONLY' then '과학'
                           when st.class_resolution_reason='NO_CLASS' then '미분류'
+                          when st.class_resolution_reason='FUTURE_TERM_ONLY' then '비재원생'
                           else st.class_name end,
           school_name=st.school_name,grade=st.grade,teacher_name=st.teacher_name,unit_name=st.unit_name,
           mother_phone_ciphertext=st.mother_phone_ciphertext,mother_phone_digest=st.mother_phone_digest,

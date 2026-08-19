@@ -499,6 +499,8 @@ export class StudentsService {
         s.class_resolution_status='AMBIGUOUS_FALLBACK' and s.class_resolution_reason='MULTIPLE_REGULAR'`;
       case "NO_CLASS": return Prisma.sql`
         s.class_resolution_status='AMBIGUOUS_FALLBACK' and s.class_resolution_reason='NO_CLASS'`;
+      case "FUTURE_TERM_ONLY": return Prisma.sql`
+        s.class_resolution_status='AMBIGUOUS_FALLBACK' and s.class_resolution_reason='FUTURE_TERM_ONLY'`;
       default: this.fail(400, "STUDENT_RESOLUTION_INVALID");
     }
   }
@@ -645,7 +647,8 @@ export class StudentsService {
   private representative(row: any, projection = this.assignmentProjection(row)) {
     const resolution = row.classResolutionStatus === "ONE_REGULAR" ? "REGULAR"
       : row.classResolutionStatus === "SCIENCE_ONLY" ? "SCIENCE_ALIAS"
-        : row.classResolutionReason === "MULTIPLE_REGULAR" ? "MULTIPLE_REGULAR" : "NO_CLASS";
+        : row.classResolutionReason === "MULTIPLE_REGULAR" ? "MULTIPLE_REGULAR"
+          : row.classResolutionReason === "FUTURE_TERM_ONLY" ? "FUTURE_TERM_ONLY" : "NO_CLASS";
     const selected = resolution === "REGULAR" ? row.assignments.find((assignment: any) =>
       assignment.sourceActive !== false
         && isRepresentativeStudentClass(assignment.className)
@@ -653,6 +656,8 @@ export class StudentsService {
     return {
       resolution,
       displayName: resolution === "REGULAR" ? studentClassBaseName(row.className) : resolution === "SCIENCE_ALIAS" ? "과학" : null,
+      // FUTURE_TERM_ONLY 는 모호가 아니다 — 고를 반이 여럿이라 못 정한 것이 아니라
+      // 지금 다니는 반이 아직 없다는 확정된 사실이다.
       ambiguous: resolution === "MULTIPLE_REGULAR" || resolution === "NO_CLASS",
       regularCandidateCount: projection.mathClassNames.length,
       scienceCandidateCount: projection.scienceClassNames.length,
@@ -704,6 +709,9 @@ export class StudentsService {
       };
       case "NO_CLASS": return {
         classResolutionStatus: "AMBIGUOUS_FALLBACK", classResolutionReason: "NO_CLASS",
+      };
+      case "FUTURE_TERM_ONLY": return {
+        classResolutionStatus: "AMBIGUOUS_FALLBACK", classResolutionReason: "FUTURE_TERM_ONLY",
       };
       default: this.fail(400, "STUDENT_RESOLUTION_INVALID");
     }

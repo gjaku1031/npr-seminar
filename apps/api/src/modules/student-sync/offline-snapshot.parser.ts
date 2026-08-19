@@ -15,6 +15,7 @@ import {
 import { canonicalUnitName, primaryTeacher } from "./student-display-normalizer.js";
 import {
   classifyStudentAssignment,
+  isFutureTermStudentClass,
   isRepresentativeStudentClass,
   isScienceStudentClass,
   studentClassBaseName,
@@ -158,6 +159,9 @@ export class OfflineSnapshotParser {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "SCIENCE_ONLY", reason: null });
       } else if (regularCandidates.length > 1) {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "MULTIPLE_REGULAR" });
+      } else if (assignments.some((assignment) => isFutureTermStudentClass(assignment.className))) {
+        // 라이브 동기화와 같은 구분 — 다음 학기 반만 가진 학생은 '반 없음'이 아니다.
+        selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "FUTURE_TERM_ONLY" });
       } else {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "NO_CLASS" });
       }
