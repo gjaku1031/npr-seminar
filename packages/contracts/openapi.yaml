@@ -6184,11 +6184,13 @@ components:
 
     RepresentativeResolution:
       type: string
-      enum: [REGULAR, SCIENCE_ALIAS, MULTIPLE_REGULAR, NO_CLASS]
+      enum: [REGULAR, SCIENCE_ALIAS, MULTIPLE_REGULAR, NO_CLASS, FUTURE_TERM_ONLY]
       description: |
         REGULAR selects exactly one regular candidate. SCIENCE_ALIAS applies when
         there are zero regular and at least one science candidate. The remaining
-        two values are ambiguous.
+        values are ambiguous. FUTURE_TERM_ONLY means the student is enrolled but
+        every class assignment belongs to a future term, so there is no current
+        class to name; the roster shows the 비재원생 marker with no unit.
 
     AssignmentCandidateType:
       type: string

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyStudentAssignment,
   isAllowedStudentAssignmentClass,
+  isFutureTermStudentClass,
   isRepresentativeStudentClass,
   isScienceStudentClass,
   studentClassBaseName,
@@ -108,5 +109,28 @@ describe("student assignment classification", () => {
       teacherName: "현재행담임",
       assignments: [],
     }, "과거담임")).toBeNull();
+  });
+
+  /**
+   * 회귀 방지: `09-` 반이 대표 반으로 뽑히면서 634명의 반·단위·담임이 한꺼번에 비었다.
+   * 원인은 정렬이었다 — `assignmentOrder` 가 반명 오름차순의 첫 번째를 고르는데
+   * `"09-1M4A"` 는 숫자 0 때문에 `"1M4A"` 보다 항상 앞선다. 규칙이 아니라 우연이 골랐다.
+   */
+  it("다음 학기 사전 배정 반은 대표 반 후보가 아니다", () => {
+    for (const className of ["09-1M4A", "09-4M3", "12-3M1"]) {
+      expect(isFutureTermStudentClass(className)).toBe(true);
+      expect(isRepresentativeStudentClass(className)).toBe(false);
+    }
+  });
+
+  it("현재 반은 월 접두처럼 보여도 그대로 대표 반이다", () => {
+    for (const className of ["1M4A", "6T3D", "13-1A", "2M1B", "과1중2과학(토1)"]) {
+      expect(isFutureTermStudentClass(className)).toBe(false);
+      expect(isRepresentativeStudentClass(className)).toBe(true);
+    }
+  });
+
+  it("다음 학기 반도 배정 자체로는 계속 받아 둔다 — 원천에 있는 사실이다", () => {
+    expect(classifyStudentAssignment("재원생", "09-1M4A")).toEqual({ included: true, exclusionReason: null });
   });
 });

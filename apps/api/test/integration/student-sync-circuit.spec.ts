@@ -8,6 +8,7 @@ import { IdempotencyService } from "../../src/common/idempotency/idempotency.ser
 import { PrismaService } from "../../src/common/prisma/prisma.service.js";
 import { PhoneProtector } from "../../src/common/crypto/phone-protector.service.js";
 import { StudentNormalizerService } from "../../src/modules/student-sync/student-normalizer.service.js";
+import { GuestBookingReconcilerService } from "../../src/modules/student-sync/guest-booking-reconciler.service.js";
 import { StudentPromotionService } from "../../src/modules/student-sync/student-promotion.service.js";
 import { StudentSyncAdminService } from "../../src/modules/student-sync/student-sync-admin.service.js";
 import { StudentSyncOrchestratorService } from "../../src/modules/student-sync/student-sync-orchestrator.service.js";
@@ -98,6 +99,7 @@ describe("durable TongTongTong authentication circuit", () => {
     orchestrator = new StudentSyncOrchestratorService(
       prisma, idempotency, gateway,
       new StudentNormalizerService(protector), new StudentPromotionService(prisma),
+      new GuestBookingReconcilerService(prisma),
     );
     admin = new StudentSyncAdminService(prisma, idempotency, orchestrator);
   });

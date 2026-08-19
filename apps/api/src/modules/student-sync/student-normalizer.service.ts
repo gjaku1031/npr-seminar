@@ -5,6 +5,7 @@ import { DomainError } from "../../common/errors/domain-error.js";
 import { canonicalUnitName, primaryTeacher } from "./student-display-normalizer.js";
 import {
   classifyStudentAssignment,
+  isFutureTermStudentClass,
   isRepresentativeStudentClass,
   isScienceStudentClass,
   studentClassBaseName,
@@ -97,6 +98,11 @@ export class StudentNormalizerService {
       if (regular.length === 1) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "ONE_REGULAR", reason: null });
       else if (regular.length === 0 && science.length > 0) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "SCIENCE_ONLY", reason: null });
       else if (regular.length > 1) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "MULTIPLE_REGULAR" });
+      // 다음 학기 반만 가진 학생과 아예 반이 없는 학생을 구분한다. 전자는 방금 등록해
+      // 개강 전인 재원생이고, 그 사실을 '미분류'로 뭉뚱그리면 원인을 다시 찾게 된다.
+      else if (assignments.some((row) => isFutureTermStudentClass(row.className))) {
+        selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "FUTURE_TERM_ONLY" });
+      }
       else selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "NO_CLASS" });
     }
     const rows: StagedSnapshotRow[] = mutable.map((row) => {

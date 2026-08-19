@@ -293,7 +293,10 @@ export class SessionRosterService {
                null::uuid family_booking_student_id,s.id student_internal_id,null::bigint guest_child_internal_id,
                array[]::bigint[] guest_child_internal_ids,
                s.source_student_no,s.name,b.code branch,s.class_name,
-               assignment_projection.math_class_names[1] math_class_name,
+               -- 현재 반이 없어 '비재원생'으로 판정된 학생은 수학반 칸에 그 사실을 그대로 쓴다.
+               -- 빈칸으로 두면 "값을 못 가져왔다"와 "다닐 반이 아직 없다"가 구별되지 않는다.
+               case when s.class_name='비재원생' then '비재원생'
+                    else assignment_projection.math_class_names[1] end math_class_name,
                assignment_projection.science_class_names,
                s.school_name,s.grade,
                npr_canonical_unit_name(s.class_name) unit_name,

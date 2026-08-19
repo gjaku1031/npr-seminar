@@ -7,6 +7,7 @@ import { OfflineSnapshotService } from "./offline-snapshot.service.js";
 import { StudentSyncAdminService } from "./student-sync-admin.service.js";
 import { StudentSyncController } from "./student-sync.controller.js";
 import { StudentNormalizerService } from "./student-normalizer.service.js";
+import { GuestBookingReconcilerService } from "./guest-booking-reconciler.service.js";
 import { StudentPromotionService } from "./student-promotion.service.js";
 import { StudentSyncOrchestratorService } from "./student-sync-orchestrator.service.js";
 import { StudentSyncScheduler } from "./student-sync.scheduler.js";
@@ -27,6 +28,7 @@ import type { AppEnvironment } from "../../common/config/environment.js";
         environment.tongSyncEnabled ? http : disabled,
     },
     OfflineSnapshotParser, OfflineSnapshotService, StudentNormalizerService, StudentPromotionService,
+    GuestBookingReconcilerService,
     StudentSyncOrchestratorService, StudentSyncScheduler, StudentSyncAdminService,
   ],
   exports: [TongTongTongGateway, OfflineSnapshotParser, OfflineSnapshotService, StudentSyncOrchestratorService],

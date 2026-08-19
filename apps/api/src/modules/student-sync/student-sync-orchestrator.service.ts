@@ -1,10 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { DomainError } from "../../common/errors/domain-error.js";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service.js";
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import type { BranchCode, StagedSnapshotRow } from "./offline-snapshot.types.js";
 import { StudentNormalizerService, type NormalizedLiveSnapshot } from "./student-normalizer.service.js";
+import { GuestBookingReconcilerService } from "./guest-booking-reconciler.service.js";
 import { StudentPromotionService } from "./student-promotion.service.js";
 import { TongTongTongGateway, type TongBranchDescriptor, type TongBranchSnapshot } from "./tongtontong.gateway.js";
 
@@ -15,12 +16,15 @@ const BATCH_SIZE = 500;
 
 @Injectable()
 export class StudentSyncOrchestratorService {
+  private readonly logger = new Logger(StudentSyncOrchestratorService.name);
+
   public constructor(
     private readonly prisma: PrismaService,
     private readonly idempotency: IdempotencyService,
     private readonly gateway: TongTongTongGateway,
     private readonly normalizer: StudentNormalizerService,
     private readonly promotion: StudentPromotionService,
+    private readonly guestReconciler: GuestBookingReconcilerService,
   ) {}
 
   public async runManual(reason: string, actorSubject: string, idempotencyKey: string): Promise<string> {
@@ -210,6 +214,14 @@ export class StudentSyncOrchestratorService {
         await this.stage(run.id, normalized, branchIds);
         await this.heartbeat(publicRunId);
         await this.promotion.promote(run.id, normalized, branchIds);
+        // 학생 원장이 최신이 된 직후에 잇는다. 예약할 때는 비재원생이었다가 그 뒤 등록한
+        // 가정을 여기서 재원생 예약으로 돌린다. 실패해도 동기화 자체는 이미 성공이므로
+        // 원장 갱신을 되돌리지 않는다 — 다음 갱신이 같은 후보를 다시 본다.
+        try {
+          await this.guestReconciler.reconcile(run.initiatedBy ?? "system:tong-sync");
+        } catch (error) {
+          this.logger.error(`guest booking reconciliation failed: ${error instanceof Error ? error.message : "unknown"}`);
+        }
       } catch (error) { await this.failValidation(run.id, this.errorCode(error, "TONG_PROMOTION_FAILED")); }
     } catch (error) {
       if (!leaseReleaseSafe) return;
