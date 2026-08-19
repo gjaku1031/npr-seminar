@@ -94,13 +94,15 @@ export class SessionRosterService {
       this.prisma.$queryRaw<RosterFacetRow[]>(Prisma.sql`
         ${base},
         enrolled as (
-          select primary_teacher,unit_name
+          select primary_teacher,unit_name,class_name
             from roster_base
            where participant_type='ENROLLED'
         )
         select coalesce(array_agg(distinct primary_teacher order by primary_teacher)
                  filter (where primary_teacher is not null),'{}'::text[]) teachers,
-               count(*) filter (where unit_name is null)::integer unmatched_unit_count
+               -- '비재원생'으로 판정된 학생은 비재원생 탭에서 볼 수 있으므로 여기서 세지 않는다.
+               -- 이 수는 "어느 탭에서도 못 찾는 학생"을 뜻해야 안내문이 사실이 된다.
+               count(*) filter (where unit_name is null and class_name<>'비재원생')::integer unmatched_unit_count
           from enrolled`),
     ]);
     const items = await this.mapRows(session.id, rows);
@@ -368,7 +370,10 @@ export class SessionRosterService {
         select * from roster_base
          where (
            ${unitGroup}='ALL'
-           or (${unitGroup}='GUEST' and participant_type='GUEST')
+           -- 비재원생 탭에는 두 부류가 함께 온다: 통통통에 없는 가정(GUEST)과,
+           -- 등록은 했지만 지금 다닐 반이 아직 없는 재원생(개강 전 신규 등록).
+           -- 후자를 빼면 어느 단위 탭에도 걸리지 않아 전체 탭에서만 보인다.
+           or (${unitGroup}='GUEST' and (participant_type='GUEST' or class_name='비재원생'))
            or (participant_type='ENROLLED' and (
              (${unitGroup}='ELEMENTARY' and unit_name='초등')
              or (${unitGroup}='MIDDLE_1' and unit_name='중등1')
