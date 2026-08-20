@@ -228,12 +228,19 @@ async function issueCredential(
   expiresAt: Date,
 ): Promise<void> {
   const rawToken = randomBytes(32).toString("base64url");
+  // version 은 예약 안에서 유일해야 한다(qr_credentials_booking_version_unique). 폐기된
+  // 자격도 그 자리를 계속 차지하므로, 늘 1 로 내면 두 번째 발급에서 부딪힌다.
+  const latest = await transaction.qrCredential.findFirst({
+    where: { familyBookingId },
+    orderBy: { version: "desc" },
+    select: { version: true },
+  });
   await transaction.qrCredential.create({
     data: {
       familyBookingId,
       tokenDigest: prismaBytes(createHash("sha256").update(rawToken).digest()),
       tokenCiphertext: prismaBytes(qrTokens.protect(rawToken)),
-      version: 1,
+      version: (latest?.version ?? 0) + 1,
       status: "ACTIVE",
       issuedAt: new Date(),
       expiresAt,
