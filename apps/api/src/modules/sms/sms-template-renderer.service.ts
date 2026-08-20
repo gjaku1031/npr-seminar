@@ -10,11 +10,10 @@ export const SMS_TEMPLATE_VARIABLES = [
   "{예약확인링크}",
   "{QR링크}",
   "{문의전화}",
-  "{설문링크}",
 ] as const;
 
 export type SmsTemplatePurpose = "OTP" | "BOOKING_CONFIRMED" | "BOOKING_UPDATED"
-  | "BOOKING_CANCELLED" | "FIRST_CHECK_IN" | "ADMIN_GROUP" | "SURVEY";
+  | "BOOKING_CANCELLED" | "FIRST_CHECK_IN" | "ADMIN_GROUP";
 
 const PURPOSE_VARIABLES: Readonly<Record<SmsTemplatePurpose, ReadonlySet<string>>> = {
   OTP: new Set(["{인증번호}"]),
@@ -23,7 +22,6 @@ const PURPOSE_VARIABLES: Readonly<Record<SmsTemplatePurpose, ReadonlySet<string>
   BOOKING_CANCELLED: new Set(["{학생명}", "{설명회명}", "{일시}", "{장소}", "{예약확인링크}", "{문의전화}"]),
   FIRST_CHECK_IN: new Set(["{학생명}", "{설명회명}", "{일시}", "{장소}", "{문의전화}"]),
   ADMIN_GROUP: new Set(SMS_TEMPLATE_VARIABLES),
-  SURVEY: new Set(["{학생명}", "{설명회명}", "{일시}", "{장소}", "{설문링크}", "{문의전화}"]),
 };
 
 export interface SmsTemplateContext {
@@ -63,7 +61,6 @@ export class SmsTemplateRenderer {
       "{예약확인링크}": context.bookingUrl,
       "{QR링크}": context.bookingUrl,
       "{문의전화}": context.inquiryPhone,
-      "{설문링크}": context.bookingUrl,
     };
     let rendered = value;
     for (const variable of SMS_TEMPLATE_VARIABLES) {

@@ -34,7 +34,6 @@ export interface SyntheticQaResult {
   readonly students: number;
   readonly assignments: number;
   readonly bookings: number;
-  readonly surveys: number;
   readonly scanners: number;
   readonly smsOutbox: 0;
   readonly sheetOutbox: 0;
@@ -398,17 +397,6 @@ export async function seedSyntheticQaDatabase(
       }) });
     }
 
-    for (const batch of chunks(plan.surveys, BATCH_SIZE)) {
-      await transaction.surveyResponse.createMany({ data: batch.map((survey, index) => {
-        const booking = required(new Map(plan.bookings.map((row) => [row.key, row])), survey.bookingKey);
-        return {
-          publicId: stableQaUuid("survey", survey.bookingKey), familyBookingId: required(bookingIdByKey, survey.bookingKey),
-          sessionId: required(sessionIdByKey, booking.sessionKey), rating: survey.rating,
-          comment: survey.comment, submittedAt: new Date(seededAt.getTime() - index * 60_000),
-        };
-      }) });
-    }
-
     await seedQaTemplates(transaction, seededAt);
     return verifyDatabase(transaction);
   }, { maxWait: 30_000, timeout: 600_000 });
@@ -478,14 +466,6 @@ async function seedQaTemplates(transaction: Prisma.TransactionClient, seededAt: 
       createdBy: "system:synthetic-qa-seed", updatedBy: "system:synthetic-qa-seed",
       createdAt: seededAt, updatedAt: seededAt,
     },
-    {
-      publicId: stableQaUuid("sms-template", "QA_DEFAULT_SURVEY"), key: "QA_DEFAULT_SURVEY",
-      name: "QA 만족도 설문", purpose: "SURVEY",
-      body: "[QA] {학생명} 학부모님, {설명회명} 만족도 설문에 참여해 주세요: {설문링크}",
-      active: true, isDefault: true, version: 1n,
-      createdBy: "system:synthetic-qa-seed", updatedBy: "system:synthetic-qa-seed",
-      createdAt: seededAt, updatedAt: seededAt,
-    },
   ];
   await transaction.smsTemplate.createMany({ data: templates });
 }
@@ -505,19 +485,19 @@ async function restoreNonQaTemplateDefaults(transaction: Prisma.TransactionClien
 }
 
 async function verifyDatabase(transaction: Prisma.TransactionClient): Promise<SyntheticQaResult> {
-  const [students, assignments, bookings, surveys, scanners, smsOutbox, sheetOutbox, mappings] = await Promise.all([
+  const [students, assignments, bookings, scanners, smsOutbox, sheetOutbox, mappings] = await Promise.all([
     transaction.student.count({ where: { sourceActive: true } }),
     transaction.studentClassAssignment.count({ where: { sourceActive: true } }),
-    transaction.familyBooking.count(), transaction.surveyResponse.count(), transaction.scannerDevice.count(),
+    transaction.familyBooking.count(), transaction.scannerDevice.count(),
     transaction.smsOutbox.count(), transaction.sheetOutbox.count(), transaction.sheetMapping.count(),
   ]);
   const expected = {
     students: EXPECTED_QA_COUNTS.students, assignments: EXPECTED_QA_COUNTS.assignments,
     bookings: EXPECTED_QA_COUNTS.pocBookings + EXPECTED_QA_COUNTS.loadBookings,
-    surveys: EXPECTED_QA_COUNTS.surveys, scanners: EXPECTED_QA_COUNTS.scanners,
+    scanners: EXPECTED_QA_COUNTS.scanners,
   };
   for (const [key, value] of Object.entries(expected)) {
-    const actual = { students, assignments, bookings, surveys, scanners }[key as keyof typeof expected];
+    const actual = { students, assignments, bookings, scanners }[key as keyof typeof expected];
     if (actual !== value) throw new Error(`QA database ${key} mismatch: expected ${value}, received ${actual}`);
   }
   if (smsOutbox !== 0 || sheetOutbox !== 0 || mappings !== 0) {
@@ -538,7 +518,7 @@ async function verifyDatabase(transaction: Prisma.TransactionClient): Promise<Sy
   if (Number(multiRows[0]?.count ?? 0n) !== EXPECTED_QA_COUNTS.multiAssignmentStudents) {
     throw new Error("QA multi-assignment student count mismatch");
   }
-  return { students, assignments, bookings, surveys, scanners, smsOutbox: 0, sheetOutbox: 0 };
+  return { students, assignments, bookings, scanners, smsOutbox: 0, sheetOutbox: 0 };
 }
 
 function branchRow(code: QaBranchCode, displayName: string, sourceCode: string) {

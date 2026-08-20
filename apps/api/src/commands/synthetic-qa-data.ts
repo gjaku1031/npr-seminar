@@ -17,7 +17,6 @@ export const EXPECTED_QA_COUNTS = {
   sessions: 6,
   pocBookings: 17,
   loadBookings: 1_500,
-  surveys: 506,
   scanners: 6,
 } as const;
 
@@ -89,18 +88,11 @@ export interface QaBookingDraft {
   readonly createdAt: Date;
 }
 
-export interface QaSurveyDraft {
-  readonly bookingKey: string;
-  readonly rating: 1 | 2 | 3 | 4 | 5;
-  readonly comment: string;
-}
-
 export interface SyntheticQaPlan {
   readonly students: readonly QaStudentDraft[];
   readonly seminars: readonly QaSeminarDraft[];
   readonly sessions: readonly QaSessionDraft[];
   readonly bookings: readonly QaBookingDraft[];
-  readonly surveys: readonly QaSurveyDraft[];
 }
 
 interface BranchPlan {
@@ -155,9 +147,8 @@ export function buildSyntheticQaPlan(): SyntheticQaPlan {
   const seminars = buildSeminars();
   const sessions = buildSessions();
   const bookings = buildBookings(students);
-  const surveys = buildSurveys(bookings);
-  assertPlan(students, seminars, sessions, bookings, surveys);
-  return { students, seminars, sessions, bookings, surveys };
+  assertPlan(students, seminars, sessions, bookings);
+  return { students, seminars, sessions, bookings };
 }
 
 function buildStudents(): QaStudentDraft[] {
@@ -356,24 +347,6 @@ function booking(
   };
 }
 
-function buildSurveys(bookings: readonly QaBookingDraft[]): QaSurveyDraft[] {
-  const poc = bookings.filter((row) => row.sessionKey === "POC");
-  const load = bookings.filter((row) => row.sessionKey === "LOAD");
-  const pocRatings = [5, 4, 5, 4, 3, 5] as const;
-  const rows: QaSurveyDraft[] = pocRatings.map((rating, index) => ({
-    bookingKey: poc[index === 5 ? 0 : 10 + index]!.key,
-    rating, comment: `QA POC 만족도 응답 ${index + 1}`,
-  }));
-  for (let index = 0; index < 500; index += 1) {
-    rows.push({
-      bookingKey: load[(900 + index) % load.length]!.key,
-      rating: ((index % 5) + 1) as 1 | 2 | 3 | 4 | 5,
-      comment: `QA 부하 만족도 응답 ${String(index + 1).padStart(3, "0")}`,
-    });
-  }
-  return rows;
-}
-
 function familyGroups(students: readonly QaStudentDraft[]): QaStudentDraft[][] {
   const groups = new Map<string, QaStudentDraft[]>();
   for (const student of students) {
@@ -448,7 +421,7 @@ function gradeFor(unit: QaUnitGroup, ordinal: number): string {
 
 function assertPlan(
   students: readonly QaStudentDraft[], seminars: readonly QaSeminarDraft[], sessions: readonly QaSessionDraft[],
-  bookings: readonly QaBookingDraft[], surveys: readonly QaSurveyDraft[],
+  bookings: readonly QaBookingDraft[],
 ): void {
   const assignments = students.reduce((count, student) => count + student.assignments.length, 0);
   const multiple = students.filter((student) => student.assignments.length > 1).length;
@@ -457,7 +430,6 @@ function assertPlan(
     seminars: seminars.length, sessions: sessions.length,
     pocBookings: bookings.filter((row) => row.sessionKey === "POC").length,
     loadBookings: bookings.filter((row) => row.sessionKey === "LOAD").length,
-    surveys: surveys.length,
   };
   for (const [name, actual] of Object.entries(counts)) {
     const expected = EXPECTED_QA_COUNTS[name as keyof typeof EXPECTED_QA_COUNTS];

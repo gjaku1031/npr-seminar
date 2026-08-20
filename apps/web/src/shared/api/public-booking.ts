@@ -4,11 +4,11 @@
  * 공개 학부모 예약 (계약 tags: Public seminar sessions / Public students / Public family bookings).
  *
  * 인증 축이 셋이다 — 서로 섞이지 않는다:
- * - X-Booking-Proof(메모리 전용 시크릿): 학생 조회·예약 생성·**모든 관리 변경(수정·취소·설문)**.
+ * - X-Booking-Proof(메모리 전용 시크릿): 학생 조회·예약 생성·**모든 관리 변경(수정·취소)**.
  *   BOOKING_MANAGE proof 는 소유 예약 읽기에는 여러 번 쓰이고, **첫 관리 변경이 같은 DB 트랜잭션에서
  *   소비**한다. 변경이 실패하면 서버가 소비를 롤백하므로 같은 proof 로 재시도할 수 있다.
  * - 관리 세션 쿠키(개인 링크 교환): 마스킹 상세 GET 과 현재 QR 복구 GET 만 가능하다.
- *   **변경·취소·설문에는 절대 쓸 수 없다** — 그때마다 새 BOOKING_MANAGE proof 가 필요하다.
+ *   **변경·취소에는 절대 쓸 수 없다** — 그때마다 새 BOOKING_MANAGE proof 가 필요하다.
  * - 연락처 조회(lookup): OTP·쿠키·proof 없이 same-origin 으로 마스킹 목록만 받는다(내구 상태 없음).
  */
 
@@ -27,9 +27,7 @@ import type {
   PublicMaskedFamilyBookingList,
   PublicSeminarSessionPage,
   PublicStudentPage,
-  PublicSurveyResponseCreateRequest,
   QrRecoveryResult,
-  SurveyResponseMutationResult,
 } from "./contract";
 
 /** proof 가 필요한 읽기 호출 옵션. */
@@ -54,7 +52,7 @@ export interface ManagementSessionReadOptions {
 
 /**
  * 소유 예약 **읽기**(마스킹 상세 GET · QR 복구 GET) 인증 — BOOKING_MANAGE proof 또는 관리 세션 중 하나.
- * 변경(수정·취소·설문)에는 이 유니언을 쓰지 않는다 — 그쪽은 언제나 `ProofMutationOptions` 다.
+ * 변경(수정·취소)에는 이 유니언을 쓰지 않는다 — 그쪽은 언제나 `ProofMutationOptions` 다.
  * 세션을 변경 인증으로 제시할 타입 경로 자체를 두지 않는다(계약: access session 은 mutation 금지).
  */
 export type OwnedBookingReadAuth = ProofReadOptions | ManagementSessionReadOptions;
@@ -177,7 +175,7 @@ export async function exchangeBookingAccessToken(
  * ★ 응답의 새 csrfToken 을 즉시 채택한다 — 서버가 세션을 재생성했으므로 이전 CSRF 는 무효다.
  *
  * 언제나 CSRF(client) + same-origin(credentials) + Idempotency-Key 가 필요하다. 이 세션은
- * 마스킹 상세 GET·현재 QR 복구 GET 만 허용한다 — 변경·취소·설문·QR 회전은 절대 인증하지 않고,
+ * 마스킹 상세 GET·현재 QR 복구 GET 만 허용한다 — 변경·취소·QR 회전은 절대 인증하지 않고,
  * 그때마다 새 BOOKING_MANAGE proof 가 필요하다. 키 수명은 호출부(useKeyedOperationIntents)가 쥔다.
  */
 export async function establishFamilyBookingContactReadSession(
@@ -275,28 +273,6 @@ export function cancelPublicFamilyBooking(
     {
       method: "POST",
       body: { expectedVersion, ...(reason ? { reason } : {}) },
-      bookingProof: options.bookingProof,
-      idempotencyKey: options.idempotencyKey,
-      signal: options.signal,
-    },
-  );
-}
-
-/**
- * 만족도 설문 — 예약이 CHECKED_IN 이거나 회차가 끝난 뒤에만 가능하고, 예약당 1건이다.
- * 계약은 별점(필수)과 후기(선택)만 받는다. update·cancel 과 같은 proof 소비 규칙을 따른다
- * (첫 성공 관리 변경이 proof 를 소비한다). 관리 세션으로는 제출할 수 없다.
- */
-export function submitFamilyBookingSurveyResponse(
-  familyBookingId: string,
-  body: PublicSurveyResponseCreateRequest,
-  options: ProofMutationOptions,
-): Promise<SurveyResponseMutationResult> {
-  return apiRequest<SurveyResponseMutationResult>(
-    `/public/family-bookings/${encodeURIComponent(familyBookingId)}/survey-response`,
-    {
-      method: "POST",
-      body,
       bookingProof: options.bookingProof,
       idempotencyKey: options.idempotencyKey,
       signal: options.signal,

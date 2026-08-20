@@ -21,7 +21,8 @@ export type {
   UnitStat,
 } from "@/shared/api/admin-operations";
 
-export { useSessionSurvey } from "./model/useSessionSurvey";
-export type { SessionSurveyState } from "./model/useSessionSurvey";
 
 export { useUpcomingSession } from "./model/useUpcomingSession";
+export { useSessionLifecycle } from "./model/useSessionLifecycle";
+export type { SessionLifecycleAction, SessionLifecycleState } from "./model/useSessionLifecycle";
+export { SessionLifecycleDialog } from "./ui/SessionLifecycleDialog";

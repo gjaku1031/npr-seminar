@@ -44,11 +44,11 @@ describe("SMS template variables", () => {
 
   it("renders every allowed variable without exposing a bearer token", () => {
     const rendered = renderer.render(
-      "{학생명}|{설명회명}|{일시}|{장소}|{QR링크}|{문의전화}|{설문링크}",
+      "{학생명}|{설명회명}|{일시}|{장소}|{QR링크}|{문의전화}",
       context,
     );
     expect(rendered).toContain("김나래|입시 설명회|2026.08.21(금) 11:00|대강당");
-    expect(rendered.match(/https:\/\/public\.test\/booking\//gu)).toHaveLength(2);
+    expect(rendered.match(/https:\/\/public\.test\/booking\//gu)).toHaveLength(1);
     expect(rendered).not.toContain("token");
   });
 

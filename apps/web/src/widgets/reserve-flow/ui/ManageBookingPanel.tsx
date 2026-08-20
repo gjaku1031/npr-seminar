@@ -1,20 +1,20 @@
 "use client";
 
 /**
- * 예약 조회 · 변경 · 취소 · QR 표시 · 만족도 설문 — 세 진입 모드가 한 패널을 공유한다.
+ * 예약 조회 · 변경 · 취소 · QR 표시 — 세 진입 모드가 한 패널을 공유한다.
  *
  * - `lookup`  (루트 `/reserve?mode=manage`): 전체 연락처 **조회**로 마스킹 목록을 받는다(OTP·proof·
  *   쿠키 없음). 목록에서 예약 하나를 고르면 그 예약에 한해 이미 메모리에 있는 전체 연락처로
  *   **읽기 세션**(`read-session`, 쿠키)을 세워 마스킹 상세와 현재 QR 을 복구한다. 그 세션은 읽기
- *   전용이라 변경·취소·설문에는 절대 쓰이지 않는다 — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
+ *   전용이라 변경·취소에는 절대 쓰이지 않는다 — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
  * - `direct`  (문자 링크 `/booking/{id}`): **인증번호 없이** 예약 연락처만 대조해 읽기 세션을
  *   세우고(`read-session`), 이 예약 하나만 상세 조회하고 현재 QR 을 복구한다. 링크(추측 불가능한
  *   UUID)가 "가진 것", 연락처가 "아는 것"이다. 그 세션은 `access` 와 똑같이 읽기 전용이라
- *   변경·취소·설문에는 쓰이지 않는다.
+ *   변경·취소에는 쓰이지 않는다.
  * - `access` (SMS 개인 링크 교환 세션): 쿠키 세션으로 마스킹 상세 GET·QR 복구만 한다.
- *   변경·취소·설문은 **절대 세션으로 인증하지 않는다** — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
+ *   변경·취소는 **절대 세션으로 인증하지 않는다** — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
  *
- * 변경 경계 인증(공통): 회차 변경·참석 변경·취소·설문은 **선택을 마친 순간** 사용 가능한 proof 가
+ * 변경 경계 인증(공통): 회차 변경·참석 변경·취소는 **선택을 마친 순간** 사용 가능한 proof 가
  * 없으면 BOOKING_MANAGE OTP 오버레이를 연다. 오버레이는 이미 메모리에 있는 전체 연락처를 채워 주고,
  * 새 검증 뒤에만 그 변경을 X-Booking-Proof 로 수행한다. 변경 성공은 같은 트랜잭션에서 proof 를 소비하고,
  * 실패는 서버가 소비를 롤백하므로 같은 proof 로 재시도할 수 있다.
@@ -65,19 +65,17 @@ import {
 import { BottomBar, ErrorNote, FlowHeader, FlowOverlay, FlowToast } from "./MobileChrome";
 import { ContactEntryForm } from "./ContactEntry";
 import { OtpFields } from "./ReserveFlow";
-import { SurveyPanel } from "./SurveyPanel";
 
-type Stage = "lookup" | "list" | "auth" | "loading" | "detail" | "survey" | "expired";
+type Stage = "lookup" | "list" | "auth" | "loading" | "detail" | "expired";
 
 /**
  * 변경 경계에서 인증이 필요한 작업. move/party/cancel 은 검증 직후 **바로 수행**하고,
- * survey 는 검증 직후 설문 화면으로 넘어가 그 화면이 같은 proof 로 제출한다.
  */
 type PendingAction =
   | { kind: "move"; targetSessionId: string }
   | { kind: "party"; party: AttendanceParty }
   | { kind: "cancel" }
-  | { kind: "survey" };
+;
 
 type ManageMutationIntent =
   | {
@@ -152,7 +150,6 @@ const ACTION_LABELS: Record<PendingAction["kind"], string> = {
   move: "회차 변경",
   party: "참석 학부모 변경",
   cancel: "예약 취소",
-  survey: "만족도 설문",
 };
 
 export function ManageBookingPanel({
@@ -248,7 +245,7 @@ export function ManageBookingPanel({
    * 3) 같은 페이지에서 기존 상세·ReservationQr 를 그린다.
    *
    * 결과 미상(network·5xx)이면 키·본문을 그대로 붙잡아 두고 목록에 남긴다 — 같은 예약 재시도만
-   * 같은 키로 나가고, 다른 예약 선택은 divergence 로 막는다. 변경·취소·설문은 여기서 인증하지
+   * 같은 키로 나가고, 다른 예약 선택은 divergence 로 막는다. 변경·취소는 여기서 인증하지
    * 않는다(언제나 새 BOOKING_MANAGE proof) — 읽기 세션은 읽기 전용이다.
    */
   const selectLookupBooking = useCallback(
@@ -343,7 +340,7 @@ export function ManageBookingPanel({
    * 브루트포스는 서버가 막는다 — 예약당 10회·연락처당 10회·IP 30회·전역 600회/분이고,
    * 없는 예약·연락처 불일치·취소된 예약이 모두 같은 오류로 돌아와 열거 단서를 주지 않는다.
    *
-   * ★ 이 세션은 **읽기 전용**이다. 회차 변경·취소·설문은 여전히 새 BOOKING_MANAGE proof 를
+   * ★ 이 세션은 **읽기 전용**이다. 회차 변경·취소는 여전히 새 BOOKING_MANAGE proof 를
    *   요구한다 — 링크를 주운 사람이 남의 예약을 취소할 수 있게 되면 안 된다.
    */
   const submitDirectAuth = useCallback(
@@ -469,7 +466,7 @@ export function ManageBookingPanel({
 
   /** 화면 선택값을 첫 전송 전에 불변 intent로 굳힌다. */
   const runAction = useCallback(
-    (action: Exclude<PendingAction, { kind: "survey" }>, issued: BookingProof) => {
+    (action: PendingAction, issued: BookingProof) => {
       if (!selected) return;
       const common = {
         familyBookingId: selected.familyBookingId,
@@ -506,13 +503,7 @@ export function ManageBookingPanel({
       setPendingKind(null);
       setOtpOpen(false);
       if (action === null) return;
-      if (action.kind === "survey") {
-        // 설문은 화면으로 넘어가 같은 proof 로 제출한다(제출 성공이 proof 를 소비).
-        proof.adopt(issued);
-        setStage("survey");
-      } else {
-        void runAction(action, issued);
-      }
+      void runAction(action, issued);
     },
   });
 
@@ -528,8 +519,7 @@ export function ManageBookingPanel({
     (action: PendingAction) => {
       setActionError(null);
       if (proof.proof !== null && proof.isUsable) {
-        if (action.kind === "survey") setStage("survey");
-        else void runAction(action, proof.proof);
+        void runAction(action, proof.proof);
         return;
       }
       pendingActionRef.current = action;
@@ -709,20 +699,6 @@ export function ManageBookingPanel({
 
   if (!selected) return null;
 
-  /* ── 만족도 설문 — 사용 가능한 proof 로만 진입한다(access 세션은 인증 불가) ── */
-  if (stage === "survey" && proof.proof !== null)
-    return (
-      <>
-        <SurveyPanel
-          familyBookingId={selected.familyBookingId}
-          bookingProof={proof.proof.value}
-          onBack={() => { proof.clear(); setStage("detail"); }}
-          onConsumed={proof.consume}
-          onDone={(message) => { setStage("detail"); setToast(message); onToast(message); }}
-        />
-      </>
-    );
-
   /* ── 예약 상세 · 관리 ── */
   const detailSession = sessionOf(selected);
   // 회차 이동 후보는 정책 모듈이 마스킹 참가자(유형·캠퍼스)만으로 판정한다 — 타입을 약화시키지 않는다.
@@ -731,7 +707,6 @@ export function ManageBookingPanel({
     participants: selected.participants,
   });
   const manageable = selected.status === "RESERVED";
-  const surveyEligible = selected.status === "CHECKED_IN";
   const controlsDisabled = busy;
   const maskedNames = selected.participants.map((p) => p.maskedName).join(", ");
 
@@ -790,11 +765,6 @@ export function ManageBookingPanel({
                 예약 취소
               </Button>
             </>
-          )}
-          {surveyEligible && (
-            <Button variant="ghost" fullWidth disabled={controlsDisabled} onClick={() => beginAction({ kind: "survey" })}>
-              만족도 설문 참여
-            </Button>
           )}
         </div>
       </div>

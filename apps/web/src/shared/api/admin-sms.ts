@@ -78,7 +78,7 @@ export function smsContentErrorMessage(error: unknown): string | null {
       return "쓸 수 없는 변수가 있어요. 변수 칩에 있는 것만 사용해 주세요.";
     case "SMS_TEMPLATE_VARIABLE_INVALID":
       return "중괄호 `{}` 짝이 맞지 않아요. 변수는 칩으로 넣어 주세요.";
-    // 변수 자리에 채울 값이 서버에 없다 (예: 공개 주소 미설정으로 {QR링크}·{설문링크} 가 빈 값).
+    // 변수 자리에 채울 값이 서버에 없다 (예: 공개 주소 미설정으로 {QR링크} 가 빈 값).
     case "SMS_TEMPLATE_VARIABLE_UNRESOLVED":
       return "변수에 채울 값이 서버에 없어요. 해당 변수를 빼고 다시 시도해 주세요.";
     case "SMS_MESSAGE_SIZE_INVALID":

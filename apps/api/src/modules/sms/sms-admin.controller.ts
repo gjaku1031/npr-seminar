@@ -11,7 +11,7 @@ import { SmsAdminService } from "./sms-admin.service.js";
 import type { SmsSource } from "./sms-outbox.service.js";
 
 const branches = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const;
-const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP", "SURVEY"] as const;
+const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP"] as const;
 const audiences = ["BOOKED_FAMILIES", "RESERVED_FAMILIES", "CHECKED_IN_FAMILIES", "CANCELLED_FAMILIES", "TEST_ACCOUNTS"] as const;
 const messageStatuses = [
   "PENDING", "CLAIMED", "SENDING", "SENT", "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST",
@@ -129,13 +129,6 @@ export class SmsAdminController {
     @Headers("idempotency-key") key = "",
   ) {
     return this.service.cancelScheduledBatch(batchId, actor.subject, key);
-  }
-
-  @Post("survey-sends")
-  @HttpCode(202)
-  @UseGuards(CsrfGuard)
-  public enqueueSurvey(@Body() body: EnqueueDto, @CurrentActor() actor: AuthenticatedActor, @Headers("idempotency-key") key = "") {
-    return this.service.enqueue(body, actor.subject, key, "SURVEY");
   }
 
   @Get("messages")

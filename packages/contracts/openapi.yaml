@@ -843,7 +843,7 @@ paths:
         browser session, and creates a short-lived booking-scoped session. The
         lookup response itself never contains a raw QR. The new session permits
         only masked booking detail and recovery of the existing QR for this one
-        booking. It never authorizes update, cancellation, survey submission, or
+        booking. It never authorizes update, cancellation, or
         QR rotation; every public business mutation still requires a fresh
         BOOKING_MANAGE proof. Missing bookings, contact mismatch, cancelled
         bookings, and unavailable access credentials share the generic
@@ -1086,61 +1086,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-
-  /api/v1/public/family-bookings/{familyBookingId}/survey-response:
-    parameters:
-      - $ref: '#/components/parameters/FamilyBookingId'
-    post:
-      operationId: submitFamilyBookingSurveyResponse
-      tags: [Public family bookings]
-      summary: Submit the one survey response for a contact-owned family booking
-      description: |
-        The BOOKING_MANAGE proof contact must own the booking. The booking must
-        already be CHECKED_IN or its seminar session must have ended. A booking
-        accepts at most one response. The response and proof consumption commit
-        atomically; the first successful management mutation consumes the proof.
-      security:
-        - bookingProof: []
-      x-proof-scopes: [BOOKING_MANAGE]
-      x-proof-consumption: consumed-by-first-successful-management-mutation
-      x-access-session-authorization: forbidden
-      x-mutation-kind: durable
-      x-idempotency: required
-      x-requires-csrf: true
-      x-requires-same-origin: true
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/Origin'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PublicSurveyResponseCreateRequest'
-      responses:
-        '201':
-          description: Fresh or idempotently replayed survey response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SurveyResponseMutationResult'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '429':
-          $ref: '#/components/responses/RateLimited'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -1524,43 +1469,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-
-  /api/v1/admin/seminar-sessions/{seminarSessionId}/survey-responses:
-    parameters:
-      - $ref: '#/components/parameters/SeminarSessionId'
-    get:
-      operationId: listSessionSurveyResponses
-      tags: [Admin seminars]
-      summary: List safe survey responses and rating summary for one session
-      description: |
-        Responses are ordered newest first. Each ADMIN-only item includes a
-        representative current participant context and the full booking contact
-        needed for operational follow-up. Active booking links win; if none are
-        active, the latest released participant set is used. An active current
-        enrolled student wins over another enrolled snapshot, which wins over a
-        guest. participantCount and additionalParticipantCount retain the family
-        context when one representative sibling is displayed.
-      security:
-        - cookieAuth: []
-      x-required-roles: [ADMIN]
-      parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
-      responses:
-        '200':
-          description: Session survey response page and aggregate summary
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSurveyResponsePage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
 
   /api/v1/admin/students:
     get:
@@ -2296,7 +2204,7 @@ paths:
     get:
       operationId: getAdminSessionStatistics
       tags: [Admin family bookings]
-      summary: Get branch-aware participant, booking-channel, and survey statistics
+      summary: Get branch-aware participant and booking-channel statistics
       description: |
         summary and channels count family booking aggregates. Their
         active count is exactly RESERVED plus CHECKED_IN, with CANCELLED and
@@ -2309,7 +2217,6 @@ paths:
         unit. Overall UI totals must use summary or the ALL row, never a sum of
         concrete units. Every summary/unit/channel monitoring object separately
         exposes linked student rows, de-duplicated family bookings, and active
-        parent attendees. Survey statistics remain scoped to the whole session.
       security:
         - cookieAuth: []
       x-required-roles: [ADMIN]
@@ -3976,49 +3883,6 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /api/v1/admin/sms/survey-sends:
-    post:
-      operationId: enqueueSurveySmsSend
-      tags: [Admin SMS]
-      summary: Enqueue a survey SMS or LMS send
-      description: Uses the same exact preview-token check as administrator group sends and records source SURVEY.
-      security:
-        - cookieAuth: []
-      x-required-roles: [ADMIN]
-      x-mutation-kind: durable
-      x-idempotency: required
-      x-requires-csrf: true
-      x-requires-same-origin: true
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/Origin'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SmsEnqueueRequest'
-      responses:
-        '202':
-          description: Survey recipient messages durably queued
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmsEnqueueAccepted'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-
   /api/v1/admin/sms/messages:
     get:
       operationId: listSmsMessages
@@ -4829,7 +4693,7 @@ components:
 
     SmsPurpose:
       type: string
-      enum: [OTP, BOOKING_CONFIRMED, BOOKING_UPDATED, BOOKING_CANCELLED, FIRST_CHECK_IN, ADMIN_GROUP, SURVEY]
+      enum: [OTP, BOOKING_CONFIRMED, BOOKING_UPDATED, BOOKING_CANCELLED, FIRST_CHECK_IN, ADMIN_GROUP]
 
     SmsMessageType:
       type: string
@@ -5135,7 +4999,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          description: Template text supporting {학생명}, {설명회명}, {일시}, {장소}, {QR링크}, {문의전화}, and {설문링크}.
+          description: Template text supporting {학생명}, {설명회명}, {일시}, {장소}, {QR링크}, and {문의전화}.
         title:
           type: string
           minLength: 1
@@ -5311,7 +5175,7 @@ components:
           const: QUEUED
         source:
           type: string
-          enum: [ADMIN_GROUP, SURVEY]
+          enum: [ADMIN_GROUP]
         templateId:
           type: [string, 'null']
           format: uuid
@@ -5397,7 +5261,7 @@ components:
           format: uuid
         source:
           type: string
-          enum: [ADMIN_GROUP, SURVEY]
+          enum: [ADMIN_GROUP]
         templateId:
           type: [string, 'null']
           format: uuid
@@ -7371,23 +7235,6 @@ components:
           $ref: '#/components/schemas/AttendanceMonitoring'
       additionalProperties: false
 
-    SessionStatisticsSurvey:
-      type: object
-      required: [averageRating, responseCount, scope]
-      properties:
-        averageRating:
-          type: [number, 'null']
-          minimum: 1
-          maximum: 5
-        responseCount:
-          type: integer
-          minimum: 0
-        scope:
-          type: string
-          const: SESSION
-          description: Survey aggregation remains whole-session scoped even when branch is filtered.
-      additionalProperties: false
-
     SessionStatistics:
       type: object
       description: |
@@ -7396,7 +7243,7 @@ components:
         family totals while retaining the raw eligible enrolled-student context count;
         concrete units are eligible enrolled-student projections and must not be
         summed to reconstruct the overall family total.
-      required: [branch, summary, units, channels, survey]
+      required: [branch, summary, units, channels]
       properties:
         branch:
           description: Effective branch, or null for an unfiltered ALL-scope session.
@@ -7417,8 +7264,6 @@ components:
           maxItems: 2
           items:
             $ref: '#/components/schemas/SessionStatisticsChannel'
-        survey:
-          $ref: '#/components/schemas/SessionStatisticsSurvey'
       additionalProperties: false
 
     RosterOperationalEventType:
@@ -8069,212 +7914,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicMaskedFamilyBooking'
-      additionalProperties: false
-
-    PublicSurveyResponseCreateRequest:
-      type: object
-      required: [rating]
-      properties:
-        rating:
-          type: integer
-          minimum: 1
-          maximum: 5
-        comment:
-          type: string
-          minLength: 1
-          maxLength: 2000
-      additionalProperties: false
-
-    SurveyParticipantContext:
-      type: object
-      description: ADMIN-only representative participant and family context for one survey response.
-      required:
-        - participantType
-        - studentId
-        - sourceStudentNo
-        - branch
-        - unitName
-        - studentName
-        - className
-        - teacherName
-        - contact
-        - participantCount
-        - additionalParticipantCount
-      properties:
-        participantType:
-          $ref: '#/components/schemas/BookingParticipantType'
-        studentId:
-          type: [string, 'null']
-          format: uuid
-        sourceStudentNo:
-          type: string
-          maxLength: 160
-        branch:
-          $ref: '#/components/schemas/Branch'
-        unitName:
-          type: [string, 'null']
-          maxLength: 160
-        studentName:
-          type: string
-          maxLength: 300
-        className:
-          type: string
-          maxLength: 300
-        teacherName:
-          type: [string, 'null']
-          maxLength: 300
-          description: Canonical student-row math homeroom teacher for the current enrolled participant. Null for GUEST, science-only, and other no-math participants; a historic booking snapshot is used only when current classification evidence is unavailable, and assignment instructors are never fallbacks.
-          x-homeroom-applicability: MATH_REGULAR_CLASS_ONLY
-          x-science-only-policy: RETURN_NULL
-          x-no-math-policy: RETURN_NULL
-          x-assignment-teacher-fallback: forbidden
-        contact:
-          type: string
-          minLength: 8
-          maxLength: 15
-          pattern: '^[0-9]{8,15}$'
-          description: ADMIN-only normalized full family booking contact.
-        participantCount:
-          type: integer
-          minimum: 1
-        additionalParticipantCount:
-          type: integer
-          minimum: 0
-          description: participantCount minus one.
-      allOf:
-        - if:
-            properties:
-              participantType:
-                const: ENROLLED
-            required: [participantType]
-          then:
-            properties:
-              studentId:
-                type: string
-                format: uuid
-        - if:
-            properties:
-              participantType:
-                const: GUEST
-            required: [participantType]
-          then:
-            properties:
-              studentId:
-                type: 'null'
-      additionalProperties: false
-
-    SurveyResponse:
-      type: object
-      required:
-        - surveyResponseId
-        - familyBookingId
-        - participant
-        - rating
-        - comment
-        - submittedAt
-      properties:
-        surveyResponseId:
-          type: string
-          format: uuid
-        familyBookingId:
-          type: string
-          format: uuid
-        participant:
-          $ref: '#/components/schemas/SurveyParticipantContext'
-        rating:
-          type: integer
-          minimum: 1
-          maximum: 5
-        comment:
-          type: [string, 'null']
-          maxLength: 2000
-        submittedAt:
-          type: string
-          format: date-time
-      additionalProperties: false
-
-    SurveyResponseMutationResult:
-      type: object
-      required:
-        - surveyResponseId
-        - familyBookingId
-        - seminarSessionId
-        - rating
-        - comment
-        - submittedAt
-        - replayed
-      properties:
-        surveyResponseId:
-          type: string
-          format: uuid
-        familyBookingId:
-          type: string
-          format: uuid
-        seminarSessionId:
-          type: string
-          format: uuid
-        rating:
-          type: integer
-          minimum: 1
-          maximum: 5
-        comment:
-          type: [string, 'null']
-          maxLength: 2000
-        submittedAt:
-          type: string
-          format: date-time
-        replayed:
-          type: boolean
-      additionalProperties: false
-
-    SurveyRatingDistribution:
-      type: object
-      required: ['1', '2', '3', '4', '5']
-      properties:
-        '1':
-          type: integer
-          minimum: 0
-        '2':
-          type: integer
-          minimum: 0
-        '3':
-          type: integer
-          minimum: 0
-        '4':
-          type: integer
-          minimum: 0
-        '5':
-          type: integer
-          minimum: 0
-      additionalProperties: false
-
-    SurveyResponseSummary:
-      type: object
-      required: [averageRating, responseCount, ratingDistribution]
-      properties:
-        averageRating:
-          type: [number, 'null']
-          minimum: 1
-          maximum: 5
-        responseCount:
-          type: integer
-          minimum: 0
-        ratingDistribution:
-          $ref: '#/components/schemas/SurveyRatingDistribution'
-      additionalProperties: false
-
-    AdminSurveyResponsePage:
-      type: object
-      required: [items, page, summary]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/SurveyResponse'
-        page:
-          $ref: '#/components/schemas/PageMeta'
-        summary:
-          $ref: '#/components/schemas/SurveyResponseSummary'
       additionalProperties: false
 
     PublicCancellationRequest:

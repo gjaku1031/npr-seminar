@@ -54,8 +54,6 @@ interface StatisticsRow {
   readonly manual_linked_student_count: bigint;
   readonly manual_family_booking_count: bigint;
   readonly manual_attendee_count: bigint;
-  readonly survey_average_rating: number | null;
-  readonly survey_response_count: bigint;
 }
 
 const EMPTY_OPERATIONS_SUMMARY: OperationsSummaryRow = {
@@ -299,12 +297,6 @@ export class SessionStatisticsService {
             select distinct family_booking_id,status,attendance_party,booking_source
               from monitoring_roster
           ) families
-      ),
-      survey_statistics as (
-        select avg(rating)::double precision survey_average_rating,
-               count(*)::bigint survey_response_count
-          from survey_responses
-         where session_id=${session.id}
       )
       select groups.unit_group,
              coalesce(units.reserved_booking_count,0)::bigint reserved_booking_count,
@@ -324,7 +316,6 @@ export class SessionStatisticsService {
              channels.*,
              monitoring_channels.*,
              monitoring_channel_families.*,
-             survey.survey_average_rating,survey.survey_response_count
         from unit_groups groups
         left join unit_statistics units on units.unit_group=groups.unit_group
         left join monitoring_unit_students monitoring_students on monitoring_students.unit_group=groups.unit_group
@@ -335,7 +326,6 @@ export class SessionStatisticsService {
         cross join channel_statistics channels
         cross join monitoring_channel_statistics monitoring_channels
         cross join monitoring_channel_families
-        cross join survey_statistics survey
        order by groups.sort_order`);
 
     const first = rows[0];
@@ -395,11 +385,6 @@ export class SessionStatisticsService {
           },
         },
       ],
-      survey: {
-        averageRating: first.survey_average_rating,
-        responseCount: Number(first.survey_response_count),
-        scope: "SESSION" as const,
-      },
     };
   }
 
