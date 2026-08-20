@@ -30,6 +30,10 @@ import { QrTokenProtector } from "../modules/family-bookings/qr-token-protector.
  *
  * 멱등이다. 같은 회차에 테스트 예약이 이미 있으면 다시 만들지 않고 그대로 둔다. QR 이
  * 없거나 죽어 있으면 그것만 새로 발급한다.
+ *
+ * 취소된 테스트 예약은 **다시 예약 상태로 되돌린다.** 리허설은 취소까지 해 보는 것이
+ * 목적이라 취소는 자주 일어나고, 그때마다 사람이 DB 를 직접 만지게 둘 이유가 없다.
+ * 되돌리는 대상은 `is_test` 예약뿐이다 — 실제 가정의 취소는 이 명령이 손대지 않는다.
  */
 
 const TEST_CONTACT = "01037137147";
@@ -47,7 +51,7 @@ const TEST_SOURCE_STUDENT_NO = "NPR-TEST-0001";
 class EnsureTestBookingModule {}
 
 export interface EnsureTestBookingResult {
-  readonly action: "CREATED" | "UNCHANGED" | "QR_REISSUED";
+  readonly action: "CREATED" | "UNCHANGED" | "QR_REISSUED" | "REINSTATED";
   readonly familyBookingId: string;
   readonly seminarSessionId: string;
   /**
@@ -81,8 +85,16 @@ export async function ensureTestBooking(
   return prisma.$transaction(async (transaction) => {
     const existing = await transaction.familyBooking.findFirst({
       where: { sessionId: session.id, isTest: true },
-      select: { id: true, publicId: true, qrCredentials: { where: { status: "ACTIVE" }, select: { id: true } } },
+      select: {
+        id: true, publicId: true, status: true,
+        qrCredentials: { where: { status: "ACTIVE" }, select: { id: true } },
+      },
     });
+
+    if (existing !== null && existing.status === "CANCELLED") {
+      const accessUrl = await reinstate(transaction, qrTokens, existing.id, expiresAt, publicBaseUrl);
+      return { action: "REINSTATED", familyBookingId: existing.publicId, seminarSessionId: session.publicId, accessUrl };
+    }
 
     if (existing !== null) {
       // 접근 링크는 매번 새로 낸다. 원문 토큰은 저장하지 않으므로 기존 자격의 URL 은 다시
@@ -161,6 +173,47 @@ export async function ensureTestBooking(
     const accessUrl = await issueAccessCredential(transaction, publicBaseUrl, booking.id, expiresAt);
     return { action: "CREATED", familyBookingId: booking.publicId, seminarSessionId: session.publicId, accessUrl };
   });
+}
+
+/**
+ * 취소된 테스트 예약을 다시 예약 상태로 되돌린다.
+ *
+ * 취소하면서 함께 내려간 것을 모두 되돌린다 — 참가 학생행, 입장 기록, 그리고 폐기된 QR.
+ * QR 은 되살리지 않고 새로 낸다: 취소 시점에 폐기된 자격을 다시 살리면 "폐기된 QR 은
+ * 다시 쓸 수 없다"는 성질이 테스트 예약에서만 깨진다.
+ */
+async function reinstate(
+  transaction: Prisma.TransactionClient,
+  qrTokens: QrTokenProtector,
+  familyBookingId: bigint,
+  expiresAt: Date,
+  publicBaseUrl: string,
+): Promise<string> {
+  await transaction.familyBooking.update({
+    where: { id: familyBookingId },
+    data: {
+      status: "RESERVED",
+      cancelledAt: null,
+      // RESERVED 는 입장 전 상태다(family_bookings_state_time_check).
+      checkedInAt: null,
+      attendedCount: null,
+      version: { increment: 1 },
+    },
+  });
+  await transaction.familyBookingStudent.updateMany({
+    where: { familyBookingId },
+    data: { active: true, releasedAt: null },
+  });
+  await transaction.bookingEvent.create({
+    data: {
+      familyBookingId,
+      eventType: "UPDATED",
+      actorSubject: "system:ensure-test-booking",
+      safeMetadata: { testBookingReinstated: true },
+    },
+  });
+  await issueCredential(transaction, qrTokens, familyBookingId, expiresAt);
+  return issueAccessCredential(transaction, publicBaseUrl, familyBookingId, expiresAt);
 }
 
 /**
