@@ -875,6 +875,9 @@ ensure_worker_database_role() {
   [[ -n ${password} && ${password} != *$'\n'* && ${password} != *$'\r'* ]] \
     || die "DB_WORKER_PASSWORD is invalid"
   escaped_password=${password//\'/\'\'}
+  # CONNECTION LIMIT 은 앱의 풀 상한(POOL_MAX_CONNECTIONS, apps/api/src/common/prisma/
+  # prisma.service.ts)보다 넉넉해야 한다. 낮으면 부하가 오른 순간 PostgreSQL 이 연결을
+  # 끊고 워커가 재시작 루프에 빠진다 — 문자 대량 발송 중에 실제로 그렇게 됐다.
   log "ensuring the isolated npr_worker login role exists"
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 postgres >/dev/null <<SQL
 DO \$role\$
@@ -885,7 +888,7 @@ BEGIN
 END
 \$role\$;
 ALTER ROLE npr_worker WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
-  NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT 8 PASSWORD '${escaped_password}';
+  NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT 24 PASSWORD '${escaped_password}';
 ALTER ROLE npr_worker SET timezone = 'UTC';
 DO \$membership\$
 DECLARE inherited_role record;
