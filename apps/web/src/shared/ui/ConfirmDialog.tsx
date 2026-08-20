@@ -24,6 +24,11 @@ export interface ConfirmDialogProps {
   /** 되돌릴 수 없는 동작은 danger. */
   tone?: "danger" | "primary";
   busy?: boolean;
+  /**
+   * 확인 버튼을 잠근다 — 되돌릴 수 없는 조작에서 "문구를 정확히 입력했는가" 같은 추가 조건을
+   * 호출부가 걸 때 쓴다. 잠긴 이유는 children 안에서 사용자에게 말해 준다.
+   */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -36,6 +41,7 @@ export function ConfirmDialog({
   cancelLabel = "취소",
   tone = "danger",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -157,7 +163,7 @@ export function ConfirmDialog({
               {cancelLabel}
             </Button>
           </div>
-          <Button variant={tone === "danger" ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
+          <Button variant={tone === "danger" ? "danger" : "primary"} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {busy ? "처리 중..." : confirmLabel}
           </Button>
         </div>

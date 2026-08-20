@@ -243,14 +243,6 @@ function StatsBody({ stats, scopeLabel }: { stats: SessionStatistics; scopeLabel
               {stats.channelStats.map((channel) => <ChannelCard key={channel.channel} channel={channel} />)}
             </div>
           )}
-
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border-hairline)", display: "flex", alignItems: "center", gap: 8 }}>
-            <Icons.star size={14} style={{ color: "var(--mint-500)" }} />
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              평균 만족도 <b style={{ color: "var(--text-strong)" }}>{stats.survey.averageRating === null ? "—" : stats.survey.averageRating.toFixed(1)}</b>
-              <span style={{ color: "var(--text-faint)" }}> · 응답 {stats.survey.responseCount.toLocaleString("ko-KR")}건</span>
-            </span>
-          </div>
         </Card>
       </div>
     </>

@@ -347,7 +347,7 @@ export class SmsAdminService {
     input: TargetRequest & { previewToken: string; scheduledAt?: string },
     actor: string,
     key: string,
-    source: "ADMIN_GROUP" | "SURVEY",
+    source: "ADMIN_GROUP",
   ) {
     return this.idempotency.execute(`SMS_${source}_ENQUEUE`, key, input, async (transaction) => {
       const prepared = await this.prepare(input, transaction);

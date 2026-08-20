@@ -1,5 +1,5 @@
 // entities/sms 공개 API (barrel). (설계 §4.1)
-export { SURVEY_SMS_VARIABLES, smsByteLength, isLms } from "./model/sms";
+export { smsByteLength, isLms } from "./model/sms";
 
 // 용도별 변수/라벨은 이 모듈이 단일 진실이다 (백엔드 PURPOSE_VARIABLES 미러).
 export {

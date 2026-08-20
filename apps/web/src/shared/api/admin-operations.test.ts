@@ -93,7 +93,7 @@ describe("channelBreakdownFrom — MOBILE/MANUAL 활성 건수만 합산한다",
 });
 
 describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 소비한다", () => {
-  it("summary·units·channels·survey 를 화면 통계로 매핑한다", () => {
+  it("summary·units·channels 를 화면 통계로 매핑한다", () => {
     const stats = statisticsFromServer({
       branch: "SONGPA",
       summary: {
@@ -142,7 +142,6 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
           noShowBookingCount: 2,
         },
       ],
-      survey: { averageRating: 4.4, responseCount: 42, scope: "SESSION" },
     });
 
     assert.equal(stats.source, "server");
@@ -152,7 +151,6 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
     assert.equal(stats.reservedCount, 120);
     assert.equal(stats.cancelledCount, 15);
     assert.equal(stats.noShowCount, 9);
-    assert.deepEqual(stats.survey, { averageRating: 4.4, responseCount: 42 });
     assert.deepEqual(stats.channels, { mobileCount: 150, manualCount: 30 });
     assert.deepEqual(stats.units, [
       {
@@ -174,10 +172,7 @@ describe("statisticsFromServer — statistics 의 정확한 모양을 그대로 
 
 describe("statisticsSummaryFrom — 합성 통계는 active 에서 NO_SHOW 를 빼고 단위·채널을 지어내지 않는다", () => {
   it("active = reserved + checkedIn, units/channels = null", () => {
-    const stats = statisticsSummaryFrom(
-      { reservedCount: 90, checkedInCount: 40, noShowCount: 12, cancelledCount: 7 },
-      { averageRating: null, responseCount: 0 },
-    );
+    const stats = statisticsSummaryFrom({ reservedCount: 90, checkedInCount: 40, noShowCount: 12, cancelledCount: 7 });
     assert.equal(stats.source, "derived");
     assert.equal(stats.activeCount, 130); // 90 + 40 — 노쇼 12 는 빠진다
     assert.equal(stats.checkedInCount, 40);
@@ -188,7 +183,6 @@ describe("statisticsSummaryFrom — 합성 통계는 active 에서 NO_SHOW 를 �
     assert.equal(stats.units, null);
     assert.equal(stats.channels, null);
     assert.equal(stats.channelStats, null);
-    assert.deepEqual(stats.survey, { averageRating: null, responseCount: 0 });
   });
 });
 

@@ -7,7 +7,7 @@
  *
  * 관리 대상은 사람이 편집하는 6종뿐이다. `FIRST_CHECK_IN` 은 백엔드 enum 에는 있지만
  * 이 화면에서 생성·수정·필터·선택·변수 어디에도 나타나면 안 되므로 여기서 의도적으로 제외한다.
- * (옛 `entities/sms` 의 `SMS_VARIABLES`·`SURVEY_SMS_VARIABLES` 는 이 규칙과 무관한 레거시다 —
+ * (옛 `entities/sms` 의 `SMS_VARIABLES` 는 이 규칙과 무관한 레거시다 —
  *  용도별 변수는 반드시 이 모듈에서만 읽는다.)
  */
 
@@ -20,7 +20,6 @@ export const EDITABLE_SMS_PURPOSES = [
   "BOOKING_CONFIRMED",
   "BOOKING_UPDATED",
   "BOOKING_CANCELLED",
-  "SURVEY",
 ] as const;
 
 export type EditableSmsPurpose = (typeof EDITABLE_SMS_PURPOSES)[number];
@@ -35,7 +34,6 @@ export const SMS_PURPOSE_LABELS: Readonly<Record<EditableSmsPurpose, string>> = 
   BOOKING_CONFIRMED: "예약 확정",
   BOOKING_UPDATED: "예약 변경",
   BOOKING_CANCELLED: "예약 취소",
-  SURVEY: "설문",
 };
 
 /**
@@ -45,7 +43,6 @@ export const SMS_PURPOSE_LABELS: Readonly<Record<EditableSmsPurpose, string>> = 
  * - BOOKING_CONFIRMED / BOOKING_UPDATED: 학생명·설명회명·일시·장소·예약확인링크·QR링크·문의전화
  * - BOOKING_CANCELLED: 위에서 QR링크만 뺀 것 (취소 안내에는 QR 이 없다)
  * - ADMIN_GROUP: 모든 실제 변수 9종
- * - SURVEY: 학생명·설명회명·일시·장소·설문링크·문의전화
  */
 export const SMS_PURPOSE_VARIABLES: Readonly<Record<EditableSmsPurpose, readonly string[]>> = {
   OTP: ["{인증번호}"],
@@ -77,9 +74,7 @@ export const SMS_PURPOSE_VARIABLES: Readonly<Record<EditableSmsPurpose, readonly
     "{예약확인링크}",
     "{QR링크}",
     "{문의전화}",
-    "{설문링크}",
   ],
-  SURVEY: ["{학생명}", "{설명회명}", "{일시}", "{장소}", "{설문링크}", "{문의전화}"],
 };
 
 /** 계약 key 패턴 `^[A-Z0-9_]{3,80}$` — 용도 이름을 접두어로 쓰면 항상 유효하다. */
@@ -89,7 +84,6 @@ const KEY_PREFIX: Readonly<Record<EditableSmsPurpose, string>> = {
   BOOKING_CONFIRMED: "BOOKING_CONFIRMED",
   BOOKING_UPDATED: "BOOKING_UPDATED",
   BOOKING_CANCELLED: "BOOKING_CANCELLED",
-  SURVEY: "SURVEY",
 };
 
 /** 편집 가능한 용도인지 — FIRST_CHECK_IN(및 알 수 없는 값)을 걸러낸다. */

@@ -8,10 +8,10 @@
  * ★ 배포 서버는 이 엔드포인트를 실제로 준다 — 응답의 **정확한 계약 모양**을 그대로 소비한다.
  *   operations-summary: {activeBookingCount, checkedInBookingCount, uncheckedBookingCount,
  *   cancelledBookingCount, noShowBookingCount}. 여기서 active = RESERVED+CHECKED_IN 이고
- *   NO_SHOW 는 제외다. statistics: {branch, summary, units[], channels[], survey}.
+ *   NO_SHOW 는 제외다. statistics: {branch, summary, units[], channels[]}.
  *
  * ★ 아직 안 붙은 배포(404/501)를 대비한 **graceful fallback** 만 남긴다: 계약이 이미 주는 값
- *   (상태별 예약 건수·설문 summary)만 병렬로 세어 합성한다. 합성 active 도 반드시
+ *   (상태별 예약 건수)만 병렬로 세어 합성한다. 합성 active 도 반드시
  *   **RESERVED+CHECKED_IN 만**이며 NO_SHOW 를 절대 포함하지 않는다. 그리고 단위·채널 분해는
  *   목록에 unitName·bookingSource 필터가 없어 만들 수 없으므로 **null** 로 두고 화면이 정직하게
  *   비운다 — 한 페이지를 전체인 척, 없는 분해를 있는 척하지 않는다.
@@ -21,7 +21,6 @@
 
 import { apiRequest } from "./client";
 import { countAdminFamilyBookings } from "./admin-family-bookings";
-import { listSessionSurveyResponses } from "./admin-seminars";
 import { isApiError } from "./problem";
 import type { Branch, ParticipationMonitoring } from "./contract";
 
@@ -128,13 +127,6 @@ export interface ChannelStat {
   cancelledCount: number;
 }
 
-/** 통계 화면이 쓰는 설문 요약 — statistics.survey(회차 전체 기준)에서 온다. */
-export interface StatisticsSurvey {
-  /** 응답이 없으면 null — 0 이 아니다. */
-  averageRating: number | null;
-  responseCount: number;
-}
-
 export interface SessionStatistics {
   source: AggregateSource;
   /** 현재 회차·캠퍼스 범위의 학생/가족/실 참가자 절대 집계. */
@@ -149,8 +141,6 @@ export interface SessionStatistics {
   cancelledCount: number;
   /** 내부 노쇼 = NO_SHOW. 활성 예약·참가자 집계에는 포함하지 않는다. */
   noShowCount: number;
-  /** 회차 전체 기준 — 설문은 캠퍼스로 나뉘지 않는다. */
-  survey: StatisticsSurvey;
   /** 서버 집계에만 있다 — derived fallback 에선 null(화면이 "연결 예정"으로 비운다). */
   units: UnitStat[] | null;
   channels: ChannelBreakdown | null;
@@ -194,7 +184,6 @@ interface StatisticsResponse {
   summary: StatisticsSummaryResponse;
   units: StatisticsUnitResponse[];
   channels: StatisticsChannelResponse[];
-  survey: { averageRating: number | null; responseCount: number; scope: "SESSION" };
 }
 
 /** 채널 배열 → 모바일/수동 **활성** 건수 합. MOBILE·MANUAL 외 값은 무시한다. */
@@ -218,7 +207,6 @@ export function statisticsFromServer(body: StatisticsResponse): SessionStatistic
     reservedCount: body.summary.reservedBookingCount,
     cancelledCount: body.summary.cancelledBookingCount,
     noShowCount: body.summary.noShowBookingCount,
-    survey: { averageRating: body.survey.averageRating, responseCount: body.survey.responseCount },
     units: body.units.map((unit) => ({
       unit: unit.unitGroup,
       activeCount: unit.activeBookingCount,
@@ -246,12 +234,11 @@ interface StatisticsDerivedCounts {
 }
 
 /**
- * 순수 합성(derived) — 요약 5개 지표와 설문만 채우고 단위·채널은 **null**(목록에 필터가 없어
+ * 순수 합성(derived) — 요약 5개 지표만 채우고 단위·채널은 **null**(목록에 필터가 없어
  * 못 만든다). active = reserved + checkedIn (**NO_SHOW 절대 제외**).
  */
 export function statisticsSummaryFrom(
   counts: StatisticsDerivedCounts,
-  survey: StatisticsSurvey,
 ): SessionStatistics {
   return {
     source: "derived",
@@ -261,7 +248,6 @@ export function statisticsSummaryFrom(
     reservedCount: counts.reservedCount,
     cancelledCount: counts.cancelledCount,
     noShowCount: counts.noShowCount,
-    survey,
     units: null,
     channels: null,
     channelStats: null,
@@ -282,17 +268,13 @@ export async function getSessionStatistics(
   } catch (error) {
     if (!isAggregateEndpointUnavailable(error)) throw error;
     // 폴백: 계약이 이미 주는 값만 합성한다. 단위·채널은 목록에 필터가 없어 못 만든다 → null.
-    const [reservedCount, checkedInCount, noShowCount, cancelledCount, surveyPage] = await Promise.all([
+    const [reservedCount, checkedInCount, noShowCount, cancelledCount] = await Promise.all([
       countAdminFamilyBookings(bookingFilter(seminarSessionId, branch, "RESERVED"), signal),
       countAdminFamilyBookings(bookingFilter(seminarSessionId, branch, "CHECKED_IN"), signal),
       countAdminFamilyBookings(bookingFilter(seminarSessionId, branch, "NO_SHOW"), signal),
       countAdminFamilyBookings(bookingFilter(seminarSessionId, branch, "CANCELLED"), signal),
-      listSessionSurveyResponses(seminarSessionId, { pageSize: 1 }, signal),
     ]);
-    return statisticsSummaryFrom(
-      { reservedCount, checkedInCount, noShowCount, cancelledCount },
-      { averageRating: surveyPage.summary.averageRating, responseCount: surveyPage.summary.responseCount },
-    );
+    return statisticsSummaryFrom({ reservedCount, checkedInCount, noShowCount, cancelledCount });
   }
 }
 

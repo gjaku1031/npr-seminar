@@ -1439,81 +1439,6 @@ export type QrRotationResult = FreshQrRotation | ReplayedQrRotation;
 
 
 
-/** 계약 PublicSurveyResponseCreateRequest — 별점(필수)과 후기(선택)만 받는다. */
-export interface PublicSurveyResponseCreateRequest {
-  rating: number;
-  comment?: string;
-}
-
-/* ── 관리자 설문 응답 (tag: Admin seminars) ─────────────────────────────── */
-
-/**
- * 계약 SurveyParticipantContext — 한 설문 응답의 **대표 참가자 + 가족 맥락**(ADMIN 전용).
- * 서버가 예약 시점 스냅샷/현재 재원 정보로 대표 참가자를 골라 준다.
- *
- * ★ nullable 은 계약 그대로다: 재학생이 아닌 GUEST 는 `studentId` 가 null, 단위 규칙에 안 맞으면
- *   `unitName` 이 null, 수학 담임이 없는 과학 전용 학생은 `teacherName` 이 null 이다(화면은 —로).
- * ★ `contact` 는 정규화된 **전체** 연락처 숫자열(8~15자리)이다 — 표기는 `fmtPhone` 로만 한다.
- */
-export interface SurveyParticipantContext {
-  participantType: BookingParticipantType;
-  /** ENROLLED 면 학생 식별자, GUEST 면 null. */
-  studentId: string | null;
-  sourceStudentNo: string;
-  branch: Branch;
-  /** 단위(초등·중1…). 단위 규칙에 안 맞으면 null. */
-  unitName: string | null;
-  studentName: string;
-  className: string;
-  /** 수학 담임. 과학 전용 등 담임이 없으면 null. */
-  teacherName: string | null;
-  /** ADMIN 전용 정규화 연락처(숫자열). */
-  contact: string;
-  participantCount: number;
-  /** participantCount - 1. */
-  additionalParticipantCount: number;
-}
-
-/**
- * 계약 SurveyResponse — 관리자 목록이 주는 응답. `participant` 로 캠퍼스·단위·학생·반·담임·
- * 학부모 연락처까지 함께 온다(POC 만족도 표의 8열이 여기서 나온다).
- */
-export interface SurveyResponse {
-  surveyResponseId: string;
-  familyBookingId: string;
-  participant: SurveyParticipantContext;
-  rating: number;
-  comment: string | null;
-  submittedAt: string;
-}
-
-/** 계약 SurveyRatingDistribution — 키는 별점 문자열 1~5 다. */
-export type SurveyRatingDistribution = Record<"1" | "2" | "3" | "4" | "5", number>;
-
-/** 서버가 센 회차 전체 집계다 — 한 페이지에서 클라이언트가 다시 계산하지 않는다. */
-export interface SurveyResponseSummary {
-  /** 응답이 없으면 null — 0 이 아니다. 0.0 점으로 그리지 않는다. */
-  averageRating: number | null;
-  responseCount: number;
-  ratingDistribution: SurveyRatingDistribution;
-}
-
-export interface AdminSurveyResponsePage {
-  items: SurveyResponse[];
-  page: PageMeta;
-  summary: SurveyResponseSummary;
-}
-
-export interface SurveyResponseMutationResult {
-  surveyResponseId: string;
-  familyBookingId: string;
-  seminarSessionId: string;
-  rating: number;
-  comment: string | null;
-  submittedAt: string;
-  replayed: boolean;
-}
-
 /* ────────────────────────────────────────────────────────────────────────────
  * 관리자 문자 (tag: Admin SMS).
  *
@@ -1528,8 +1453,7 @@ export type SmsPurpose =
   | "BOOKING_UPDATED"
   | "BOOKING_CANCELLED"
   | "FIRST_CHECK_IN"
-  | "ADMIN_GROUP"
-  | "SURVEY";
+  | "ADMIN_GROUP";
 
 export type SmsMessageType = "SMS" | "LMS";
 
@@ -1689,7 +1613,7 @@ export interface SmsEnqueueAccepted {
   queuedCount: number;
   previewToken: string;
   status: "QUEUED";
-  source: "ADMIN_GROUP" | "SURVEY";
+  source: "ADMIN_GROUP";
   templateId: string | null;
   templateName: string;
 }
@@ -1730,7 +1654,7 @@ export type SmsBatchStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "PARTIAL" |
  */
 export interface SmsBatchSummary {
   batchId: string;
-  source: "ADMIN_GROUP" | "SURVEY";
+  source: "ADMIN_GROUP";
   templateId: string | null;
   templateName: string;
   audience: SmsAudience;

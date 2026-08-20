@@ -160,8 +160,6 @@ export class FamilyBookingsManagementService {
       if (moved && ((targetSessionState.booking_opens_at !== null && now < targetSessionState.booking_opens_at)
         || (targetSessionState.booking_closes_at !== null && now > targetSessionState.booking_closes_at))) this.fail(409, "BOOKING_WINDOW_CLOSED");
       if (moved) {
-        const submittedSurvey = await transaction.surveyResponse.findUnique({ where: { familyBookingId: booking.id }, select: { id: true } });
-        if (submittedSurvey !== null) this.fail(409, "SURVEYED_BOOKING_CANNOT_MOVE");
         const duplicate = await transaction.familyBooking.findFirst({
           where: {
             id: { not: booking.id }, sessionId: targetSession.id,

@@ -80,9 +80,9 @@ export type {
 
 export {
   listBookableSessions,
-  listSessionSurveyResponses,
   normalizeAdminSeminarSession,
   normalizeSessionOperationsSummary,
+  archiveAdminSeminarSession,
   updateAdminSeminarSession,
 } from "./admin-seminars";
 export type {
@@ -248,7 +248,6 @@ export {
   recoverOwnedFamilyBookingQr,
   searchAuthorizedStudents,
   seatCountFor,
-  submitFamilyBookingSurveyResponse,
   updatePublicFamilyBooking,
 } from "./public-booking";
 export type {

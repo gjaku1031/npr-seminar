@@ -129,7 +129,7 @@ export class BookingAccessService {
   /**
    * Establishes the same booking-scoped read/QR session as a personal access
    * link, but only after an exact full-contact ownership check.  The public
-   * update, cancel, QR-rotation, and survey controllers intentionally do not
+   * update, cancel, and QR-rotation controllers intentionally do not
    * accept this session as mutation authority; they continue to require a
    * fresh BOOKING_MANAGE proof.
    */
