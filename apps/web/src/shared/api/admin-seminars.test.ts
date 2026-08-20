@@ -1,6 +1,6 @@
 /**
  * 회차 어댑터의 **정규화 심장**만 값으로 확인한다 (node:test + tsx).
- * fetch 를 타는 목록·설문 함수는 훅·통합에서 다루고, 여기서는 목록 항목의 operationsSummary 를
+ * fetch 를 타는 목록 함수는 훅·통합에서 다루고, 여기서는 목록 항목의 operationsSummary 를
  * 서버 원시 필드명(…BookingCount)에서 화면 이름(…Count)으로 옮기는 규칙만 본다.
  *
  * 실행: pnpm --dir apps/web test

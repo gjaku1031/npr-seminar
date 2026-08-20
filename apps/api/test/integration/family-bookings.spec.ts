@@ -25,7 +25,6 @@ import { SmsMessagePolicy } from "../../src/modules/sms/sms-message-policy.servi
 import { SmsOutboxService } from "../../src/modules/sms/sms-outbox.service.js";
 import { SmsTemplateCatalog } from "../../src/modules/sms/sms-template-catalog.service.js";
 import { SmsTemplateRenderer } from "../../src/modules/sms/sms-template-renderer.service.js";
-import { SurveysService } from "../../src/modules/surveys/surveys.service.js";
 import { QrTokenProtector } from "../../src/modules/family-bookings/qr-token-protector.service.js";
 
 const apiDirectory = resolve(import.meta.dirname, "../..");
@@ -44,7 +43,6 @@ describe("family booking lifecycle", () => {
   let management: FamilyBookingsManagementService;
   let qr: QrService;
   let checkIns: CheckInsService;
-  let surveys: SurveysService;
   let runId: bigint;
   let branchId: bigint;
   let environment: AppEnvironment;
@@ -87,7 +85,6 @@ describe("family booking lifecycle", () => {
     management = new FamilyBookingsManagementService(prisma, idempotency, crypto, sms, smsTemplates, sheetOutbox, proofService, protector, bookingAccess, qrTokenProtector, environment);
     qr = new QrService(prisma, crypto, proofService, bookingAccess, qrTokenProtector);
     checkIns = new CheckInsService(prisma, crypto, sheetOutbox);
-    surveys = new SurveysService(prisma, idempotency, proofService, protector);
     runId = (await prisma.syncRun.create({ data: { runType: "OFFLINE_INITIAL_DRY_RUN", status: "PUBLISHED" } })).id;
     branchId = (await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_A" } })).id;
   });
@@ -670,7 +667,7 @@ describe("family booking lifecycle", () => {
     })).publicId);
   });
 
-  it("keeps science instructors traceability-only across booking, survey, check-in snapshots, and Sheets", async () => {
+  it("keeps science instructors traceability-only across booking, check-in snapshots, and Sheets", async () => {
     const target = await session(true);
     const createClassifiedStudent = async (input: {
       readonly phone: string;
@@ -805,20 +802,6 @@ describe("family booking lifecycle", () => {
     expect(checkedInPayloadByBooking.get(scienceBooking.familyBookingId)?.teacherName).toBeNull();
     expect(checkedInPayloadByBooking.get(mathBooking.familyBookingId)?.teacherName).toBe("수학담임");
 
-    await surveys.submit(scienceBooking.familyBookingId, {
-      rating: 5,
-      comment: "과학 정책",
-    }, await proof(sciencePhone, "BOOKING_MANAGE"), `science-survey-${randomUUID()}`);
-    await surveys.submit(mathBooking.familyBookingId, {
-      rating: 4,
-      comment: "수학 정책",
-    }, await proof(mathPhone, "BOOKING_MANAGE"), `math-survey-${randomUUID()}`);
-    const surveyPage = await surveys.listSession(target.publicId, 1, 50);
-    expect(surveyPage.items.find((item) => item.familyBookingId === scienceBooking.familyBookingId)?.participant.teacherName)
-      .toBeNull();
-    expect(surveyPage.items.find((item) => item.familyBookingId === mathBooking.familyBookingId)?.participant.teacherName)
-      .toBe("수학담임");
-
     await prisma.sheetMapping.update({
       where: { seminarSessionPublicId: target.publicId },
       data: { enabled: true, circuitStatus: "CLOSED", blockReasonCode: null, lastValidatedAt: new Date() },
@@ -866,7 +849,7 @@ describe("family booking lifecycle", () => {
     expect(storedAssignments.map((entry) => entry.teacherName)).toEqual(["과학강사", "수학강사"]);
   });
 
-  it("allows one terminal outcome in move/cancel and check-in/cancel races and records surveys once", async () => {
+  it("allows one terminal outcome in move/cancel and check-in/cancel races", async () => {
     const phone = "01020004001";
     const source = await session();
     const target = await session();
@@ -883,36 +866,6 @@ describe("family booking lifecycle", () => {
         status: { in: ["RESERVED", "CHECKED_IN"] },
       },
     })).toBeLessThanOrEqual(1);
-
-    const surveyPhone = "01020004002";
-    const surveyBooking = await guestBooking(surveyPhone);
-    await prisma.familyBooking.update({ where: { publicId: surveyBooking.result.familyBookingId }, data: { status: "CHECKED_IN", checkedInAt: new Date() } });
-    const surveyKey = `survey-${randomUUID()}`;
-    const surveyProof = await proof(surveyPhone, "BOOKING_MANAGE");
-    const submitted = await surveys.submit(surveyBooking.result.familyBookingId, {
-      rating: 5, comment: "좋았습니다",
-    }, surveyProof, surveyKey);
-    expect(submitted).toMatchObject({ rating: 5, replayed: false });
-    expect(await surveys.submit(surveyBooking.result.familyBookingId, {
-      rating: 5, comment: "좋았습니다",
-    }, surveyProof, surveyKey)).toMatchObject({ replayed: true });
-    const listed = await surveys.listSession(surveyBooking.target.publicId, 1, 50);
-    expect(listed.summary).toMatchObject({ averageRating: 5, responseCount: 1 });
-    expect(listed.items[0]).toMatchObject({
-      familyBookingId: surveyBooking.result.familyBookingId,
-      participant: {
-        participantType: "GUEST",
-        studentId: null,
-        branch: "CAMPUS_A",
-        unitName: null,
-        studentName: "비재원 학생",
-        className: "비재원생",
-        teacherName: null,
-        contact: surveyPhone,
-        participantCount: 1,
-        additionalParticipantCount: 0,
-      },
-    });
 
     const siblingPhone = "01020004004";
     const siblingSession = await session();
@@ -940,29 +893,6 @@ describe("family booking lifecycle", () => {
       where: { publicId: siblingBooking.familyBookingId },
       data: { status: "CHECKED_IN", checkedInAt: new Date() },
     });
-    await surveys.submit(siblingBooking.familyBookingId, {
-      rating: 4,
-      comment: "형제 설문",
-    }, await proof(siblingPhone, "BOOKING_MANAGE"), `survey-siblings-${randomUUID()}`);
-    const siblingSurvey = await surveys.listSession(siblingSession.publicId, 1, 50);
-    expect(siblingSurvey.items[0]).toMatchObject({
-      participant: {
-        participantType: "ENROLLED",
-        studentId: (await prisma.student.findUniqueOrThrow({ where: { id: primaryLink.studentId! } })).publicId,
-        branch: "CAMPUS_A",
-        unitName: "중등2",
-        studentName: "현재 대표 학생",
-        className: "2B[토3]",
-        teacherName: "현재담임",
-        contact: siblingPhone,
-        participantCount: 2,
-        additionalParticipantCount: 1,
-      },
-    });
-    expect(siblingSurvey.items[0]).not.toHaveProperty("photoAttached");
-    expect(siblingSurvey.items[0]).not.toHaveProperty("photoName");
-    expect(siblingSurvey.items[0]).not.toHaveProperty("photoUrl");
-
     const checkPhone = "01020004003";
     const checkSession = await session();
     const checkBooking = await guestBooking(checkPhone, checkSession);

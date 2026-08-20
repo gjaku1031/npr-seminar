@@ -15,7 +15,6 @@ import { SeminarsModule } from "./modules/seminars/seminars.module.js";
 import { StudentsModule } from "./modules/students/students.module.js";
 import { SmsAdminModule } from "./modules/sms/sms-admin.module.js";
 import { GoogleSheetsAdminModule } from "./modules/google-sheets/google-sheets-admin.module.js";
-import { SurveysModule } from "./modules/surveys/surveys.module.js";
 import { PosterModule } from "./modules/poster/poster.module.js";
 
 @Module({
@@ -40,7 +39,6 @@ import { PosterModule } from "./modules/poster/poster.module.js";
     StudentsModule,
     SmsAdminModule,
     GoogleSheetsAdminModule,
-    SurveysModule,
     PosterModule,
   ],
 })

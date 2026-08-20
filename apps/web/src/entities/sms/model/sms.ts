@@ -1,7 +1,7 @@
 /**
  * 문자(SMS) 도메인 어휘 — 명세 v4.0 §5.
  *
- * ⚠️ 이 모듈에 남은 것은 **화면이 쓰는 어휘뿐**이다: 설문 변수 칩과 byte 추정.
+ * ⚠️ 이 모듈에 남은 것은 **화면이 쓰는 어휘뿐**이다: byte 추정.
  *   문자 발송 화면(views/sms)은 Nest 계약(shared/api tag: Admin SMS)만 읽고 쓴다 —
  *   대상 수·치환 본문·바이트/타입·배송 상태·배치 집계는 전부 서버가 준다.
  *   용도별 변수·라벨의 단일 진실은 옆 모듈 `template-purpose.ts` 다.
@@ -10,8 +10,6 @@
  * `SMS_VARIABLES` 를 제거했다. 계약 타입과 이름만 겹치는 별개 타입이었고 어떤 화면도 쓰지 않았다.
  */
 
-/** 설문 문자 전용 변수 (명세 §6.4) */
-export const SURVEY_SMS_VARIABLES = ["{학생명}", "{설명회명}", "{설문링크}"] as const;
 
 /** SMS/LMS 분기 기준 byte (명세 §5.1) */
 const SMS_BYTE_LIMIT = 90;

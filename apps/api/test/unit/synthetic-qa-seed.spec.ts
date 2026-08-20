@@ -72,7 +72,7 @@ describe("synthetic QA fixed plan", () => {
     expect(classes).toEqual(expect.arrayContaining(["5ZMA", "과고3생2[화2]", "과2내신[토10]", "기하[일1]", "수학특강"]));
   });
 
-  it("builds the POC/load reservations and surveys without any external outbox plan", () => {
+  it("builds the POC/load reservations without any external outbox plan", () => {
     expect(plan.seminars).toHaveLength(4);
     expect(plan.sessions).toHaveLength(6);
     const poc = plan.bookings.filter((booking) => booking.sessionKey === "POC");
@@ -85,6 +85,5 @@ describe("synthetic QA fixed plan", () => {
     expect(load.filter((booking) => booking.status === "CHECKED_IN")).toHaveLength(300);
     expect(load.filter((booking) => booking.status === "CANCELLED")).toHaveLength(150);
     expect(load.filter((booking) => booking.status === "NO_SHOW")).toHaveLength(150);
-    expect(plan.surveys).toHaveLength(506);
   });
 });

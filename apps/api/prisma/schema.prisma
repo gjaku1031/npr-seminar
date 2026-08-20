@@ -363,7 +363,6 @@ model SeminarSession {
   familyBookings        FamilyBooking[]
   familyBookingStudents FamilyBookingStudent[]
   checkInEvents         CheckInEvent[]
-  surveyResponses       SurveyResponse[]
   scannerDevices        ScannerDevice[]
 
   @@index([seminarId, startsAt], map: "seminar_sessions_seminar_starts_idx")
@@ -446,7 +445,6 @@ model FamilyBooking {
   qrCredentials      QrCredential[]
   bookingEvents      BookingEvent[]
   checkInEvents      CheckInEvent[]
-  surveyResponse     SurveyResponse?
   accessCredentials  BookingAccessCredential[]
   managementSessions BookingManagementSession[]
 
@@ -799,20 +797,4 @@ model SheetAttempt {
   @@unique([sheetOutboxId, attemptNo], map: "sheet_attempts_outbox_attempt_unique")
   @@index([sheetOutboxId, occurredAt(sort: Desc)], map: "sheet_attempts_outbox_occurred_idx")
   @@map("sheet_attempts")
-}
-
-model SurveyResponse {
-  id              BigInt         @id @default(autoincrement())
-  publicId        String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
-  familyBookingId BigInt         @unique @map("family_booking_id")
-  sessionId       BigInt         @map("session_id")
-  rating          Int            @db.SmallInt
-  comment         String?        @db.Text
-  submittedAt     DateTime       @default(now()) @map("submitted_at") @db.Timestamptz(6)
-  familyBooking   FamilyBooking  @relation(fields: [familyBookingId, sessionId], references: [id, sessionId], onDelete: NoAction, onUpdate: NoAction, map: "survey_responses_family_session_fk")
-  session         SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([familyBookingId, sessionId], map: "survey_responses_family_session_unique")
-  @@index([sessionId, submittedAt(sort: Desc), id(sort: Desc)], map: "survey_responses_session_submitted_idx")
-  @@map("survey_responses")
 }

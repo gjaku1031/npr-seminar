@@ -49,8 +49,6 @@ CRITICAL_OPERATION_IDS = {
     "getPublicFamilyBooking",
     "updatePublicFamilyBooking",
     "cancelPublicFamilyBooking",
-    "submitFamilyBookingSurveyResponse",
-    "listSessionSurveyResponses",
     "listAdminSeminarSessions",
     "listAdminStudents",
     "listAdminStudentsReviewRequired",
@@ -103,7 +101,6 @@ CRITICAL_OPERATION_IDS = {
     "archiveSmsTemplate",
     "previewSmsTargets",
     "enqueueSmsSend",
-    "enqueueSurveySmsSend",
     "listSmsMessages",
     "getSmsMessage",
     "getGoogleSheetsReadiness",
@@ -147,7 +144,6 @@ EXPECTED_SMS_PURPOSES = {
     "BOOKING_CANCELLED",
     "FIRST_CHECK_IN",
     "ADMIN_GROUP",
-    "SURVEY",
 }
 EXPECTED_SMS_DELIVERY_STATUSES = {
     "PENDING",
@@ -1017,7 +1013,6 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "summary",
         "units",
         "channels",
-        "survey",
     }:
         fail("SessionStatistics is missing a runtime response field")
     statistics_properties = schema_properties(document, "SessionStatistics")
@@ -1057,7 +1052,6 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         ("SessionStatisticsSummary", expected_statistics_fields),
         ("SessionStatisticsUnit", expected_unit_fields),
         ("SessionStatisticsChannel", expected_channel_fields),
-        ("SessionStatisticsSurvey", {"averageRating", "responseCount", "scope"}),
     ):
         response_schema = schema(document, schema_name)
         if (
@@ -1927,111 +1921,6 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     if not {"401", "429"}.issubset(read_session_operation.get("responses", {})):
         fail("contact-owned booking read session must contract generic invalid and rate-limited responses")
 
-    survey_path, survey_method, survey_operation, survey_path_item = operation_by_id(
-        document, "submitFamilyBookingSurveyResponse"
-    )
-    if (survey_path, survey_method) != (
-        "/api/v1/public/family-bookings/{familyBookingId}/survey-response",
-        "post",
-    ):
-        fail("public survey submission has the wrong route")
-    if operation_security_names(survey_operation) != {"bookingProof"}:
-        fail("public survey submission must use X-Booking-Proof only")
-    if survey_operation.get("x-proof-scopes") != ["BOOKING_MANAGE"]:
-        fail("public survey submission must require BOOKING_MANAGE")
-    if "201" not in survey_operation.get("responses", {}):
-        fail("public survey submission must return 201")
-    # The survey response is a durable BOOKING_MANAGE mutation. It must sit behind
-    # the same syntactic booking-proof + session-bound CSRF (including same-origin)
-    # gate as the public family-booking update and cancel, and consume the proof on
-    # the first successful management mutation. Lock every leg so a future edit
-    # cannot silently drop CSRF, the Origin/same-origin check, idempotency, or the
-    # proof-consumption contract for this exact endpoint.
-    survey_parameters = merged_parameters(document, survey_path_item, survey_operation)
-    if survey_operation.get("x-mutation-kind") != "durable":
-        fail("public survey submission must be a durable mutation")
-    if survey_operation.get("x-idempotency") != "required":
-        fail("public survey submission must require idempotency")
-    if not has_required_header(survey_parameters, "Idempotency-Key"):
-        fail("public survey submission must require Idempotency-Key")
-    if survey_operation.get("x-proof-consumption") != (
-        "consumed-by-first-successful-management-mutation"
-    ):
-        fail("public survey submission must consume the proof on first successful mutation")
-    if survey_operation.get("x-access-session-authorization") != "forbidden":
-        fail("public survey submission must forbid access-session authorization")
-    if survey_operation.get("x-requires-csrf") is not True:
-        fail("public survey submission must require session-bound CSRF")
-    if not has_required_header(survey_parameters, "X-CSRF-Token"):
-        fail("public survey submission must require X-CSRF-Token")
-    if survey_operation.get("x-requires-same-origin") is not True:
-        fail("public survey submission must require same-origin validation")
-    if not has_required_header(survey_parameters, "Origin"):
-        fail("public survey submission must require the Origin header")
-    survey_request = schema(document, "PublicSurveyResponseCreateRequest")
-    if set(survey_request.get("required", [])) != {"rating"}:
-        fail("public survey request must require rating")
-    if {"photoAttached", "photoName"} & set(schema_properties(document, "PublicSurveyResponseCreateRequest")):
-        fail("public survey request must not expose mock photo metadata")
-    survey_response = schema(document, "SurveyResponse")
-    survey_fields = set(schema_properties(document, "SurveyResponse"))
-    if {"photoAttached", "photoName"} & survey_fields:
-        fail("SurveyResponse must not expose mock photo metadata")
-    if "participant" not in set(survey_response.get("required", [])) or survey_fields & {
-        "contact",
-        "maskedContact",
-        "students",
-        "studentName",
-    }:
-        fail("SurveyResponse must nest its ADMIN-only participant context")
-    if schema_properties(document, "SurveyResponse").get("participant") != {
-        "$ref": "#/components/schemas/SurveyParticipantContext"
-    }:
-        fail("SurveyResponse.participant must use SurveyParticipantContext")
-    participant_context = schema(document, "SurveyParticipantContext")
-    expected_participant_fields = {
-        "participantType",
-        "studentId",
-        "sourceStudentNo",
-        "branch",
-        "unitName",
-        "studentName",
-        "className",
-        "teacherName",
-        "contact",
-        "participantCount",
-        "additionalParticipantCount",
-    }
-    if (
-        set(participant_context.get("required", [])) != expected_participant_fields
-        or set(schema_properties(document, "SurveyParticipantContext"))
-        != expected_participant_fields
-    ):
-        fail("SurveyParticipantContext does not match the runtime representative mapping")
-    participant_contact = schema_properties(
-        document, "SurveyParticipantContext"
-    ).get("contact", {})
-    if (
-        participant_contact.get("type") != "string"
-        or participant_contact.get("minLength") != 8
-        or participant_contact.get("maxLength") != 15
-        or participant_contact.get("pattern") != r"^[0-9]{8,15}$"
-    ):
-        fail("survey participant contact must be a normalized full ADMIN-only phone")
-
-    admin_survey_path, admin_survey_method, admin_survey, _ = operation_by_id(
-        document, "listSessionSurveyResponses"
-    )
-    if (admin_survey_path, admin_survey_method) != (
-        "/api/v1/admin/seminar-sessions/{seminarSessionId}/survey-responses",
-        "get",
-    ):
-        fail("admin survey response list has the wrong route")
-    if operation_security_names(admin_survey) != {"cookieAuth"}:
-        fail("admin survey response list must use ADMIN cookie authentication")
-    if admin_survey.get("x-required-roles") != ["ADMIN"]:
-        fail("admin survey response list must require ADMIN")
-
     sms_routes = {
         "getSmsGatewayReadiness": ("/api/v1/admin/sms/gateway-readiness", "get"),
         "listSmsTemplates": ("/api/v1/admin/sms/templates", "get"),
@@ -2041,7 +1930,6 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "archiveSmsTemplate": ("/api/v1/admin/sms/templates/{templateId}", "delete"),
         "previewSmsTargets": ("/api/v1/admin/sms/targets/preview", "post"),
         "enqueueSmsSend": ("/api/v1/admin/sms/sends", "post"),
-        "enqueueSurveySmsSend": ("/api/v1/admin/sms/survey-sends", "post"),
         "listSmsMessages": ("/api/v1/admin/sms/messages", "get"),
         "getSmsMessage": ("/api/v1/admin/sms/messages/{messageId}", "get"),
     }
@@ -2057,7 +1945,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "ephemeral"
     ):
         fail("SMS target preview must remain an ephemeral, non-idempotent calculation")
-    for operation_id in ("enqueueSmsSend", "enqueueSurveySmsSend"):
+    for operation_id in ("enqueueSmsSend",):
         if "202" not in operation_by_id(document, operation_id)[2].get("responses", {}):
             fail(f"{operation_id} must return 202 after durable queueing")
     archive_path, _, archive_operation, archive_item = operation_by_id(

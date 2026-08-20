@@ -40,9 +40,7 @@ const EXPECTED: Record<EditableSmsPurpose, string[]> = {
     "{예약확인링크}",
     "{QR링크}",
     "{문의전화}",
-    "{설문링크}",
   ],
-  SURVEY: ["{학생명}", "{설명회명}", "{일시}", "{장소}", "{설문링크}", "{문의전화}"],
 };
 
 describe("EDITABLE_SMS_PURPOSES", () => {
@@ -60,7 +58,6 @@ describe("EDITABLE_SMS_PURPOSES", () => {
       "BOOKING_CONFIRMED",
       "BOOKING_UPDATED",
       "OTP",
-      "SURVEY",
     ]);
   });
 
@@ -102,21 +99,15 @@ describe("SMS_PURPOSE_VARIABLES — 백엔드 PURPOSE_VARIABLES 와 정확히 �
     assert.equal(SMS_PURPOSE_VARIABLES.BOOKING_CONFIRMED.includes("{QR링크}"), true);
   });
 
-  it("ADMIN_GROUP 은 실제 변수 9종을 모두 담는다", () => {
-    assert.equal(SMS_PURPOSE_VARIABLES.ADMIN_GROUP.length, 9);
+  it("ADMIN_GROUP 은 실제 변수 8종을 모두 담는다", () => {
+    assert.equal(SMS_PURPOSE_VARIABLES.ADMIN_GROUP.length, 8);
     assert.equal(SMS_PURPOSE_VARIABLES.ADMIN_GROUP.includes("{인증번호}"), true);
-    assert.equal(SMS_PURPOSE_VARIABLES.ADMIN_GROUP.includes("{설문링크}"), true);
   });
 
-  it("SURVEY 는 설문링크를 담고 QR링크·인증번호는 담지 않는다", () => {
-    assert.equal(SMS_PURPOSE_VARIABLES.SURVEY.includes("{설문링크}"), true);
-    assert.equal(SMS_PURPOSE_VARIABLES.SURVEY.includes("{QR링크}"), false);
-    assert.equal(SMS_PURPOSE_VARIABLES.SURVEY.includes("{인증번호}"), false);
-  });
 });
 
 describe("isEditableSmsPurpose / asEditablePurpose", () => {
-  it("6종은 편집 가능으로 본다", () => {
+  it("편집 가능 용도는 전부 편집 가능으로 본다", () => {
     for (const purpose of EDITABLE_SMS_PURPOSES) {
       assert.equal(isEditableSmsPurpose(purpose), true);
     }
@@ -129,7 +120,6 @@ describe("isEditableSmsPurpose / asEditablePurpose", () => {
   });
 
   it("편집 가능한 값은 그대로 통과시킨다", () => {
-    assert.equal(asEditablePurpose("SURVEY"), "SURVEY");
     assert.equal(asEditablePurpose("OTP"), "OTP");
   });
 });
@@ -145,7 +135,6 @@ describe("newTemplateKey", () => {
 
   it("용도 접두어를 담아 로그에서 구분된다", () => {
     assert.match(newTemplateKey("ADMIN_GROUP"), /^GROUP_/u);
-    assert.match(newTemplateKey("SURVEY"), /^SURVEY_/u);
     assert.match(newTemplateKey("OTP"), /^OTP_/u);
   });
 

@@ -177,7 +177,7 @@ export function SmsView() {
   // 발송 요청은 값싼 동기 계산이라 메모이제이션이 필요 없다 — 매 렌더에서 바로 만든다.
   const selectedTemplateId = selected?.templateId ?? null;
   const selectedIsGroup = selected !== null && asEditablePurpose(selected.purpose) === GROUP_PURPOSE;
-  // 그룹 발송 용도만 실제로 나간다. 자동 발송 용도(OTP·예약·설문)는 여기서 편집만 하고
+  // 그룹 발송 용도만 실제로 나간다. 자동 발송 용도(OTP·예약)는 여기서 편집만 하고
   // templateId·message 어느 쪽으로도 발송 요청을 만들지 않는다. 초안이 용도를 그룹에서
   // 다른 값으로 바꿔 둔 경우도 isGroup 이 false 라 여기서 걸린다.
   let request: SmsTargetRequest | null = null;
@@ -310,8 +310,7 @@ export function SmsView() {
     .replaceAll("{장소}", session === undefined ? "" : SEMINAR_LOCATION)
     .replaceAll("{예약확인링크}", "academy.kr/b/(예시)")
     .replaceAll("{QR링크}", "academy.kr/q/(예시)")
-    .replaceAll("{문의전화}", campusInfo.inquiry)
-    .replaceAll("{설문링크}", "academy.kr/s/(예시)");
+    .replaceAll("{문의전화}", campusInfo.inquiry);
   const phoneBody = serverSample?.message ?? exampleRendered;
   const phoneCaption = serverSample !== null
     ? `서버가 만든 실제 발송 본문 — ${serverSample.maskedRecipient} 기준`

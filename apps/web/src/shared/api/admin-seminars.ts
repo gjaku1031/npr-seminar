@@ -12,9 +12,9 @@ import type { DurableCallOptions } from "./scanner-admin";
 import type {
   AdminSeminarSession,
   AdminSeminarSessionPage,
-  AdminSurveyResponsePage,
   SeminarPage,
   SeminarSessionOperationsSummary,
+  SeminarSessionStatus,
   SeminarStatus,
 } from "./contract";
 
@@ -69,6 +69,8 @@ export function normalizeAdminSeminarSession(raw: RawAdminSeminarSession): Admin
  */
 export interface SeminarSessionUpdateRequest {
   guestBookingEnabled?: boolean;
+  /** 회차 상태 — 화면에서는 '설명회 종료'가 CLOSED 로 내린다. */
+  status?: SeminarSessionStatus;
   expectedVersion: number;
 }
 
@@ -77,6 +79,23 @@ export interface SeminarSessionUpdateRequest {
  * 응답 단건은 목록의 operationsSummary 를 주지 않을 수 있어 normalizeAdminSeminarSession 으로 0 폴백한다
  * (그래서 화면은 실집계가 필요하면 목록을 reload 한다 — 이 응답의 0 을 실집계로 오해하지 않는다).
  */
+/**
+ * 회차 보관(계약 DELETE) — 실제로 지우지 않고 ARCHIVED 로 내린다.
+ *
+ * 예약·입장·문자 기록이 매달린 회차를 진짜로 지우면 그 기록들이 갈 곳을 잃는다. 그래서
+ * 계약의 DELETE 는 처음부터 보관이고, 보관된 회차는 목록에서 빠진다.
+ */
+export async function archiveAdminSeminarSession(
+  sessionId: string,
+  body: { expectedVersion: number; reason: string },
+  options: DurableCallOptions,
+): Promise<void> {
+  await apiRequest<unknown>(
+    `/admin/seminar-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE", body, idempotencyKey: options.idempotencyKey, signal: options.signal },
+  );
+}
+
 export async function updateAdminSeminarSession(
   sessionId: string,
   body: SeminarSessionUpdateRequest,
@@ -198,19 +217,3 @@ export async function listBookableSessions(signal?: AbortSignal): Promise<Semina
     .sort((a, b) => Date.parse(a.session.startsAt) - Date.parse(b.session.startsAt));
 }
 
-/**
- * 한 회차의 설문 응답 + **서버 집계 요약**.
- *
- * `summary` 는 회차 전체 기준이라 페이지 크기와 무관하다 — 평균 별점은 여기서만 읽고
- * items 로 다시 계산하지 않는다(한 페이지 평균은 회차 평균이 아니다).
- */
-export async function listSessionSurveyResponses(
-  seminarSessionId: string,
-  params: { page?: number; pageSize?: number } = {},
-  signal?: AbortSignal,
-): Promise<AdminSurveyResponsePage> {
-  return apiRequest<AdminSurveyResponsePage>(
-    `/admin/seminar-sessions/${encodeURIComponent(seminarSessionId)}/survey-responses`,
-    { method: "GET", query: { page: params.page, pageSize: params.pageSize }, signal },
-  );
-}

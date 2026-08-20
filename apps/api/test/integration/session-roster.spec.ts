@@ -292,10 +292,6 @@ describe("ADMIN seminar session roster", () => {
       ],
       bookingSource: "PHONE",
     }));
-    await prisma.surveyResponse.createMany({ data: [
-      { familyBookingId: bookings.get("siblings")!.id, sessionId: sessionInternalId, rating: 5 },
-      { familyBookingId: bookings.get("otherBranch")!.id, sessionId: sessionInternalId, rating: 3 },
-    ] });
 
     const canonicalMigration = readFileSync(resolve(
       apiDirectory,
@@ -621,7 +617,6 @@ describe("ADMIN seminar session roster", () => {
         noShowBookingCount: 1,
         monitoring: { studentCount: 7, familyBookingCount: 6, attendeeCount: 6 },
       },
-      survey: { averageRating: 4, responseCount: 2, scope: "SESSION" },
     });
     expect(all.units).toHaveLength(8);
     expect(all.units.find((row) => row.unitGroup === "ALL")).toEqual({
@@ -695,7 +690,6 @@ describe("ADMIN seminar session roster", () => {
       noShowBookingCount: 1,
       monitoring: { studentCount: 4, familyBookingCount: 3, attendeeCount: 3 },
     });
-    expect(campusA.survey).toEqual(all.survey);
   });
 
   it("exports every filtered row independently of UI pagination with operational columns and full parent phones", async () => {
