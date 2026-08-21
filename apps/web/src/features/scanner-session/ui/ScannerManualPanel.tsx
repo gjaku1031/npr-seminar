@@ -15,7 +15,7 @@
  * 전체 번호로 바뀐 뒤에도 **의도적으로 마스킹을 유지한다**. 현장 태블릿은 공용 화면이다.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Delete, Search } from "lucide-react";
 import {
   attendancePartySummary,
@@ -28,6 +28,7 @@ import {
   type CheckInOutcome,
   type ManualCheckInCandidate,
 } from "@/shared/api";
+import type { CheckInSource } from "../model/useQrCheckIn";
 
 const DIGIT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const PHONE_LAST4_LENGTH = 4;
@@ -35,7 +36,16 @@ const PHONE_LAST4_LENGTH = 4;
 export interface ScannerManualPanelProps {
   /** 회차 잠금이 없으면 계약상 조회·처리가 모두 거부된다. */
   enabled: boolean;
-  onOutcome: (outcome: CheckInOutcome) => void;
+  /**
+   * 결과를 공용 화면 흐름에 넘긴다. 두 번째 인자로 **어느 예약이었는지**를 함께 준다 —
+   * 서버가 인원을 되물으면 그 흐름이 선택 화면을 열고 같은 예약으로 확정해야 한다.
+   */
+  onOutcome: (outcome: CheckInOutcome, source: CheckInSource) => void;
+  /**
+   * 입장이 확정될 때마다 바뀌는 값. 인원 선택은 이 패널 바깥(공용 오버레이)에서 끝나므로,
+   * 이 신호가 없으면 방금 입장한 예약이 목록에 계속 '미입장'으로 남는다.
+   */
+  settledSignal: number;
   /**
    * 수동 조회·검증·처리 실패마다 정확히 한 번 호출 — 공용 결과음(오류)을 울린다.
    * 성공·중복 결과는 onOutcome(공용 패널)로만 가므로 오류음과 겹치지 않는다.
@@ -65,7 +75,7 @@ const keyStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManualPanelProps) {
+export function ScannerManualPanel({ enabled, onOutcome, onError, settledSignal }: ScannerManualPanelProps) {
   const [last4, setLast4] = useState("");
   const [candidates, setCandidates] = useState<ManualCheckInCandidate[]>([]);
   const [searching, setSearching] = useState(false);
@@ -123,6 +133,32 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
     }
   }, [last4, onError]);
 
+  /*
+    입장이 확정되면 후보를 **조용히** 다시 읽는다.
+
+    인원 선택은 이 패널 바깥(공용 오버레이)에서 끝나므로, 그 결과가 여기로 돌아오는 길이
+    따로 필요하다. 스피너 없이 갱신한다 — 이미 떠 있는 목록을 지울 이유가 없고, 갱신 실패는
+    조용히 둔다(기존 목록이 남는 편이 빈 화면보다 낫다).
+
+    첫 렌더에서는 돌지 않는다 — 아직 아무것도 찾지 않았고, 조회는 회차 잠금을 요구한다.
+  */
+  const settledSeenRef = useRef(settledSignal);
+  useEffect(() => {
+    if (settledSeenRef.current === settledSignal) return;
+    settledSeenRef.current = settledSignal;
+    if (!hasSearched || last4.length !== PHONE_LAST4_LENGTH) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const result = await listScannerManualCandidates(last4);
+        if (!controller.signal.aborted) setCandidates(result.items);
+      } catch {
+        // 배경 갱신 실패 — 기존 목록을 그대로 둔다.
+      }
+    })();
+    return () => controller.abort();
+  }, [settledSignal, hasSearched, last4]);
+
   const enter = useCallback(
     async (candidate: ManualCheckInCandidate) => {
       const bookingId = candidate.familyBookingId;
@@ -147,11 +183,19 @@ export function ScannerManualPanel({ enabled, onOutcome, onError }: ScannerManua
       try {
         const outcome = await checkInFamilyManually(bookingId, { idempotencyKey: lookup.key });
         entryKeys.settle(bookingId);
-        onOutcome(outcome);
-        // 처리된 예약은 목록에서 상태를 갱신한다.
-        setCandidates((current) =>
-          current.map((item) => (item.familyBookingId === bookingId ? { ...item, status: "CHECKED_IN" } : item)),
-        );
+        onOutcome(outcome, { kind: "MANUAL", familyBookingId: bookingId });
+        /*
+          입장한 것만 입장으로 표시한다.
+
+          예전에는 응답과 무관하게 CHECKED_IN 으로 칠했다. 그래서 서버가 "인원을 물어라"로
+          되물었을 때 — 아무것도 바뀌지 않았는데 — 목록이 입장 완료라고 말했다. 스태프는
+          처리된 줄 알고 넘어갔고 그 가족은 미입장으로 남았다.
+        */
+        if (outcome.result === "CHECKED_IN" || outcome.result === "ALREADY_CHECKED_IN") {
+          setCandidates((current) =>
+            current.map((item) => (item.familyBookingId === bookingId ? { ...item, status: "CHECKED_IN" } : item)),
+          );
+        }
       } catch (caught) {
         // 확정 4xx 면 키를 버리고, network·5xx 면 유지해 같은 후보 재시도가 리플레이되게 한다.
         entryKeys.settle(bookingId, caught);

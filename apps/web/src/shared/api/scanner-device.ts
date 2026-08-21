@@ -92,10 +92,12 @@ export function checkInFamilyByQr(
 export function checkInFamilyManually(
   familyBookingId: string,
   options: DurableCallOptions,
+  /** 실제 입장 인원. 비우면 서버가 PARTY_SELECTION_REQUIRED 로 되묻고 아무것도 바꾸지 않는다. */
+  attendedCount?: number,
 ): Promise<CheckInOutcome> {
   return apiRequest<CheckInOutcome>("/scanner/check-ins/manual", {
     method: "POST",
-    body: { familyBookingId },
+    body: attendedCount === undefined ? { familyBookingId } : { familyBookingId, attendedCount },
     idempotencyKey: options.idempotencyKey,
     signal: options.signal,
   });
