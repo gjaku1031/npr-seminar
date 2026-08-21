@@ -27,6 +27,7 @@
     "db:ensure-test-booking": "node dist/commands/ensure-test-booking.js",
     "db:reset:qa": "node dist/commands/reset-synthetic-qa.js",
     "db:reconcile-guest-bookings": "node dist/commands/reconcile-guest-bookings.js",
+    "db:console-check-in": "node dist/commands/console-check-in.js",
     "db:studio": "prisma studio",
     "migrate:deploy": "prisma migrate deploy",
     "snapshot:dry-run": "node dist/commands/offline-snapshot.js dry-run",
