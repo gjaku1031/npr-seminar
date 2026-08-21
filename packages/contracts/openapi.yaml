@@ -8914,6 +8914,9 @@ components:
         seminarSessionId:
           type: string
           format: uuid
+        representativeStudentName:
+          type: [string, 'null']
+          description: Snapshot name of one active participant, for live operator logs. Null when the booking or its rows are gone.
         source:
           $ref: '#/components/schemas/CheckInSource'
         result:

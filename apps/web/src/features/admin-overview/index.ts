@@ -26,3 +26,4 @@ export { useUpcomingSession } from "./model/useUpcomingSession";
 export { useSessionLifecycle } from "./model/useSessionLifecycle";
 export type { SessionLifecycleAction, SessionLifecycleState } from "./model/useSessionLifecycle";
 export { SessionLifecycleDialog } from "./ui/SessionLifecycleDialog";
+export { LiveCheckInLog } from "./ui/LiveCheckInLog";

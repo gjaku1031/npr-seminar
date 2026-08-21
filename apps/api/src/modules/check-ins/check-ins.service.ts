@@ -255,7 +255,12 @@ export class CheckInsService {
       select: {
         id: true, eventId: true, source: true, result: true, seatCount: true, gateCode: true,
         actorSubject: true, safeMetadata: true, occurredAt: true,
-        familyBooking: { select: { publicId: true } },
+        familyBooking: { select: {
+          publicId: true,
+          // 실시간 로그가 "누가 들어왔는지"를 말할 수 있어야 한다. 대표 참가자 한 명의
+          // 스냅샷 이름이면 충분하다 — 형제가 있어도 로그 한 줄에는 한 이름이 낫다.
+          students: { where: { active: true }, orderBy: { id: "asc" }, take: 1, select: { studentNameSnapshot: true } },
+        } },
         session: { select: { publicId: true } },
         scannerDevice: { select: { publicId: true, name: true, location: true } },
       },
@@ -268,6 +273,7 @@ export class CheckInsService {
         return {
           sequence: row.id.toString(), eventId: row.eventId, source: row.source, result: row.result,
           familyBookingId: row.familyBooking?.publicId ?? null, seminarSessionId: row.session.publicId,
+          representativeStudentName: row.familyBooking?.students?.[0]?.studentNameSnapshot ?? null,
           deviceId: row.scannerDevice?.publicId ?? null,
           scannerDeviceName: this.metadataText(metadata, "scannerDeviceName") ?? row.scannerDevice?.name ?? null,
           scannerEntranceName: this.metadataText(metadata, "scannerEntranceName") ?? row.scannerDevice?.location ?? null,
