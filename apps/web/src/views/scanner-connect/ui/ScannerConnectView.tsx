@@ -386,7 +386,12 @@ export function ScannerConnectView() {
             {checkIn.panel.kind === "processing" && <CheckInResultPanel panel={checkIn.panel} />}
           </div>
 
-          <ScannerManualPanel enabled={locked} onOutcome={checkIn.showOutcome} onError={handleManualError} />
+          <ScannerManualPanel
+            enabled={locked}
+            onOutcome={checkIn.showOutcome}
+            onError={handleManualError}
+            settledSignal={checkIn.settledCount}
+          />
         </div>
       )}
 

@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkInFamilyByQr,
+  checkInFamilyManually,
   defaultErrorMessage,
   isAborted,
   useKeyedOperationKeys,
@@ -27,6 +28,26 @@ import { extractQrToken } from "@/shared/lib/qrToken";
 
 /** qr-poc 검증값 — 같은 QR 이 연속 디코드돼도 2.5초 안에는 한 번만 처리한다. */
 const DUPLICATE_COOLDOWN_MS = 2500;
+
+/**
+ * 인원을 되물은 뒤 **무엇으로 다시 보낼지**.
+ *
+ * 두 입장 경로는 서버에게 자기를 다르게 밝힌다 — QR 은 원문 토큰으로, 수동 입장은 예약
+ * id 로. 인원 선택 화면은 두 경로가 함께 쓰므로, 화면이 아니라 이 값이 확정 요청의
+ * 목적지를 정한다. 예전에는 확정이 QR 전용으로 박혀 있어 수동 입장에는 아예 화면이
+ * 뜨지 않았다.
+ */
+export type CheckInSource =
+  | { readonly kind: "QR"; readonly token: string }
+  | { readonly kind: "MANUAL"; readonly familyBookingId: string };
+
+/**
+ * 멱등 키를 잡는 단위. 경로가 달라도 같은 예약이면 같은 키를 쓰면 안 된다 — 서로 다른
+ * 본문의 요청이기 때문이다.
+ */
+function sourceKey(source: CheckInSource): string {
+  return source.kind === "QR" ? source.token : `manual:${source.familyBookingId}`;
+}
 
 export type CheckInPanel =
   | { kind: "idle" }
@@ -39,7 +60,7 @@ export type CheckInPanel =
    *
    * `confirming` 은 선택 후 확정 요청이 나가는 중 — 두 선택지를 모두 잠가 이중 확정을 막는다.
    */
-  | { kind: "party"; token: string; outcome: CheckInOutcome; confirming: boolean }
+  | { kind: "party"; source: CheckInSource; outcome: CheckInOutcome; confirming: boolean }
   /**
    * 결과 미상 건이 상한만큼 쌓여 **새 QR** 을 보낼 수 없다.
    * 이미 스캔한 QR 의 재시도는 계속 가능하다 (기존 키를 그대로 쓴다).
@@ -49,7 +70,18 @@ export type CheckInPanel =
 export interface QrCheckInState {
   panel: CheckInPanel;
   handleScan: (decodedText: string) => void;
-  showOutcome: (outcome: CheckInOutcome) => void;
+  /**
+   * 다른 경로(수동 입장)가 받아 온 결과를 이 화면 흐름에 넘긴다.
+   *
+   * `source` 를 함께 받는 이유: 결과가 "인원을 물어라"이면 여기서 선택 화면을 열어야 하고,
+   * 그때 확정 요청이 어디로 가야 하는지는 결과만 봐서는 알 수 없다.
+   */
+  showOutcome: (outcome: CheckInOutcome, source: CheckInSource) => void;
+  /**
+   * 입장이 확정될 때마다 늘어난다. 수동 입장 후보 목록이 이 값을 보고 다시 읽어,
+   * 인원 선택을 거친 예약도 목록에서 제 상태로 보이게 한다.
+   */
+  settledCount: number;
   /** 인원을 확정해 입장시킨다. 새 Idempotency-Key 로 나간다 — 본문이 달라진 요청이다. */
   confirmParty: (attendedCount: number) => void;
   /** 인원을 고르지 않고 물러난다. 예약은 그대로 미입장이다. */
@@ -59,6 +91,7 @@ export interface QrCheckInState {
 
 export function useQrCheckIn(enabled: boolean): QrCheckInState {
   const [panel, setPanel] = useState<CheckInPanel>({ kind: "idle" });
+  const [settledCount, setSettledCount] = useState(0);
   const lastTokenRef = useRef("");
   const processingRef = useRef(false);
   /** 인원 선택이 열려 있는 동안 새 스캔을 막는 문. state 로 두면 콜백이 낡은 값을 본다. */
@@ -113,9 +146,10 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
           checkInKeys.settle(token);
           if (outcome.result === "PARTY_SELECTION_REQUIRED") {
             partyOpenRef.current = true;
-            setPanel({ kind: "party", token, outcome, confirming: false });
+            setPanel({ kind: "party", source: { kind: "QR", token }, outcome, confirming: false });
             return;
           }
+          if (outcome.result === "CHECKED_IN") setSettledCount((count) => count + 1);
           setPanel({ kind: "outcome", outcome });
         } catch (caught) {
           // 확정 4xx 면 키를 버리고, network·5xx·abort 면 유지한다(같은 토큰 재스캔이 리플레이되도록).
@@ -135,7 +169,15 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
     [enabled, checkInKeys],
   );
 
-  const showOutcome = useCallback((outcome: CheckInOutcome) => {
+  const showOutcome = useCallback((outcome: CheckInOutcome, source: CheckInSource) => {
+    // 되묻는 응답은 아직 입장이 아니다 — 결과처럼 3초 뒤 사라지게 두면 그 가족은 처리되지
+    // 않은 채 넘어간다. QR 경로와 **같은 선택 화면**으로 보낸다.
+    if (outcome.result === "PARTY_SELECTION_REQUIRED") {
+      partyOpenRef.current = true;
+      setPanel({ kind: "party", source, outcome, confirming: false });
+      return;
+    }
+    if (outcome.result === "CHECKED_IN") setSettledCount((current) => current + 1);
     setPanel({ kind: "outcome", outcome });
   }, []);
 
@@ -149,23 +191,29 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
     (attendedCount: number) => {
       setPanel((current) => {
         if (current.kind !== "party" || current.confirming) return current;
-        const { token } = current;
-        const lookup = checkInKeys.keyFor(token);
+        const { source } = current;
+        const key = sourceKey(source);
+        const lookup = checkInKeys.keyFor(key);
         if (!lookup.ok) return { kind: "backlog" };
+        // 다시 시도할 방법이 경로마다 다르므로 안내 문구도 갈라 준다.
+        const retryHint = source.kind === "QR" ? "같은 QR을 다시 스캔해 주세요." : "같은 예약을 다시 눌러 주세요.";
 
         void (async () => {
           try {
-            const outcome = await checkInFamilyByQr(token, { idempotencyKey: lookup.key }, attendedCount);
-            checkInKeys.settle(token);
+            const outcome = source.kind === "QR"
+              ? await checkInFamilyByQr(source.token, { idempotencyKey: lookup.key }, attendedCount)
+              : await checkInFamilyManually(source.familyBookingId, { idempotencyKey: lookup.key }, attendedCount);
+            checkInKeys.settle(key);
             partyOpenRef.current = false;
+            if (outcome.result === "CHECKED_IN") setSettledCount((count) => count + 1);
             setPanel({ kind: "outcome", outcome });
           } catch (caught) {
-            checkInKeys.settle(token, caught);
+            checkInKeys.settle(key, caught);
             if (isAborted(caught)) return;
             partyOpenRef.current = false;
             setPanel({
               kind: "error",
-              message: `${defaultErrorMessage(caught)} 같은 QR을 다시 스캔해 주세요.`,
+              message: `${defaultErrorMessage(caught)} ${retryHint}`,
             });
           }
         })();
@@ -196,5 +244,5 @@ export function useQrCheckIn(enabled: boolean): QrCheckInState {
     setPanel({ kind: "idle" });
   }, []);
 
-  return { panel, handleScan, showOutcome, confirmParty, cancelParty, reset };
+  return { panel, handleScan, showOutcome, settledCount, confirmParty, cancelParty, reset };
 }

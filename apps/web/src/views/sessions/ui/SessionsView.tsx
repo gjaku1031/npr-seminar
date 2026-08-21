@@ -18,6 +18,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  LiveCheckInLog,
   SessionLifecycleDialog,
   useGuestBookingToggle,
   useSeminarSessions,
@@ -282,6 +283,16 @@ export function SessionsView() {
             <StatCard label="입장인원" value={summary.attendedPeopleCount} suffix="명" tone="accent" icon={<Icons.users size={15} />} delay={100} />
             <StatCard label="취소" value={summary.cancelledCount} suffix="건" tone="danger" icon={<Icons.x size={15} />} delay={150} />
           </div>
+
+          {/* 실시간 입장 로그 — 당일 운영 중 "방금 그 가족 처리됐나"를 새로고침 없이 본다. */}
+          <Card padding="14px 16px">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Icons.monitor size={15} style={{ color: "var(--mint-600)" }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-strong)" }}>실시간 입장 로그</span>
+              <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>3초마다 갱신 · 최근 300건</span>
+            </div>
+            <LiveCheckInLog seminarSessionId={session.seminarSessionId} />
+          </Card>
 
         </div>
       </div>

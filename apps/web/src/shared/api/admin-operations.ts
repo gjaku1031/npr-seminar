@@ -22,7 +22,7 @@
 import { apiRequest } from "./client";
 import { countAdminFamilyBookings } from "./admin-family-bookings";
 import { isApiError } from "./problem";
-import type { Branch, ParticipationMonitoring } from "./contract";
+import type { Branch, CheckInResult, ParticipationMonitoring } from "./contract";
 
 /** 이 값이 서버 집계에서 왔는지, 배포 전이라 기존 엔드포인트로 합성했는지. */
 export type AggregateSource = "server" | "derived";
@@ -285,4 +285,45 @@ function bookingFilter(
   status: "RESERVED" | "CHECKED_IN" | "NO_SHOW" | "CANCELLED",
 ): { sessionId: string; branch?: Branch; status: "RESERVED" | "CHECKED_IN" | "NO_SHOW" | "CANCELLED" } {
   return branch === null ? { sessionId, status } : { sessionId, branch, status };
+}
+
+/* ── 실시간 입장 로그 (tag: Admin check-in audit) ─────────────────────────── */
+
+/**
+ * 입장 시도 원장 한 줄 — 운영 화면의 실시간 로그가 쓰는 필드만 옮겼다.
+ * 서버는 더 주지만(멱등 digest 등) 로그가 안 쓰는 값은 받지 않은 셈 친다.
+ */
+export interface CheckInAuditEvent {
+  /** 단조 증가 커서 — 이 값 뒤만 다시 물어보면 새 줄만 온다. */
+  sequence: string;
+  eventId: string;
+  result: CheckInResult;
+  representativeStudentName: string | null;
+  familyBookingId: string | null;
+  scannerGateCode: string | null;
+  scannerDeviceName: string | null;
+  seatCount: number | null;
+  /** attendedCount 등 안전 메타데이터 — 원문 QR·연락처는 계약상 없다. */
+  safeMetadata: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface CheckInAuditEventPage {
+  items: CheckInAuditEvent[];
+  page: { nextAfterSequence: string | null; hasMore: boolean };
+}
+
+/**
+ * 입장 이벤트를 커서로 읽는다 — 실시간 로그는 `afterSequence` 로 새 줄만 이어 받는다.
+ * 조회 전용이라 멱등 키가 없다.
+ */
+export async function listAdminCheckInEvents(
+  params: { sessionId?: string; afterSequence?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<CheckInAuditEventPage> {
+  return apiRequest<CheckInAuditEventPage>("/admin/check-in-events", {
+    method: "GET",
+    query: { sessionId: params.sessionId, afterSequence: params.afterSequence, limit: params.limit },
+    signal,
+  });
 }
