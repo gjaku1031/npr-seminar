@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { defaultErrorMessage, isApiError, loginProjectSession, useOperationKey } from "@/shared/api";
 import { BrandMark, Button, Icons, Input } from "@/shared/ui";
 
@@ -15,7 +14,6 @@ import { BrandMark, Button, Icons, Input } from "@/shared/ui";
  * 자격증명은 제출 순간에만 메모리에 있고, 성공하든 실패하든 로그·스토리지에 남기지 않는다.
  */
 export function LoginForm() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +39,7 @@ export function LoginForm() {
       // 성공 후 자격증명을 메모리에서도 지운다.
       setPassword("");
       // pending 을 풀지 않는다 — 화면 전환까지 버튼이 잠겨 있어야 중복 제출이 없다.
-      router.replace("/admin");
-      router.refresh();
+      window.location.replace("/sessions/");
     } catch (err) {
       operationKey.settle(err);
       setPassword("");
