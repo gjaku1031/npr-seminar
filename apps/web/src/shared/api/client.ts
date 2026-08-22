@@ -14,6 +14,7 @@
  */
 
 import { ApiError, toApiError } from "./problem";
+import { ADMIN_SESSION_EXPIRED_EVENT } from "./session-events";
 
 const API_BASE = "/api/v1";
 
@@ -253,7 +254,12 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     }
   }
 
-  if (!response.ok) throw await toApiError(response);
+  if (!response.ok) {
+    if (response.status === 401 && path.startsWith("/admin/") && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(ADMIN_SESSION_EXPIRED_EVENT));
+    }
+    throw await toApiError(response);
+  }
   return parseOk<T>(response);
 }
 
@@ -292,7 +298,12 @@ export async function apiDownload(path: string, options: ApiDownloadOptions = {}
   const url = buildUrl(path, options.query);
   const headers = new Headers({ Accept: options.accept ?? "application/octet-stream" });
   const response = await runFetch(url, { method: "GET", headers, signal: options.signal });
-  if (!response.ok) throw await toApiError(response);
+  if (!response.ok) {
+    if (response.status === 401 && path.startsWith("/admin/") && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(ADMIN_SESSION_EXPIRED_EVENT));
+    }
+    throw await toApiError(response);
+  }
 
   const blob = await response.blob();
   return {

@@ -27,7 +27,8 @@ export type {
 
 export * from "./contract";
 
-export { loginProjectSession, logoutProjectSession } from "./auth";
+export { ADMIN_SESSION_EXPIRED_EVENT } from "./session-events";
+export { getCurrentActor, loginProjectSession, logoutProjectSession } from "./auth";
 export type { SessionMutationOptions } from "./auth";
 
 export {

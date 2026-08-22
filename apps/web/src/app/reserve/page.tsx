@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ReserveView } from "@/views/reserve";
+import { Suspense } from "react";
+import { ReserveRoute } from "./ReserveRoute";
 import { brandSeminarTitle } from "@/shared/ui/brand";
 
 export const metadata: Metadata = { title: `${brandSeminarTitle()} — 예약` };
@@ -15,12 +16,10 @@ export const metadata: Metadata = { title: `${brandSeminarTitle()} — 예약` }
  * 계약 API 로 이뤄진다. 예약 권한은 SMS OTP 로 얻는 X-Booking-Proof(메모리 전용)가 정한다.
  * 관리자 콘솔은 `/admin` 이고 `(main)` 레이아웃이 인증을 강제한다 — `/` 와 `/reserve` 는 공개다.
  */
-export default async function ParentReservePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ mode?: string | string[] }>;
-}) {
-  const { mode } = await searchParams;
-  const modeValue = Array.isArray(mode) ? mode[0] : mode;
-  return <ReserveView initialMode={modeValue === "manage" ? "manage" : "reserve"} />;
+export default function ParentReservePage() {
+  return (
+    <Suspense fallback={null}>
+      <ReserveRoute />
+    </Suspense>
+  );
 }
