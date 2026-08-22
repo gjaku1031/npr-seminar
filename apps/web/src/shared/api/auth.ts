@@ -17,6 +17,20 @@ import { apiRequest, resetCsrfToken } from "./client";
 import type { CurrentActor, LoginRequest } from "./contract";
 import { isApiError } from "./problem";
 
+/** 현재 세션 actor를 Nest에서 다시 확인한다. 예상 계약과 다르면 오류로 처리한다. */
+export async function getCurrentActor(signal?: AbortSignal): Promise<CurrentActor> {
+  const actor = await apiRequest<CurrentActor>("/auth/me", { signal });
+  if (
+    !actor ||
+    typeof actor.subjectId !== "string" ||
+    typeof actor.displayName !== "string" ||
+    (actor.role !== "ADMIN" && actor.role !== "SCANNER")
+  ) {
+    throw new TypeError("인증 응답 형식이 올바르지 않습니다.");
+  }
+  return actor;
+}
+
 /** durable 변경이라 계약이 Idempotency-Key 를 요구한다 — 키는 호출부(useOperationKey)가 소유한다. */
 export interface SessionMutationOptions {
   idempotencyKey: string;

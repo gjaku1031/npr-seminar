@@ -18,7 +18,6 @@
  * 종료(onExit)는 공개 홈(루트 `/`, 포스터 진입면)으로 돌아간다.
  */
 
-import { useRouter } from "next/navigation";
 import { usePublicSessions } from "@/features/public-booking";
 import { ManageBookingPanel } from "@/widgets/reserve-flow";
 
@@ -27,7 +26,6 @@ export interface BookingDetailViewProps {
 }
 
 export function BookingDetailView({ familyBookingId }: BookingDetailViewProps) {
-  const router = useRouter();
   // 회차 메타(제목·일시·장소)를 붙이고 회차 변경 후보를 고르는 데 쓴다.
   const { sessions } = usePublicSessions();
 
@@ -36,7 +34,7 @@ export function BookingDetailView({ familyBookingId }: BookingDetailViewProps) {
       <ManageBookingPanel
         sessions={sessions}
         initialBookingId={familyBookingId}
-        onExit={() => router.push("/")}
+        onExit={() => { window.location.assign("/"); }}
         onToast={() => {}}
       />
     </div>
