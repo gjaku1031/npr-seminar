@@ -1,16 +1,16 @@
 # @npr-seminar/web
 
-npr 입시설명회 **Next.js 클라이언트 UI**. 화면·라우팅·접근성만 담당한다.
+npr 입시설명회 **Next.js 정적 export UI**. 화면·라우팅·접근성만 담당한다.
 
 업무 API·데이터·OTP·SMS·QR·체크인의 **소유자는 `apps/api`(NestJS)** 다. 이 앱은 서버가 아니다.
 
 > 계약(단일 진실): [`packages/contracts/openapi.yaml`](../../packages/contracts/openapi.yaml)
-> 작업 경계: [`AGENTS.md`](../../AGENTS.md) · 설계: [`docs/architecture.md`](../../docs/architecture.md)
+> 이전 구조 기록: [`docs/architecture.md`](../../docs/architecture.md)
 
 ## 아키텍처 경계
 
 - 브라우저는 **same-origin `/api/v1`** 으로만 Nest 를 호출한다. 계약이 Origin·same-origin 검사를 요구하고, HttpOnly 세션 쿠키가 origin 에 묶이기 때문이다.
-- 로컬·프리뷰는 origin 이 다르므로 `next.config.ts` 가 `NEST_API_ORIGIN` 이 있을 때만 `/api/v1/*` 를 그 origin 으로 프록시한다. 운영에서 앞단 프록시가 이미 `/api/v1` 을 Nest 로 보낸다면 값을 비워 둔다.
+- 정적 산출물에는 Next 서버와 rewrite가 없다. 로컬에서는 [`ops/static-web/serve.mjs`](../../ops/static-web/serve.mjs)가 `out`을 제공하고 `/api/v1/*`를 Nest로 프록시한다. 운영에서는 CloudFront가 같은 공개 주소의 API 경로를 Nest 원본으로 전달한다.
 - **`apps/api` 내부 구현을 import 하지 않는다.** 타입은 계약을 보고 `src/shared/api/contract.ts` 에서 다시 선언한다.
 - 브라우저 어댑터는 `src/shared/api/` 하나뿐이다: same-origin credentials, CSRF 부트스트랩, durable 변경의 Idempotency-Key, RFC 9457 problem 정규화.
 
@@ -20,16 +20,17 @@ npr 입시설명회 **Next.js 클라이언트 UI**. 화면·라우팅·접근성
 | --- | --- | --- |
 | `/` | 공개 | 안내 포스터 진입면 — 예약하기 · 예약 조회로 보낸다 |
 | `/reserve` | 공개 | 학부모 모바일 예약 앱 (캠퍼스 → 회차 → 본인 확인 → 예약). `?mode=manage` 는 조회·변경·취소 |
-| `/booking/{familyBookingId}` | 공개 | 문자로 보내는 안전한 예약 링크 |
+| `/booking/{familyBookingId}` | 공개 | UUIDv4 예약 링크. CDN/로컬 서버가 `/booking/detail/index.html` 정적 셸로 내부 연결 |
+| `/booking/access` | 공개 | 개인 접근 토큰의 fragment를 읽는 별도 화면 |
 | `/admin` | 보호 | `/sessions` 로 이동 (기존 링크 호환. 카드 런처 허브는 2026-08 제거) |
 | `/sessions` `/students` `/sms` `/stats` `/student-status` `/counsel` | 보호 | 관리자 콘솔 모듈 |
 | `/scanner` | 보호 | 관리자용 스캐너 기기 모니터·페어링 |
 | `/scanner/connect` | 공개 | iPad 페어링·스캔 UI |
 
-가드는 `src/app/(main)/layout.tsx` 가 담당한다 — 미들웨어나 프록시 매처가 아니라 **데이터 경계**에
-둔다. `(main)` 아래 화면은 전부 이 레이아웃을 지나고, 레이아웃은 매 요청 Nest 에
-`GET /api/v1/auth/me` 로 되물어 ADMIN 세션만 통과시킨다. 각 페이지가 `requireModuleAccess` 로 한 번 더
-확인한다. `/`·`/reserve`·`/booking/*`·`/scanner/connect` 는 `(main)` 밖이라 공개다.
+관리자 HTML은 정적 파일이므로 브라우저가 화면 진입 시 `GET /api/v1/auth/me`로 세션과 권한을
+확인한다. 확인 중 로딩, 인증 실패, 권한 부족, API 장애를 구분해 표시한다. 화면의 접근 제어는
+사용자 경험을 위한 것이며, 데이터와 변경 요청의 최종 권한은 Nest API가 검사한다.
+`/`·`/reserve`·`/booking/*`·`/scanner/connect`는 공개 화면이다.
 
 ## 제품 표시 불변식
 
@@ -60,11 +61,17 @@ npr 입시설명회 **Next.js 클라이언트 UI**. 화면·라우팅·접근성
 ```bash
 pnpm install
 
-# Nest 를 로컬(기본 PORT=4000)에서 띄운 뒤, 같은 origin 으로 프록시해 실행한다
-NEST_API_ORIGIN=http://127.0.0.1:4000 pnpm dev
+# UI 편집용 Next 개발 서버
+pnpm dev
+
+# 정적 빌드 후 실제 배포 경로와 같은 출처로 확인
+pnpm build
+PORT=3410 NEST_API_ORIGIN=http://127.0.0.1:4000 pnpm start
 ```
 
-`NEST_API_ORIGIN` 없이 `pnpm dev` 를 하면 `/api/v1` 프록시가 없어 모든 계약 호출이 실패한다.
+`pnpm dev`는 UI 개발용이다. API와 함께 보는 정적 preview는 `pnpm start`를 사용한다.
+`NEST_API_ORIGIN` 없이 정적 preview를 띄우면 API 요청은 명시적인 503을 반환한다.
+정적 경로·CloudFront·S3 설정은 [`ops/static-web/README.md`](../../ops/static-web/README.md)를 따른다.
 
 품질 게이트:
 
@@ -86,8 +93,9 @@ pnpm build
 `db:*`·`vercel-build` 스크립트.
 
 제거 시점에 **이 코드를 렌더 경로에서 참조하는 화면은 하나도 없었다** — 관리자 화면까지 계약 API
-이관이 끝난 뒤였다. `src/server` 에 남은 것은 인증 판정(`currentUser`·`requireModuleAccess`)뿐이고,
-그마저 DB 가 아니라 Nest `GET /api/v1/auth/me` 를 부른다. 자세한 내용은
-[`src/server/README.md`](src/server/README.md).
+이관이 끝난 뒤였다. 정적 export 전환 뒤 `src/server`의 기존 인증 헬퍼는 파일로 남아 있어도
+렌더 경로에서 사용하지 않는다. 관리자 세션 확인은 브라우저의 `/api/v1/auth/me` 호출로 진행하며,
+Nest가 API 권한을 최종 판정한다. 이전 서버 인증 구조는
+[`src/server/README.md`](src/server/README.md)에 기록되어 있다.
 
 이전 풀스택 구조의 설계 기록은 [`docs/architecture.md`](../../docs/architecture.md) 에 보존한다.
