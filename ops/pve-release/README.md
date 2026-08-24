@@ -3,6 +3,16 @@
 This directory is the reproducible configuration for the NPR release VM. It
 contains no passwords, cookies, or source student payloads.
 
+## 정적 export 전환과 기존 배포 절차
+
+아래 `deploy-nest-release.sh`는 Next 서버가 `127.0.0.1:3000`에서 실행되고
+Caddy upstream이 그 서버로 이어지는 기존 운영 구조를 전제로 한다. 정적 export의
+`apps/web/out`을 S3에 업로드하거나 CloudFront의 `/api/v1/*` 원본을 구성하지 않는다.
+정적 전환 브랜치의 웹 시작 명령은 이 스크립트가 기대하는 Next 서버가 아니므로,
+기존 운영 VM에 이 스크립트를 그대로 적용하지 않는다. 별도 API 인입 경로와
+CloudFront/S3 전환이 검증되기 전까지 기존 운영 배포는 현재 구조로 유지한다.
+정적 배포 계약과 로컬 미리보기는 [static-web 안내](../static-web/README.md)를 따른다.
+
 ## Target layout
 
 - PostgreSQL 18 data: `/srv/postgresql/18/main`
