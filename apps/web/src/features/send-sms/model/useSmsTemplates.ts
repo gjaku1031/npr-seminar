@@ -15,16 +15,21 @@ import {
   isApiError,
   listSmsTemplates,
   removeSmsTemplate,
+  sameOperationIntent,
   SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE,
   SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE,
   SMS_TEMPLATE_KEY_CONFLICT_CODE,
   SMS_TEMPLATE_VERSION_CONFLICT_CODE,
   smsContentErrorMessage,
   updateSmsTemplate,
+  useKeyedOperationIntents,
   useKeyedOperationKeys,
 } from "@/shared/api";
-import type { SmsEditablePurpose, SmsTemplate, SmsTemplatePolicy } from "@/shared/api";
+import type { CreateSmsTemplateInput, SmsEditablePurpose, SmsTemplate, SmsTemplatePolicy } from "@/shared/api";
 import { newTemplateKey } from "@/entities/sms";
+
+/** 화면이 생성할 수 있는 편집 용도로 좁힌, 멱등 전송용 전체 본문. */
+type SmsCreateIntent = Omit<CreateSmsTemplateInput, "purpose"> & { purpose: SmsEditablePurpose };
 
 function templateErrorMessage(error: unknown): string {
   if (isApiError(error)) {
@@ -55,6 +60,10 @@ export interface SmsTemplatesState {
   busy: boolean;
   reload: () => void;
   create: (input: { name: string; body: string; purpose: SmsEditablePurpose }) => Promise<SmsTemplate | null>;
+  /** 결과를 알 수 없는 생성 요청의 표시 정보. 실제 요청 본문은 의도 훅에 보존한다. */
+  pendingCreate: { name: string; purpose: SmsEditablePurpose } | null;
+  /** 이전 생성 요청의 멱등 키와 본문을 그대로 다시 보낸다. */
+  retryCreate: () => Promise<SmsTemplate | null>;
   save: (
     templateId: string,
     input: { name: string; body: string; purpose: SmsEditablePurpose },
@@ -73,10 +82,12 @@ export function useSmsTemplates(policy: SmsTemplatePolicy | null): SmsTemplatesS
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<{ name: string; purpose: SmsEditablePurpose } | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
-  // 템플릿마다 독립된 조작 — 결과가 미상인 동안 같은 키로만 재시도한다.
+  // 생성은 키와 전체 본문을 함께 붙잡는다. 다른 조작은 기존 대상별 키 수명을 유지한다.
+  const createIntents = useKeyedOperationIntents<SmsCreateIntent>(1);
   const keys = useKeyedOperationKeys();
 
   useEffect(() => {
@@ -118,40 +129,66 @@ export function useSmsTemplates(policy: SmsTemplatePolicy | null): SmsTemplatesS
     setTemplates((previous) => previous.filter((item) => item.templateId !== templateId));
   }, []);
 
+  /** 생성 본문과 멱등 키를 함께 고정해 전송하고, 미확정 결과일 때만 둘 다 보존한다. */
+  const submitCreate = useCallback(async (input: SmsCreateIntent): Promise<SmsTemplate | null> => {
+    const lookup = createIntents.begin("create", input);
+    if (!lookup.ok) {
+      setMutationError(lookup.reason === "diverged"
+        ? "이전 생성 결과가 확인되지 않았어요. 아래에서 이전 요청을 그대로 다시 시도해 주세요."
+        : "확인되지 않은 요청이 남아 있어요. 이전 요청을 먼저 다시 시도해 주세요.");
+      return null;
+    }
+
+    setMutationError(null);
+    setBusy(true);
+    try {
+      // 첫 전송과 재시도 모두 의도 훅이 보존한 동일한 본문·멱등 키를 사용한다.
+      const created = await createSmsTemplate(lookup.intent, { idempotencyKey: lookup.key });
+      createIntents.settle("create");
+      setPendingCreate(null);
+      upsert(created);
+      setMutationError(null);
+      return created;
+    } catch (caught) {
+      createIntents.settle("create", caught);
+      const retained = createIntents.retained("create");
+      setPendingCreate(retained === null ? null : { name: retained.name, purpose: retained.purpose });
+      setMutationError(templateErrorMessage(caught));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [createIntents, upsert]);
+
+  /** 새 생성은 새 키를 만들고, 미확정 생성은 원래 입력과 같을 때만 다시 보낸다. */
   const create = useCallback(
     async (input: { name: string; body: string; purpose: SmsEditablePurpose }): Promise<SmsTemplate | null> => {
+      const retained = createIntents.retained("create");
+      if (retained !== null) {
+        if (!sameOperationIntent(input, { name: retained.name, body: retained.body, purpose: retained.purpose })) {
+          setMutationError("이전 생성 결과가 확인되지 않았어요. 아래에서 이전 요청을 그대로 다시 시도해 주세요.");
+          setPendingCreate({ name: retained.name, purpose: retained.purpose });
+          return null;
+        }
+        return submitCreate(retained);
+      }
+
       const key = policy === null ? null : newTemplateKey(policy, input.purpose);
       if (key === null) {
         setMutationError("문자 편집 정책을 확인할 수 없어요. 정책을 다시 불러와 주세요.");
         return null;
       }
-      const lookup = keys.keyFor("create");
-      if (!lookup.ok) {
-        setMutationError("확인되지 않은 요청이 남아 있어요. 새로고침한 뒤 다시 시도해 주세요.");
-        return null;
-      }
-
-      setBusy(true);
-      try {
-        const created = await createSmsTemplate(
-          // key 는 용도 접두어를 담아 생성 시 한 번 짓는다 — 이름과 달리 사람이 고치는 값이 아니다.
-          { key, name: input.name, purpose: input.purpose, body: input.body },
-          { idempotencyKey: lookup.key },
-        );
-        keys.settle("create");
-        upsert(created);
-        setMutationError(null);
-        return created;
-      } catch (caught) {
-        keys.settle("create", caught);
-        setMutationError(templateErrorMessage(caught));
-        return null;
-      } finally {
-        setBusy(false);
-      }
+      return submitCreate({ key, ...input });
     },
-    [keys, policy, upsert],
+    [createIntents, policy, submitCreate],
   );
+
+  /** 화면의 명시적 재시도는 현재 필터 값과 무관하게 붙잡힌 원래 생성만 보낸다. */
+  const retryCreate = useCallback(async (): Promise<SmsTemplate | null> => {
+    const retained = createIntents.retained("create");
+    if (retained === null) return null;
+    return submitCreate(retained);
+  }, [createIntents, submitCreate]);
 
   const save = useCallback(
     async (
@@ -286,6 +323,8 @@ export function useSmsTemplates(policy: SmsTemplatePolicy | null): SmsTemplatesS
     busy,
     reload,
     create,
+    pendingCreate,
+    retryCreate,
     save,
     archive,
     setDefault,
