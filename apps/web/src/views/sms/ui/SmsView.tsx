@@ -32,6 +32,7 @@ import {
   type SmsAudience,
   type SmsBatchStatus,
   type SmsEditablePurpose,
+  type SmsTemplate,
   type SmsTargetRequest,
 } from "@/shared/api";
 import { CAMPUS_INFO, type Campus } from "@/shared/config/campus";
@@ -258,6 +259,20 @@ export function SmsView() {
     });
   };
 
+  /** 생성·재시도 응답의 실제 용도를 열어, 필터가 바뀌었어도 생성된 행을 선택한다. */
+  const showCreatedTemplate = (created: SmsTemplate) => {
+    const createdPurpose = policyForPurpose(policy, created.purpose as SmsEditablePurpose)?.purpose;
+    if (createdPurpose === undefined) return;
+    setPurposeChoice(createdPurpose);
+    setDraft({
+      templateId: created.templateId,
+      name: created.name,
+      body: created.body,
+      purpose: createdPurpose,
+    });
+    flash("새 템플릿을 만들었어요.");
+  };
+
   /** 서버 정책의 라벨·접두어로 현재 용도의 새 템플릿을 만든다. */
   const doCreate = async () => {
     if (!policyReady || purposeView === null) return;
@@ -269,14 +284,14 @@ export function SmsView() {
       body: `${BRAND_SMS_TAG} `,
       purpose: purposeView,
     });
-    if (created === null) return;
-    setDraft({
-      templateId: created.templateId,
-      name: created.name,
-      body: created.body,
-      purpose: purposeView,
-    });
-    flash("새 템플릿을 만들었어요.");
+    if (created !== null) showCreatedTemplate(created);
+  };
+
+  /** 결과가 불명확했던 생성의 원래 본문을 다시 보내고 확인된 행을 연다. */
+  const doRetryCreate = async () => {
+    if (!policyReady) return;
+    const created = await templates.retryCreate();
+    if (created !== null) showCreatedTemplate(created);
   };
 
   /** 현재 초안을 저장하고 서버가 반환한 용도·본문·버전으로 선택을 갱신한다. */
@@ -510,6 +525,17 @@ export function SmsView() {
             <p role="alert" style={{ margin: "10px 2px 0", fontSize: 12, color: "var(--status-danger)", lineHeight: 1.5 }}>
               {templates.mutationError}
             </p>
+          )}
+
+          {templates.pendingCreate !== null && (
+            <div role="status" style={{ margin: "10px 2px 0", padding: 10, borderRadius: "var(--radius-sm)", background: "var(--surface-sunken)", border: "1px solid var(--border-soft)" }}>
+              <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-body)", lineHeight: 1.5 }}>
+                <b>{templates.pendingCreate.name}</b> ({policyForPurpose(policy, templates.pendingCreate.purpose)?.label ?? templates.pendingCreate.purpose}) 생성 결과를 확인하지 못했어요. 이전 요청을 그대로 다시 시도해 주세요.
+              </p>
+              <Button variant="secondary" size="sm" fullWidth onClick={() => void doRetryCreate()} disabled={!policyReady || templates.busy}>
+                이전 생성 요청 다시 시도
+              </Button>
+            </div>
           )}
 
           <Button
