@@ -8,28 +8,31 @@ import { RolesGuard } from "../../common/auth/roles.guard.js";
 import { SessionGuard } from "../../common/auth/session.guard.js";
 import type { AuthenticatedActor } from "../../common/auth/authenticated-actor.js";
 import { SmsAdminService } from "./sms-admin.service.js";
-import type { SmsSource } from "./sms-outbox.service.js";
+import { SMS_TEMPLATE_PURPOSES, type SmsTemplatePurpose } from "./sms-template-policy.js";
 
 const branches = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const;
-const purposes = ["OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED", "FIRST_CHECK_IN", "ADMIN_GROUP"] as const;
 const audiences = ["BOOKED_FAMILIES", "RESERVED_FAMILIES", "CHECKED_IN_FAMILIES", "CANCELLED_FAMILIES", "TEST_ACCOUNTS"] as const;
 const messageStatuses = [
   "PENDING", "CLAIMED", "SENDING", "SENT", "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST",
   "FAILED_PERMANENT", "DELIVERY_UNKNOWN", "DEAD", "CANCELLED",
 ] as const;
 
+/** 새 템플릿 본문과 {@link SMS_TEMPLATE_PURPOSES} 용도를 검증하는 요청 본문. */
 class CreateTemplateDto {
   @IsString() @Matches(/^[A-Z0-9_]{3,80}$/) public key!: string;
   @IsString() @Length(1, 160) public name!: string;
-  @IsIn(purposes) public purpose!: SmsSource;
+  /** {@link SMS_TEMPLATE_PURPOSES}에 포함된 저장 용도. */
+  @IsIn(SMS_TEMPLATE_PURPOSES) public purpose!: SmsTemplatePurpose;
   @IsOptional() @IsString() @Length(1, 200) public title?: string;
   @IsString() @Length(1, 2000) public body!: string;
   @IsOptional() @IsBoolean() public isDefault?: boolean;
 }
 
+/** 기존 템플릿의 선택 변경과 필수 버전을 검증하는 요청 본문. */
 class UpdateTemplateDto {
   @IsOptional() @IsString() @Length(1, 160) public name?: string;
-  @IsOptional() @IsIn(purposes) public purpose?: SmsSource;
+  /** 변경 시 {@link SMS_TEMPLATE_PURPOSES}에 포함되어야 하는 용도. */
+  @IsOptional() @IsIn(SMS_TEMPLATE_PURPOSES) public purpose?: SmsTemplatePurpose;
   @IsOptional() @ValidateIf((_object, value) => value !== null) @IsString() @Length(1, 200) public title?: string | null;
   @IsOptional() @IsString() @Length(1, 2000) public body?: string;
   @IsOptional() @IsBoolean() public active?: boolean;
@@ -57,15 +60,18 @@ class EnqueueDto extends TargetDto {
   @IsOptional() @IsISO8601() public scheduledAt?: string;
 }
 
+/** 관리자 발송 이력의 선택 필터와 조회 한도를 검증하는 쿼리. */
 class HistoryQueryDto {
   @IsOptional() @IsIn(messageStatuses) public status?: string;
-  @IsOptional() @IsIn(purposes) public source?: string;
+  /** 문자 발송 출처 필터. 서버가 처리하는 모든 용도를 허용한다. */
+  @IsOptional() @IsIn(SMS_TEMPLATE_PURPOSES) public source?: SmsTemplatePurpose;
   @IsOptional() @IsIn(branches) public branch?: string;
   @IsOptional() @IsUUID() public seminarSessionId?: string;
   @IsOptional() @IsUUID() public batchId?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) public limit?: number;
 }
 
+/** 관리자 문자 API. 모든 경로는 세션과 ADMIN 권한 검사를 거친다. */
 @Controller("api/v1/admin/sms")
 @UseGuards(SessionGuard, RolesGuard)
 @Roles("ADMIN")
@@ -74,6 +80,10 @@ export class SmsAdminController {
 
   @Get("gateway-readiness")
   public readiness() { return this.service.readiness(); }
+
+  /** 관리자에게 편집 가능한 용도와 변수 정책을 반환한다. 권한은 클래스 가드가 검사한다. */
+  @Get("template-policy")
+  public templatePolicy() { return this.service.templatePolicy(); }
 
   @Get("templates")
   public listTemplates() { return this.service.listTemplates(); }

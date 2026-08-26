@@ -1,16 +1,5 @@
 // entities/sms 공개 API (barrel). (설계 §4.1)
 export { smsByteLength, isLms } from "./model/sms";
 
-// 용도별 변수/라벨은 이 모듈이 단일 진실이다 (백엔드 PURPOSE_VARIABLES 미러).
-export {
-  asEditablePurpose,
-  DEFAULT_EDITABLE_PURPOSE,
-  EDITABLE_PURPOSE_OPTIONS,
-  EDITABLE_SMS_PURPOSES,
-  isEditableSmsPurpose,
-  newTemplateKey,
-  SMS_PURPOSE_LABELS,
-  SMS_PURPOSE_VARIABLES,
-  variablesForPurpose,
-} from "./model/template-purpose";
-export type { EditableSmsPurpose } from "./model/template-purpose";
+// 편집 정보의 값은 API 정책에서 읽는다. 기존 고정 모듈은 테스트의 직접 import 호환용이다.
+export { newTemplateKey, policyForPurpose } from "./model/template-policy";

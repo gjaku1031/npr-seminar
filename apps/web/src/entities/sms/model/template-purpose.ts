@@ -1,19 +1,13 @@
 /**
- * 문자 템플릿 용도(purpose)와 용도별 변수 — 백엔드 계약의 단일 진실을 프론트에서 그대로 비춘다.
+ * 기존 테스트가 직접 참조하는 문자 용도 도우미의 호환 모듈.
  *
- * ⚠️ 이 모듈은 `apps/api/src/modules/sms/sms-template-renderer.service.ts` 의 `PURPOSE_VARIABLES`
- *   와 **정확히 같아야** 한다. 서버는 저장·프리뷰·발송에서 용도별 허용 변수만 통과시키므로,
- *   화면이 다른 목록을 쓰면 칩으로 넣은 변수가 저장 단계에서 400 으로 떨어진다.
- *
- * 관리 대상은 사람이 편집하는 6종뿐이다. `FIRST_CHECK_IN` 은 백엔드 enum 에는 있지만
- * 이 화면에서 생성·수정·필터·선택·변수 어디에도 나타나면 안 되므로 여기서 의도적으로 제외한다.
- * (옛 `entities/sms` 의 `SMS_VARIABLES` 는 이 규칙과 무관한 레거시다 —
- *  용도별 변수는 반드시 이 모듈에서만 읽는다.)
+ * 함수와 상수의 동작은 보존한다. 실제 화면은 서버의 template-policy 응답을 사용하므로
+ * 이 고정 목록을 제품 코드에서 가져오지 않는다. FIRST_CHECK_IN은 이 편집 목록에 없다.
  */
 
 import type { SmsPurpose } from "@/shared/api";
 
-/** 사람이 편집하는 용도 6종 — 계약 SmsPurpose 에서 FIRST_CHECK_IN 만 뺀 집합이다. */
+/** 호환 테스트가 참조하는 편집 용도 5종의 고정 목록. */
 export const EDITABLE_SMS_PURPOSES = [
   "ADMIN_GROUP",
   "OTP",
@@ -24,10 +18,10 @@ export const EDITABLE_SMS_PURPOSES = [
 
 export type EditableSmsPurpose = (typeof EDITABLE_SMS_PURPOSES)[number];
 
-/** 이 화면의 기본 뷰 — 이 화면은 주로 관리자 그룹 발송에 쓰인다. */
+/** 호환 테스트용 기본 용도. 실제 화면은 API의 defaultPurpose를 읽는다. */
 export const DEFAULT_EDITABLE_PURPOSE: EditableSmsPurpose = "ADMIN_GROUP";
 
-/** 용도 한국어 라벨 — 필터·에디터 Select·목적 컨텍스트 표기에 함께 쓴다. */
+/** 호환 테스트용 고정 라벨. 실제 화면 라벨은 API 응답을 읽는다. */
 export const SMS_PURPOSE_LABELS: Readonly<Record<EditableSmsPurpose, string>> = {
   ADMIN_GROUP: "관리자 그룹 발송",
   OTP: "인증번호",
@@ -37,7 +31,7 @@ export const SMS_PURPOSE_LABELS: Readonly<Record<EditableSmsPurpose, string>> = 
 };
 
 /**
- * 용도별 허용 변수 — 백엔드 `PURPOSE_VARIABLES` 와 1:1. 칩 순서도 서버 집합 순서를 따른다.
+ * 호환 테스트용 고정 변수. 실제 화면 칩은 API 응답의 변수를 따른다.
  *
  * - OTP: 인증번호만
  * - BOOKING_CONFIRMED / BOOKING_UPDATED: 학생명·설명회명·일시·장소·예약확인링크·QR링크·문의전화
@@ -77,7 +71,7 @@ export const SMS_PURPOSE_VARIABLES: Readonly<Record<EditableSmsPurpose, readonly
   ],
 };
 
-/** 계약 key 패턴 `^[A-Z0-9_]{3,80}$` — 용도 이름을 접두어로 쓰면 항상 유효하다. */
+/** 호환 테스트용 고정 접두어. 실제 생성 키의 접두어는 API 응답을 따른다. */
 const KEY_PREFIX: Readonly<Record<EditableSmsPurpose, string>> = {
   ADMIN_GROUP: "GROUP",
   OTP: "OTP",
@@ -107,6 +101,6 @@ export function newTemplateKey(purpose: EditableSmsPurpose): string {
   return `${KEY_PREFIX[purpose]}_${suffix}`;
 }
 
-/** 에디터·필터 Select 용 옵션 — 라벨은 한국어. */
+/** 호환 테스트용 옵션. 실제 선택지는 API 응답 순서와 라벨을 따른다. */
 export const EDITABLE_PURPOSE_OPTIONS: ReadonlyArray<{ value: EditableSmsPurpose; label: string }> =
   EDITABLE_SMS_PURPOSES.map((purpose) => ({ value: purpose, label: SMS_PURPOSE_LABELS[purpose] }));

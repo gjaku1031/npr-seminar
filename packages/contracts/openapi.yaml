@@ -3531,6 +3531,27 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/admin/sms/template-policy:
+    get:
+      operationId: getSmsTemplatePolicy
+      tags: [Admin SMS]
+      summary: Get editable SMS template purposes and variables
+      description: Returns the five administrator-editable purposes in display order. FIRST_CHECK_IN remains valid for server templates but is not editable in this screen.
+      security:
+        - cookieAuth: []
+      x-required-roles: [ADMIN]
+      responses:
+        '200':
+          description: Server-owned template editing policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmsTemplatePolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/admin/sms/templates:
     get:
       operationId: listSmsTemplates
@@ -4694,6 +4715,52 @@ components:
     SmsPurpose:
       type: string
       enum: [OTP, BOOKING_CONFIRMED, BOOKING_UPDATED, BOOKING_CANCELLED, FIRST_CHECK_IN, ADMIN_GROUP]
+
+    SmsEditablePurpose:
+      type: string
+      description: Purposes shown in the administrator template editor.
+      enum: [ADMIN_GROUP, OTP, BOOKING_CONFIRMED, BOOKING_UPDATED, BOOKING_CANCELLED]
+
+    SmsTemplateVariable:
+      type: string
+      enum: ['{인증번호}', '{학생명}', '{설명회명}', '{일시}', '{장소}', '{예약확인링크}', '{QR링크}', '{문의전화}']
+
+    SmsTemplatePurposePolicy:
+      type: object
+      required: [purpose, label, variables, keyPrefix]
+      properties:
+        purpose:
+          $ref: '#/components/schemas/SmsEditablePurpose'
+        label:
+          type: string
+          minLength: 1
+        variables:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SmsTemplateVariable'
+        keyPrefix:
+          type: string
+          minLength: 1
+          maxLength: 67
+          pattern: '^[A-Z0-9_]{1,67}$'
+          description: Prefix for a new template key; the editor appends an underscore and a 12-character suffix within the 80-character key limit.
+      additionalProperties: false
+
+    SmsTemplatePolicy:
+      type: object
+      required: [defaultPurpose, purposes]
+      properties:
+        defaultPurpose:
+          $ref: '#/components/schemas/SmsEditablePurpose'
+        purposes:
+          type: array
+          minItems: 5
+          maxItems: 5
+          description: Administrator-editable purposes in display order; FIRST_CHECK_IN is excluded.
+          items:
+            $ref: '#/components/schemas/SmsTemplatePurposePolicy'
+      additionalProperties: false
 
     SmsMessageType:
       type: string

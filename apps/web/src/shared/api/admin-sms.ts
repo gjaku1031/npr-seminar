@@ -18,6 +18,7 @@ import type {
   SmsBatchSummary,
   SmsDeliveryStatus,
   SmsEnqueueAccepted,
+  SmsEditablePurpose,
   SmsGatewayReadiness,
   SmsMessageList,
   SmsMessageSummary,
@@ -27,6 +28,8 @@ import type {
   SmsTemplate,
   SmsTemplateCreated,
   SmsTemplateList,
+  SmsTemplatePolicy,
+  SmsTemplatePurposePolicy,
   SmsTemplateRemovalResult,
 } from "./contract";
 
@@ -102,6 +105,51 @@ export function smsContentErrorMessage(error: unknown): string | null {
 }
 
 /* ── 템플릿 ──────────────────────────────────────────────────────────────── */
+
+/** 계약에 있는 편집 용도의 집합. 노출 순서와 내용은 서버 응답에서만 읽는다. */
+const EDITABLE_PURPOSE_SET: ReadonlySet<string> = new Set<SmsEditablePurpose>([
+  "ADMIN_GROUP", "OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED",
+]);
+
+/** 정책 응답이 계약과 다를 때 화면에 표시할 안전한 오류를 만든다. */
+function invalidSmsTemplatePolicy(): Error {
+  return new Error("문자 편집 정책 응답이 올바르지 않아요. 다시 시도해 주세요.");
+}
+
+/** 잘못된 정책 응답을 편집 가능한 데이터로 취급하지 않도록 구조와 중복을 확인한다. */
+function parseSmsTemplatePolicy(value: unknown): SmsTemplatePolicy {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalidSmsTemplatePolicy();
+  const response = value as Record<string, unknown>;
+  if (!Array.isArray(response.purposes) || response.purposes.length !== EDITABLE_PURPOSE_SET.size) throw invalidSmsTemplatePolicy();
+
+  const seen = new Set<string>();
+  const purposes: SmsTemplatePurposePolicy[] = response.purposes.map((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) throw invalidSmsTemplatePolicy();
+    const item = entry as Record<string, unknown>;
+    if (typeof item.purpose !== "string" || !EDITABLE_PURPOSE_SET.has(item.purpose) || seen.has(item.purpose)) throw invalidSmsTemplatePolicy();
+    if (typeof item.label !== "string" || item.label.trim() === "") throw invalidSmsTemplatePolicy();
+    if (typeof item.keyPrefix !== "string" || !/^[A-Z0-9_]{1,67}$/.test(item.keyPrefix)) throw invalidSmsTemplatePolicy();
+    if (!Array.isArray(item.variables) || !item.variables.every((variable: unknown) =>
+      typeof variable === "string" && /^\{[^{}]+\}$/.test(variable)
+    )) throw invalidSmsTemplatePolicy();
+    if (new Set(item.variables).size !== item.variables.length) throw invalidSmsTemplatePolicy();
+    seen.add(item.purpose);
+    return {
+      purpose: item.purpose as SmsEditablePurpose,
+      label: item.label,
+      variables: item.variables as string[],
+      keyPrefix: item.keyPrefix,
+    };
+  });
+  if (typeof response.defaultPurpose !== "string" || !seen.has(response.defaultPurpose)) throw invalidSmsTemplatePolicy();
+  return { defaultPurpose: response.defaultPurpose as SmsEditablePurpose, purposes };
+}
+
+/** 관리자 문자 편집 정책을 읽고 검증한다. 취소 신호는 화면 이탈·재조회 때 전달한다. */
+export async function getSmsTemplatePolicy(signal?: AbortSignal): Promise<SmsTemplatePolicy> {
+  const response = await apiRequest<unknown>("/admin/sms/template-policy", { method: "GET", signal });
+  return parseSmsTemplatePolicy(response);
+}
 
 export const SMS_TEMPLATE_VERSION_CONFLICT_CODE = "SMS_TEMPLATE_VERSION_CONFLICT";
 export const SMS_TEMPLATE_KEY_CONFLICT_CODE = "SMS_TEMPLATE_KEY_CONFLICT";

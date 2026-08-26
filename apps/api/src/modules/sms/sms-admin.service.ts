@@ -9,6 +9,7 @@ import { SmsMessagePolicy, type SmsPayloadClassification } from "./sms-message-p
 import { SmsOutboxService, type SmsBranch, type SmsSource } from "./sms-outbox.service.js";
 import { SmsTemplateRenderer } from "./sms-template-renderer.service.js";
 import type { SmsTemplatePurpose } from "./sms-template-renderer.service.js";
+import { SMS_TEMPLATE_EDITING_POLICY, type SmsTemplatePolicyView } from "./sms-template-policy.js";
 
 export type SmsAudience =
   | "BOOKED_FAMILIES"
@@ -97,6 +98,7 @@ const TERMINAL_FAILURE_STATUSES = [
   "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST", "FAILED_PERMANENT", "DELIVERY_UNKNOWN", "DEAD",
 ] as const;
 
+/** 문자 템플릿 편집 정책 조회와 관리자 템플릿·발송 업무를 처리한다. */
 @Injectable()
 export class SmsAdminService {
   public constructor(
@@ -118,6 +120,14 @@ export class SmsAdminService {
       adapterAvailable: false,
       workerOnly: true,
     };
+  }
+
+  /**
+   * {@link SMS_TEMPLATE_EDITING_POLICY}에서 편집 가능한 다섯 용도의 공개 정책을 반환한다.
+   * FIRST_CHECK_IN은 저장·렌더링 허용을 유지하면서 화면 목록에는 포함하지 않는다.
+   */
+  public templatePolicy(): SmsTemplatePolicyView {
+    return SMS_TEMPLATE_EDITING_POLICY;
   }
 
   public async listTemplates() {

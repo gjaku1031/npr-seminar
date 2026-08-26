@@ -18,18 +18,11 @@ import {
   useSmsLogs,
   useSmsSendFlow,
   useSmsTemplates,
+  useSmsTemplatePolicy,
   useSmsAudienceCounts,
 } from "@/features/send-sms";
 import { useSeminarSessions } from "@/features/admin-overview";
-import {
-  asEditablePurpose,
-  DEFAULT_EDITABLE_PURPOSE,
-  EDITABLE_PURPOSE_OPTIONS,
-  SMS_PURPOSE_LABELS,
-  smsByteLength,
-  variablesForPurpose,
-  type EditableSmsPurpose,
-} from "@/entities/sms";
+import { policyForPurpose, smsByteLength } from "@/entities/sms";
 import {
   BRANCH_LABELS,
   primarySample,
@@ -38,6 +31,7 @@ import {
   type Branch,
   type SmsAudience,
   type SmsBatchStatus,
+  type SmsEditablePurpose,
   type SmsTargetRequest,
 } from "@/shared/api";
 import { CAMPUS_INFO, type Campus } from "@/shared/config/campus";
@@ -83,7 +77,7 @@ const BRANCH_CAMPUS: Record<Branch, Campus> = {
 const BRANCHES: Branch[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
 
 /** 관리자 그룹 발송 용도만 실제로 발송된다 — 나머지 용도는 이 화면에서 편집만 한다. */
-const GROUP_PURPOSE: EditableSmsPurpose = "ADMIN_GROUP";
+const GROUP_PURPOSE: SmsEditablePurpose = "ADMIN_GROUP";
 
 /** 발송 큐에 들어간 상태 — 로그에서 "성공/실패"로 세지 않는 중간 상태다. */
 const PENDING_LABEL = "대기";
@@ -105,10 +99,14 @@ const BATCH_STATUS_TONE: Record<SmsBatchStatus, "info" | "warning" | "danger" | 
   FAILED: "danger",
 };
 
+/** 서버 정책으로 편집 선택을 구성하고, 그룹 용도에서만 발송 프리뷰를 연다. */
 export function SmsView() {
   const gateway = useSmsGateway();
   const sessions = useSeminarSessions();
-  const templates = useSmsTemplates();
+  const templatePolicy = useSmsTemplatePolicy();
+  const policy = templatePolicy.policy;
+  const policyReady = policy !== null && !templatePolicy.loading && templatePolicy.error === null;
+  const templates = useSmsTemplates(policy);
 
   /**
    * 편집 중인 초안. null 이면 "아직 아무것도 고치지 않았다"는 뜻이고, 그때 화면은 선택한 용도의 첫
@@ -118,10 +116,10 @@ export function SmsView() {
    * 용도와 달라지면 dirty 가 된다.
    */
   const [draft, setDraft] = useState<
-    { templateId: string | null; name: string; body: string; purpose: EditableSmsPurpose } | null
+    { templateId: string | null; name: string; body: string; purpose: SmsEditablePurpose } | null
   >(null);
-  /** 왼쪽 카드의 용도 필터 — 기본은 그룹 발송(이 화면의 주 용도). */
-  const [purposeView, setPurposeView] = useState<EditableSmsPurpose>(DEFAULT_EDITABLE_PURPOSE);
+  /** 사용자가 고른 필터. 처음에는 서버의 defaultPurpose를 따른다. */
+  const [purposeChoice, setPurposeChoice] = useState<SmsEditablePurpose | null>(null);
   const [sessionChoice, setSessionChoice] = useState<string | null>(null);
   const [audience, setAudience] = useState<SmsAudience>("BOOKED_FAMILIES");
   const [branch, setBranch] = useState<Branch>("CAMPUS_A");
@@ -129,6 +127,7 @@ export function SmsView() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  /** 성공 문구를 잠시 보여 주고, 연속 작업 시 이전 타이머를 취소한다. */
   const flash = (message: string) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -136,8 +135,14 @@ export function SmsView() {
   };
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  // 편집 가능한 용도(FIRST_CHECK_IN 제외)만 다룬다 — 자동 체크인 템플릿은 이 화면에 나타나지 않는다.
-  const editableTemplates = templates.active.filter((template) => asEditablePurpose(template.purpose) === template.purpose);
+  const purposeView = purposeChoice !== null && policyForPurpose(policy, purposeChoice) !== null
+    ? purposeChoice : policy?.defaultPurpose ?? null;
+  const viewPolicy = purposeView === null ? null : policyForPurpose(policy, purposeView);
+  const purposeOptions = policy?.purposes.map((entry) => ({ value: entry.purpose, label: entry.label })) ?? [];
+  // 편집 정책이 노출한 용도만 다룬다 — 자동 체크인 템플릿은 서버에 남아도 이 화면에서 제외한다.
+  const editableTemplates = templates.active.filter((template) =>
+    policyForPurpose(policy, template.purpose as SmsEditablePurpose) !== null,
+  );
   // 왼쪽 목록에는 선택한 용도의 활성 템플릿만 보인다.
   const viewTemplates = editableTemplates.filter((template) => template.purpose === purposeView);
   // 첫 템플릿·첫 회차는 파생 기본값이다. 사용자가 한 번 고르면 그 선택이 목록보다 우선한다.
@@ -146,9 +151,11 @@ export function SmsView() {
     templateId: fallbackTemplate?.templateId ?? null,
     name: fallbackTemplate?.name ?? "",
     body: fallbackTemplate?.body ?? "",
-    purpose: fallbackTemplate ? asEditablePurpose(fallbackTemplate.purpose) : purposeView,
+    purpose: purposeView,
   };
   const { templateId, name, body, purpose } = current;
+  const draftPurposeValid = purpose !== null && policyForPurpose(policy, purpose) !== null;
+  const editorLocked = !policyReady || !draftPurposeValid;
 
   const sessionId = sessionChoice ?? sessions.options[0]?.session.seminarSessionId ?? "";
   // 대상 탭에 붙일 실제 수신 인원 — 캠퍼스·회차가 바뀌면 다시 센다.
@@ -160,11 +167,11 @@ export function SmsView() {
   // 선택 대상은 전체 목록에서 찾는다 — 초안이 용도를 바꿔 두면 그 행은 아직 옛 용도 뷰에 남아 있다.
   const selected = editableTemplates.find((template) => template.templateId === templateId) ?? null;
   const dirty =
-    selected !== null && (selected.body !== body || selected.name !== name || asEditablePurpose(selected.purpose) !== purpose);
+    selected !== null && (selected.body !== body || selected.name !== name || selected.purpose !== purpose);
   /** 이 초안은 실제 그룹 발송 대상인가 — 그룹 용도가 아니면 프리뷰·발송을 만들지 않는다. */
   const isGroup = purpose === GROUP_PURPOSE;
-  /** 화면 변수 칩은 초안의 현재 용도가 허용하는 것만 (백엔드 PURPOSE_VARIABLES 미러). */
-  const variables = variablesForPurpose(purpose);
+  /** 화면 변수 칩은 서버 정책에서 초안의 현재 용도가 허용한 목록이다. */
+  const variables = purpose === null ? [] : policyForPurpose(policy, purpose)?.variables ?? [];
 
   /**
    * 발송 요청 (계약 oneOf: templateId **또는** message — 둘 다 보내면 400).
@@ -176,12 +183,12 @@ export function SmsView() {
    */
   // 발송 요청은 값싼 동기 계산이라 메모이제이션이 필요 없다 — 매 렌더에서 바로 만든다.
   const selectedTemplateId = selected?.templateId ?? null;
-  const selectedIsGroup = selected !== null && asEditablePurpose(selected.purpose) === GROUP_PURPOSE;
+  const selectedIsGroup = selected !== null && selected.purpose === GROUP_PURPOSE;
   // 그룹 발송 용도만 실제로 나간다. 자동 발송 용도(OTP·예약)는 여기서 편집만 하고
   // templateId·message 어느 쪽으로도 발송 요청을 만들지 않는다. 초안이 용도를 그룹에서
   // 다른 값으로 바꿔 둔 경우도 isGroup 이 false 라 여기서 걸린다.
   let request: SmsTargetRequest | null = null;
-  if (isGroup && sessionId !== "" && body.trim() !== "") {
+  if (policyReady && isGroup && sessionId !== "" && body.trim() !== "") {
     const target = { branch, seminarSessionId: sessionId, audience };
     // 저장된 그룹 템플릿을 그대로 쓰는 중이면 templateId 를, 고쳤으면 편집 본문을 message 로.
     request =
@@ -200,32 +207,41 @@ export function SmsView() {
     },
   });
 
-  const setBody = (next: string) => setDraft({ ...current, body: next });
+  /** 본문 변경을 선택한 초안에 반영한다. 정책 조회 전에는 초안을 만들지 않는다. */
+  const setBody = (next: string) => {
+    if (purpose !== null) setDraft({ ...current, purpose, body: next });
+  };
 
+  /** 정책에 노출된 템플릿을 선택하고 서버 본문을 새 초안으로 연다. */
   const pickTemplate = (id: string) => {
     const template = editableTemplates.find((item) => item.templateId === id);
     if (template === undefined) return;
+    const entry = policyForPurpose(policy, template.purpose as SmsEditablePurpose);
+    if (entry === null) return;
     setDraft({
       templateId: template.templateId,
       name: template.name,
       body: template.body,
-      purpose: asEditablePurpose(template.purpose),
+      purpose: entry.purpose,
     });
     templates.clearMutationError();
   };
 
-  // 용도 필터를 바꾸면 초안을 버려 새 용도의 첫 템플릿을 파생시킨다(effect 없이).
-  const changePurposeView = (next: EditableSmsPurpose) => {
-    setPurposeView(next);
+  /** 용도 필터를 바꾸면 그 용도의 첫 템플릿을 파생 기본값으로 연다. */
+  const changePurposeView = (next: SmsEditablePurpose) => {
+    if (policyForPurpose(policy, next) === null) return;
+    setPurposeChoice(next);
     setDraft(null);
     templates.clearMutationError();
   };
 
-  // 에디터의 용도 Select — 저장 전까지는 초안에만 반영된다(용도를 바꾸면 dirty 가 된다).
-  const changeDraftPurpose = (next: EditableSmsPurpose) => {
+  /** 편집 용도 변경을 저장 전 초안에만 반영한다. */
+  const changeDraftPurpose = (next: SmsEditablePurpose) => {
+    if (policyForPurpose(policy, next) === null) return;
     setDraft({ ...current, purpose: next });
   };
 
+  /** 변수 칩을 본문의 현재 커서 또는 선택 영역에 삽입한다. */
   const insertVariable = (variable: string) => {
     const textarea = bodyRef.current;
     // 커서 위치에 넣는다 — 항상 끝에 붙이면 문장 중간에 변수를 넣을 수 없다.
@@ -242,10 +258,14 @@ export function SmsView() {
     });
   };
 
+  /** 서버 정책의 라벨·접두어로 현재 용도의 새 템플릿을 만든다. */
   const doCreate = async () => {
+    if (!policyReady || purposeView === null) return;
+    const entry = policyForPurpose(policy, purposeView);
+    if (entry === null) return;
     // 지금 보고 있는 용도로 만든다. 본문 기본값은 변수가 없어 어떤 용도에서도 유효하다.
     const created = await templates.create({
-      name: `새 ${SMS_PURPOSE_LABELS[purposeView]} 템플릿 ${viewTemplates.length + 1}`,
+      name: `새 ${entry.label} 템플릿 ${viewTemplates.length + 1}`,
       body: `${BRAND_SMS_TAG} `,
       purpose: purposeView,
     });
@@ -254,28 +274,34 @@ export function SmsView() {
       templateId: created.templateId,
       name: created.name,
       body: created.body,
-      purpose: asEditablePurpose(created.purpose),
+      purpose: purposeView,
     });
     flash("새 템플릿을 만들었어요.");
   };
 
+  /** 현재 초안을 저장하고 서버가 반환한 용도·본문·버전으로 선택을 갱신한다. */
   const doSave = async () => {
-    if (templateId === null) return;
+    if (!policyReady || templateId === null || purpose === null) return;
     const saved = await templates.save(templateId, { name, body, purpose });
     if (saved === null) return;
     flash("템플릿을 저장했어요.");
     // 저장된 용도로 카테고리 뷰를 옮기되 선택은 유지한다 — 서버가 준 행이 진실이다.
-    const savedPurpose = asEditablePurpose(saved.purpose);
-    setPurposeView(savedPurpose);
+    const savedPurpose = policyForPurpose(policy, saved.purpose as SmsEditablePurpose)?.purpose;
+    if (savedPurpose === undefined) return;
+    setPurposeChoice(savedPurpose);
     setDraft({ templateId: saved.templateId, name: saved.name, body: saved.body, purpose: savedPurpose });
   };
 
+  /** 서버가 같은 용도의 기본 템플릿을 옮긴 결과를 목록에 반영한다. */
   const doSetDefault = async (id: string) => {
+    if (!policyReady) return;
     const ok = await templates.setDefault(id);
     if (ok) flash("기본 템플릿으로 지정했어요.");
   };
 
+  /** 보관·삭제 결과를 반영하고 현재 선택이 사라졌을 때 같은 용도의 다른 템플릿을 연다. */
   const doArchive = async (id: string) => {
+    if (!policyReady || purposeView === null) return;
     const ok = await templates.archive(id);
     if (!ok) return;
     flash("템플릿을 삭제했어요.");
@@ -285,7 +311,7 @@ export function SmsView() {
     setDraft(
       next === null
         ? { templateId: null, name: "", body: "", purpose: purposeView }
-        : { templateId: next.templateId, name: next.name, body: next.body, purpose: asEditablePurpose(next.purpose) },
+        : { templateId: next.templateId, name: next.name, body: next.body, purpose: purposeView },
     );
   };
 
@@ -322,6 +348,7 @@ export function SmsView() {
   /** 확인 대화상자가 떠 있는 구간 — 실패 문구는 그 안에서만 보여 준다 (두 번 말하지 않게). */
   const confirmOpen = flow.phase === "confirming" || flow.phase === "sending";
 
+  /** 로그의 회차 식별자를 현재 조회한 설명회 제목으로 바꾼다. */
   const sessionTitleOf = (id: string | null) =>
     sessions.options.find((option) => option.session.seminarSessionId === id)?.seminarTitle ?? null;
 
@@ -351,6 +378,16 @@ export function SmsView() {
         </div>
       )}
 
+      {(templatePolicy.loading || templatePolicy.error !== null || (policyReady && !draftPurposeValid)) && (
+        <div role={templatePolicy.error !== null ? "alert" : "status"} style={{ marginTop: 14, padding: "11px 16px", borderRadius: "var(--radius-md)", background: "var(--surface-sunken)", border: "1px solid var(--border-soft)", fontSize: 13, color: templatePolicy.error !== null ? "var(--status-danger)" : "var(--text-body)" }}>
+          {templatePolicy.loading ? "문자 편집 정책을 불러오는 중이에요. 편집은 잠시 기다려 주세요." :
+            templatePolicy.error !== null ? templatePolicy.error : "이 초안의 용도가 현재 편집 정책에 없어요. 용도를 다시 선택해 주세요."}
+          {templatePolicy.error !== null && (
+            <Button variant="secondary" size="sm" onClick={templatePolicy.reload} style={{ marginLeft: 12 }}>정책 다시 시도</Button>
+          )}
+        </div>
+      )}
+
       <div className="npr-sms-grid">
         {/* 템플릿 목록 (명세 §5.1) */}
         <Card padding="14px" style={{ animation: "ds-fade-up var(--dur-slow) var(--ease-out) 60ms both" }}>
@@ -359,8 +396,8 @@ export function SmsView() {
             <button
               type="button"
               onClick={() => void doCreate()}
-              disabled={templates.busy}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--violet-800)", fontSize: 12, fontWeight: 700, cursor: templates.busy ? "default" : "pointer", opacity: templates.busy ? 0.5 : 1, fontFamily: "var(--font-body)" }}
+              disabled={!policyReady || templates.busy}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--violet-800)", fontSize: 12, fontWeight: 700, cursor: !policyReady || templates.busy ? "default" : "pointer", opacity: !policyReady || templates.busy ? 0.5 : 1, fontFamily: "var(--font-body)" }}
             >
               <Icons.plus size={13} /> 생성
             </button>
@@ -371,15 +408,16 @@ export function SmsView() {
             <Select
               portal
               label="용도"
-              options={[...EDITABLE_PURPOSE_OPTIONS]}
-              value={purposeView}
-              onChange={(next) => changePurposeView(next as EditableSmsPurpose)}
+              options={purposeOptions}
+              value={purposeView ?? undefined}
+              onChange={(next) => changePurposeView(next as SmsEditablePurpose)}
+              disabled={!policyReady}
             />
-            <p style={{ margin: "6px 2px 0", fontSize: 11, color: "var(--text-faint)", lineHeight: 1.5 }}>
+            {viewPolicy !== null && <p style={{ margin: "6px 2px 0", fontSize: 11, color: "var(--text-faint)", lineHeight: 1.5 }}>
               {purposeView === GROUP_PURPOSE
                 ? "그룹 발송용 템플릿이에요. 아래에서 골라 발송할 수 있어요."
-                : `${SMS_PURPOSE_LABELS[purposeView]} 자동 발송용 템플릿이에요. 여기서 편집만 하고 그룹으로는 발송하지 않아요.`}
-            </p>
+                : `${viewPolicy.label} 자동 발송용 템플릿이에요. 여기서 편집만 하고 그룹으로는 발송하지 않아요.`}
+            </p>}
           </div>
 
           {templates.loading && (
@@ -395,9 +433,9 @@ export function SmsView() {
             </div>
           )}
 
-          {!templates.loading && templates.error === null && viewTemplates.length === 0 && (
+          {policyReady && !templates.loading && templates.error === null && viewTemplates.length === 0 && (
             <div style={{ padding: "18px 6px", fontSize: 12.5, color: "var(--text-faint)", lineHeight: 1.6 }}>
-              이 용도에는 아직 템플릿이 없어요. <b>생성</b>으로 {SMS_PURPOSE_LABELS[purposeView]} 템플릿을 만들어 주세요.
+              이 용도에는 아직 템플릿이 없어요. <b>생성</b>으로 {viewPolicy?.label} 템플릿을 만들어 주세요.
             </div>
           )}
 
@@ -419,6 +457,7 @@ export function SmsView() {
                     type="button"
                     onClick={() => pickTemplate(template.templateId)}
                     aria-current={current}
+                    disabled={!policyReady}
                     style={{
                       width: "100%",
                       textAlign: "left",
@@ -445,8 +484,8 @@ export function SmsView() {
                     title={template.isDefault ? `${template.name} 은 기본 템플릿이라 다른 템플릿을 기본으로 지정한 뒤에 삭제할 수 있어요` : `${template.name} 템플릿 삭제`}
                     aria-label={template.isDefault ? `${template.name} 템플릿 삭제 — 기본 템플릿이라 먼저 다른 템플릿을 기본으로 지정해야 해요` : `${template.name} 템플릿 삭제`}
                     onClick={() => void doArchive(template.templateId)}
-                    disabled={templates.busy || template.isDefault}
-                    style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-faint)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: templates.busy || template.isDefault ? "default" : "pointer", opacity: template.isDefault ? 0.4 : 1 }}
+                    disabled={!policyReady || templates.busy || template.isDefault}
+                    style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-faint)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: !policyReady || templates.busy || template.isDefault ? "default" : "pointer", opacity: template.isDefault ? 0.4 : 1 }}
                   >
                     <Icons.x size={12} />
                   </button>
@@ -455,8 +494,8 @@ export function SmsView() {
                       <button
                         type="button"
                         onClick={() => void doSetDefault(template.templateId)}
-                        disabled={templates.busy}
-                        style={{ background: "none", border: "none", padding: 0, color: "var(--violet-800)", fontSize: 11.5, fontWeight: 700, cursor: templates.busy ? "default" : "pointer", opacity: templates.busy ? 0.5 : 1, fontFamily: "var(--font-body)" }}
+                        disabled={!policyReady || templates.busy}
+                        style={{ background: "none", border: "none", padding: 0, color: "var(--violet-800)", fontSize: 11.5, fontWeight: 700, cursor: !policyReady || templates.busy ? "default" : "pointer", opacity: !policyReady || templates.busy ? 0.5 : 1, fontFamily: "var(--font-body)" }}
                       >
                         이 목적의 기본으로 지정
                       </button>
@@ -479,7 +518,7 @@ export function SmsView() {
             fullWidth
             icon={<Icons.save size={14} />}
             onClick={() => void doSave()}
-            disabled={templateId === null || templates.busy || !dirty}
+            disabled={editorLocked || templateId === null || templates.busy || !dirty}
             style={{ marginTop: 12 }}
           >
             {templates.busy ? "저장 중…" : dirty ? "현재 내용 저장" : "저장됨"}
@@ -561,8 +600,10 @@ export function SmsView() {
             <input
               id="npr-sms-template-name"
               value={name}
-              onChange={(event) => setDraft({ ...current, name: event.target.value })}
-              disabled={templateId === null || templates.busy}
+              onChange={(event) => {
+                if (purpose !== null) setDraft({ ...current, purpose, name: event.target.value });
+              }}
+              disabled={editorLocked || templateId === null || templates.busy}
               maxLength={160}
               placeholder={templateId === null ? "템플릿을 먼저 선택하세요" : "템플릿 이름"}
               style={{
@@ -588,10 +629,10 @@ export function SmsView() {
             <span style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>용도</span>
             <Select
               portal
-              options={[...EDITABLE_PURPOSE_OPTIONS]}
-              value={purpose}
-              onChange={(next) => changeDraftPurpose(next as EditableSmsPurpose)}
-              disabled={templateId === null || templates.busy}
+              options={purposeOptions}
+              value={purpose ?? undefined}
+              onChange={(next) => changeDraftPurpose(next as SmsEditablePurpose)}
+              disabled={!policyReady || templateId === null || templates.busy}
               style={{ minWidth: 200 }}
             />
             {!isGroup && (
@@ -609,7 +650,7 @@ export function SmsView() {
             ref={bodyRef}
             value={body}
             onChange={(event) => setBody(event.target.value)}
-            disabled={flow.busy}
+            disabled={editorLocked || flow.busy}
             rows={9}
             style={{ width: "100%", marginTop: 10, padding: "14px 16px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-soft)", background: "var(--surface-card)", fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.65, color: "var(--text-strong)", resize: "vertical", outline: "none", boxSizing: "border-box" }}
           />
@@ -621,8 +662,8 @@ export function SmsView() {
                 key={variable}
                 type="button"
                 onClick={() => insertVariable(variable)}
-                disabled={flow.busy}
-                style={{ padding: "4px 10px", borderRadius: "var(--radius-pill)", border: "1px dashed var(--mint-500)", background: "var(--mint-50)", color: "var(--mint-700)", fontSize: 12, fontWeight: 700, cursor: flow.busy ? "default" : "pointer", fontFamily: "var(--font-body)" }}
+                disabled={editorLocked || flow.busy}
+                style={{ padding: "4px 10px", borderRadius: "var(--radius-pill)", border: "1px dashed var(--mint-500)", background: "var(--mint-50)", color: "var(--mint-700)", fontSize: 12, fontWeight: 700, cursor: editorLocked || flow.busy ? "default" : "pointer", fontFamily: "var(--font-body)" }}
               >
                 {variable}
               </button>

@@ -23,8 +23,8 @@ import {
   updateSmsTemplate,
   useKeyedOperationKeys,
 } from "@/shared/api";
-import type { SmsTemplate } from "@/shared/api";
-import { newTemplateKey, type EditableSmsPurpose } from "@/entities/sms";
+import type { SmsEditablePurpose, SmsTemplate, SmsTemplatePolicy } from "@/shared/api";
+import { newTemplateKey } from "@/entities/sms";
 
 function templateErrorMessage(error: unknown): string {
   if (isApiError(error)) {
@@ -54,10 +54,10 @@ export interface SmsTemplatesState {
   error: string | null;
   busy: boolean;
   reload: () => void;
-  create: (input: { name: string; body: string; purpose: EditableSmsPurpose }) => Promise<SmsTemplate | null>;
+  create: (input: { name: string; body: string; purpose: SmsEditablePurpose }) => Promise<SmsTemplate | null>;
   save: (
     templateId: string,
-    input: { name: string; body: string; purpose: EditableSmsPurpose },
+    input: { name: string; body: string; purpose: SmsEditablePurpose },
   ) => Promise<SmsTemplate | null>;
   archive: (templateId: string) => Promise<boolean>;
   /** 같은 용도의 기본 템플릿을 이 템플릿으로 옮긴다 — 성공하면 목록을 다시 읽는다. */
@@ -67,7 +67,8 @@ export interface SmsTemplatesState {
   clearMutationError: () => void;
 }
 
-export function useSmsTemplates(): SmsTemplatesState {
+/** 서버 정책의 접두어로 템플릿을 생성하고, 변경 결과는 서버 목록에 반영한다. */
+export function useSmsTemplates(policy: SmsTemplatePolicy | null): SmsTemplatesState {
   const [templates, setTemplates] = useState<SmsTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +119,12 @@ export function useSmsTemplates(): SmsTemplatesState {
   }, []);
 
   const create = useCallback(
-    async (input: { name: string; body: string; purpose: EditableSmsPurpose }): Promise<SmsTemplate | null> => {
+    async (input: { name: string; body: string; purpose: SmsEditablePurpose }): Promise<SmsTemplate | null> => {
+      const key = policy === null ? null : newTemplateKey(policy, input.purpose);
+      if (key === null) {
+        setMutationError("문자 편집 정책을 확인할 수 없어요. 정책을 다시 불러와 주세요.");
+        return null;
+      }
       const lookup = keys.keyFor("create");
       if (!lookup.ok) {
         setMutationError("확인되지 않은 요청이 남아 있어요. 새로고침한 뒤 다시 시도해 주세요.");
@@ -129,7 +135,7 @@ export function useSmsTemplates(): SmsTemplatesState {
       try {
         const created = await createSmsTemplate(
           // key 는 용도 접두어를 담아 생성 시 한 번 짓는다 — 이름과 달리 사람이 고치는 값이 아니다.
-          { key: newTemplateKey(input.purpose), name: input.name, purpose: input.purpose, body: input.body },
+          { key, name: input.name, purpose: input.purpose, body: input.body },
           { idempotencyKey: lookup.key },
         );
         keys.settle("create");
@@ -144,13 +150,13 @@ export function useSmsTemplates(): SmsTemplatesState {
         setBusy(false);
       }
     },
-    [keys, upsert],
+    [keys, policy, upsert],
   );
 
   const save = useCallback(
     async (
       templateId: string,
-      input: { name: string; body: string; purpose: EditableSmsPurpose },
+      input: { name: string; body: string; purpose: SmsEditablePurpose },
     ): Promise<SmsTemplate | null> => {
       const current = templates.find((item) => item.templateId === templateId);
       if (current === undefined) {

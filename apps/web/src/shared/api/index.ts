@@ -155,6 +155,7 @@ export {
   createSmsTemplate,
   enqueueSmsSend,
   getSmsGatewayReadiness,
+  getSmsTemplatePolicy,
   isSmsSendDisabled,
   listSmsMessages,
   countSmsTargets,

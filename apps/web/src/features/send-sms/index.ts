@@ -11,6 +11,8 @@ export type { SmsGatewayState } from "./model/useSmsGateway";
 
 export { useSmsTemplates } from "./model/useSmsTemplates";
 export type { SmsTemplatesState } from "./model/useSmsTemplates";
+export { useSmsTemplatePolicy } from "./model/useSmsTemplatePolicy";
+export type { SmsTemplatePolicyState } from "./model/useSmsTemplatePolicy";
 
 export { useSmsSendFlow } from "./model/useSmsSendFlow";
 export type { SmsSendFlowState, SmsSendPhase } from "./model/useSmsSendFlow";

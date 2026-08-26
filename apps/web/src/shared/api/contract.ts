@@ -1455,6 +1455,23 @@ export type SmsPurpose =
   | "FIRST_CHECK_IN"
   | "ADMIN_GROUP";
 
+/** 관리자 화면에서 편집 가능한 문자 용도. 자동 입장 문자는 서버 전용으로 유지한다. */
+export type SmsEditablePurpose = Exclude<SmsPurpose, "FIRST_CHECK_IN">;
+
+/** 서버가 제공하는 용도별 편집 정책. 변수와 신규 키 접두어의 기준이다. */
+export interface SmsTemplatePurposePolicy {
+  purpose: SmsEditablePurpose;
+  label: string;
+  variables: string[];
+  keyPrefix: string;
+}
+
+/** 관리자 문자 화면의 편집 정책 응답. 배열 순서가 화면의 용도 선택 순서다. */
+export interface SmsTemplatePolicy {
+  defaultPurpose: SmsEditablePurpose;
+  purposes: SmsTemplatePurposePolicy[];
+}
+
 export type SmsMessageType = "SMS" | "LMS";
 
 /** 계약 SmsDeliveryStatus. CLAIMED·SENDING 은 워커가 집어 든 중간 상태다. */
