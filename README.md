@@ -25,6 +25,9 @@ docs/
 접속하지 않으며, `apps/api`와 내부 타입을 공유하지 않는다. 양쪽의 계약은
 [`packages/contracts/openapi.yaml`](packages/contracts/openapi.yaml)이다.
 
+정책의 기준과 응답 타입·책임을 정리한 이유 및 검증 결과는
+[`docs/refactoring-notes.md`](docs/refactoring-notes.md)에 기록한다.
+
 ## 개발
 
 Node.js 22와 저장소에 고정된 pnpm 11.10.0을 사용한다.
