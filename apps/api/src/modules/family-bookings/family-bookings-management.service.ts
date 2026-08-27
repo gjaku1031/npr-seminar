@@ -29,6 +29,23 @@ import {
 
 interface UpdateInput { readonly seminarSessionId?: string; readonly attendanceParty?: AttendanceParty; readonly studentIds?: readonly string[]; readonly expectedVersion: number; readonly reason: string; }
 
+/** {@link FamilyBookingsManagementService}의 공통 include가 실제로 조회하는 예약 행. */
+type BookingRow = Prisma.FamilyBookingGetPayload<{
+  include: ReturnType<FamilyBookingsManagementService["include"]>;
+}>;
+
+/** 멱등성 재생은 JSON 저장값을 돌려주므로 날짜가 문자열일 수도 있다. */
+type ReplayableBookingDates<T> = Omit<T, "createdAt" | "updatedAt" | "checkedInAt" | "cancelledAt"> & {
+  readonly createdAt: Date | string;
+  readonly updatedAt: Date | string;
+  readonly checkedInAt: Date | string | null;
+  readonly cancelledAt: Date | string | null;
+};
+
+/** 관리자 예약 조회와 변경·취소 응답. 공개 응답과 달리 연락처를 포함한다. */
+type AdminFamilyBooking = ReplayableBookingDates<Awaited<ReturnType<FamilyBookingsManagementService["get"]>>>;
+
+/** 관리자와 공개 예약 조회의 연락처 공개 경계를 유지한다. */
 @Injectable()
 export class FamilyBookingsManagementService {
   public constructor(
@@ -101,8 +118,11 @@ export class FamilyBookingsManagementService {
     };
   }
 
+  /** 공개 변경은 {@link PublicMaskedFamilyBooking}으로 연락처·학생 식별자를 가린다. */
   public update(id: string, input: UpdateInput, actorSubject: null, key: string, proofValue: string, request?: Request): Promise<PublicMaskedFamilyBooking>;
-  public update(id: string, input: UpdateInput, actorSubject: string, key: string, proofValue?: string, request?: Request): Promise<any>;
+  /** 관리자 변경은 연락처를 포함하며 멱등성 재생 시 날짜는 문자열일 수 있다. */
+  public update(id: string, input: UpdateInput, actorSubject: string, key: string, proofValue?: string, request?: Request): Promise<AdminFamilyBooking>;
+  /** 증명 소비·잠금·문자 및 시트 이벤트를 한 멱등성 트랜잭션에서 처리한다. */
   public async update(id: string, input: UpdateInput, actorSubject: string | null, key: string, proofValue?: string, _request?: Request) {
     if (actorSubject === null && (proofValue === undefined || proofValue.trim().length === 0)) {
       this.fail(401, "BOOKING_PROOF_INVALID");
@@ -279,7 +299,7 @@ export class FamilyBookingsManagementService {
     });
     return actorSubject === null
       ? response
-      : this.attachContact(id, response as ReturnType<FamilyBookingsManagementService["mapCore"]>);
+      : this.attachContact(id, response as ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>);
   }
 
   /**
@@ -374,14 +394,17 @@ export class FamilyBookingsManagementService {
     });
   }
 
+  /** 공개 취소는 {@link PublicMaskedFamilyBooking}으로 연락처·학생 식별자를 가린다. */
   public cancel(
     id: string, expectedVersion: number, cancellationType: BookingCancellationType,
     actorSubject: null, key: string, proofValue: string, legacyPublicReason?: string, request?: Request,
   ): Promise<PublicMaskedFamilyBooking>;
+  /** 관리자 취소는 연락처를 포함하며 멱등성 재생 시 날짜는 문자열일 수 있다. */
   public cancel(
     id: string, expectedVersion: number, cancellationType: BookingCancellationType,
     actorSubject: string, key: string, proofValue?: string, legacyPublicReason?: string, request?: Request,
-  ): Promise<any>;
+  ): Promise<AdminFamilyBooking>;
+  /** 취소 상태·버전을 잠그고 문자 및 시트 이벤트와 함께 멱등 처리한다. */
   public async cancel(
     id: string,
     expectedVersion: number,
@@ -488,7 +511,7 @@ export class FamilyBookingsManagementService {
     });
     return actorSubject === null
       ? response
-      : this.attachContact(id, response as ReturnType<FamilyBookingsManagementService["mapCore"]>);
+      : this.attachContact(id, response as ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>);
   }
 
   public async bookingEvents(id: string, afterSequence?: string, requestedLimit?: number) {
@@ -668,14 +691,18 @@ export class FamilyBookingsManagementService {
     return [...current.values()];
   }
 
+  /** 모든 예약 상세 매핑에 필요한 관계를 실제 Prisma include 타입으로 고정한다. */
   private include() { return { session: true, students: { include: { student: { select: {
     publicId: true,
     teacherName: true,
     assignments: { select: { className: true, sourceActive: true } },
-  } } }, orderBy: { id: "asc" as const } }, qrCredentials: { orderBy: { version: "desc" as const }, take: 1 } }; }
+  } } }, orderBy: { id: "asc" as const } }, qrCredentials: { orderBy: { version: "desc" as const }, take: 1 } } as const satisfies Prisma.FamilyBookingInclude; }
+  /** 잠긴 트랜잭션 안에서 조회한 예약을 관리자 응답의 연락처 제외 부분으로 매핑한다. */
   private async load(transaction: Prisma.TransactionClient, id: bigint) { return this.mapCore(await transaction.familyBooking.findUniqueOrThrow({ where: { id }, include: this.include() })); }
-  private map(row: any) { return { ...this.mapCore(row), contact: this.phoneProtector.reveal(row.contactCiphertext) }; }
-  private mapCore(row: any) {
+  /** 관리자 조회에서만 연락처를 복호화해 반환한다. */
+  private map(row: BookingRow) { return { ...this.mapCore(row), contact: this.phoneProtector.reveal(row.contactCiphertext) }; }
+  /** 공개·관리자 응답이 공유하는 예약 필드만 매핑하고 연락처는 제외한다. */
+  private mapCore(row: BookingRow) {
     const qr = row.qrCredentials[0];
     return {
       familyBookingId: row.publicId,
@@ -684,7 +711,7 @@ export class FamilyBookingsManagementService {
       bookingSource: row.bookingSource,
       seatCount: row.seatCount,
       status: row.status,
-      students: this.currentStudentLinks(row.students).map((link: any) => ({
+      students: this.currentStudentLinks(row.students).map((link) => ({
         familyBookingStudentId: link.publicId,
         participantType: link.participantType,
         studentId: link.student?.publicId ?? null,
@@ -710,13 +737,15 @@ export class FamilyBookingsManagementService {
       cancelledAt: row.cancelledAt,
     };
   }
-  private currentStudentLinks(links: readonly any[]) {
+  /** 활성 학생 연결을 우선하고 없으면 가장 최근 해제된 연결들을 반환한다. */
+  private currentStudentLinks(links: readonly BookingRow["students"][number][]) {
     const active = links.filter((link) => link.active === true);
     if (active.length > 0) return active;
     const latestRelease = Math.max(...links.map((link) => link.releasedAt instanceof Date ? link.releasedAt.getTime() : -1));
     return links.filter((link) => link.releasedAt instanceof Date && link.releasedAt.getTime() === latestRelease);
   }
-  private async attachContact(id: string, response: ReturnType<FamilyBookingsManagementService["mapCore"]>) {
+  /** 멱등성 재생값에도 최신 암호문을 조회해 관리자 응답의 연락처를 붙인다. */
+  private async attachContact(id: string, response: ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>) {
     const booking = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, select: { contactCiphertext: true } });
     if (booking === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
     return { ...response, contact: this.phoneProtector.reveal(booking.contactCiphertext) };
