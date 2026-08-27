@@ -76,6 +76,20 @@ interface StudentAssignmentProjection {
   readonly unitName: ReturnType<typeof canonicalUnitName>;
 }
 
+/** 관리자 조회의 포함 조건으로 가져온 학생과 관련 데이터다. */
+type StudentRow = Prisma.StudentGetPayload<{ include: ReturnType<StudentsService["include"]> }>;
+/** 공개 검색의 선택 조건으로 가져온 연락처 없는 학생 데이터다. */
+type PublicStudentRow = Prisma.StudentGetPayload<{ select: ReturnType<StudentsService["publicSelect"]> }>;
+/** 관리자 배정 필드를 기반으로 공개 조회의 활성 상태 미선택도 허용하는 입력이다. */
+type ProjectionAssignment = Pick<StudentRow["assignments"][number],
+  "className" | "sourceUniqueNo" | "classRegistrationNo"> &
+  Partial<Pick<StudentRow["assignments"][number], "sourceActive">>;
+/** 대표 반 분류에 필요한 학생·배정 필드만 담는 공통 입력이다. */
+type ProjectionStudent = Pick<StudentRow,
+  "className" | "classResolutionStatus" | "classResolutionReason"> & {
+    readonly assignments: readonly ProjectionAssignment[];
+  };
+
 type StudentReviewReasonCode =
   | "MULTIPLE_MATH_CLASS"
   | "NO_RECOGNIZABLE_CLASS"
@@ -168,7 +182,7 @@ export class StudentsService {
       this.prisma.syncRun.findFirst({ where: { status: { in: ["PUBLISHED", "SUCCEEDED", "NO_CHANGES"] } }, orderBy: { publishedAt: "desc" } }),
     ]);
     const positions = new Map(pageIds.map((row, index) => [row.id.toString(), index]));
-    const [rows, bookingRows]: [any[], StudentBookingProjectionRow[]] = pageIds.length === 0
+    const [rows, bookingRows]: [StudentRow[], StudentBookingProjectionRow[]] = pageIds.length === 0
       ? [[], []]
       : await Promise.all([
         this.prisma.student.findMany({
@@ -281,6 +295,10 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 예약 증명에 묶인 지점·보호자 연락처로 공개 학생을 검색한다.
+   * 연락처 원문은 반환하지 않으며 증명에 지점이 없거나 요청 지점이 다르면 DomainError를 던진다.
+   */
   public async publicSearch(proofValue: string, filters: { query?: string; branch?: string; page: number; pageSize: number }) {
     const proof = await this.bookingProof.authorize(proofValue, "FAMILY_BOOKING");
     const selectedBranch = proof.selectedBranchCode;
@@ -313,7 +331,7 @@ export class StudentsService {
       this.prisma.student.count({ where }),
     ]);
     return {
-      items: rows.map((row) => ({
+      items: rows.map((row: PublicStudentRow) => ({
         studentId: row.publicId, sourceStudentNo: row.sourceStudentNo, name: row.name, branch: row.branch.code,
         schoolName: row.schoolName, grade: row.grade, representativeClass: this.representative(row),
       })),
@@ -539,6 +557,7 @@ export class StudentsService {
                 booking.id desc,booking_student.id desc`);
   }
 
+  /** 관리자 조회에서 지점·활성 배정·동기화 시각을 함께 읽는 Prisma 포함 조건을 반환한다. */
   private include() {
     return {
       branch: { select: { code: true } },
@@ -549,9 +568,10 @@ export class StudentsService {
         },
       },
       firstSeenRun: { select: { startedAt: true } }, lastSeenRun: { select: { startedAt: true } },
-    };
+    } as const satisfies Prisma.StudentInclude;
   }
 
+  /** 공개 검색에 필요한 학생 식별·대표 반 필드만 선택하고 연락처를 제외한다. 배정은 활성 항목만 조회한다. */
   private publicSelect() {
     return {
       publicId: true,
@@ -568,10 +588,14 @@ export class StudentsService {
         orderBy: [{ className: "asc" as const }, { id: "asc" as const }],
         select: { className: true, sourceUniqueNo: true, classRegistrationNo: true },
       },
-    };
+    } as const satisfies Prisma.StudentSelect;
   }
 
-  private map(row: any, booking?: StudentBookingProjectionRow) {
+  /**
+   * 관리자 학생 응답을 구성하고 보호자 연락처는 이 경계에서만 복호화한다.
+   * 선택한 세미나 예약이 없으면 예약 필드를 null로 반환한다.
+   */
+  private map(row: StudentRow, booking?: StudentBookingProjectionRow) {
     const classProjection = this.assignmentProjection(row);
     const hasReservation = booking !== undefined
       && ["RESERVED", "CHECKED_IN", "NO_SHOW"].includes(booking.status);
@@ -593,7 +617,7 @@ export class StudentsService {
         bookingSource: booking.booking_source,
       },
       representativeClass: this.representative(row, classProjection),
-      assignments: row.assignments.map((assignment: any) => ({
+      assignments: row.assignments.map((assignment) => ({
         assignmentId: assignment.publicId,
         sourceAssignmentKey: this.assignmentKey(assignment.sourceUniqueNo, assignment.classRegistrationNo),
         sourceStudentNo: row.sourceStudentNo, branch: row.branch.code, className: assignment.className,
@@ -608,10 +632,14 @@ export class StudentsService {
     };
   }
 
-  private assignmentProjection(row: any): StudentAssignmentProjection {
-    const rawClassNames = [...new Set<string>((row.assignments as any[])
-      .filter((assignment: any) => assignment.sourceActive !== false)
-      .map((assignment: any): string => typeof assignment.className === "string" ? assignment.className : ""))]
+  /**
+   * 활성 배정의 반 이름을 정규화해 수학·과학 후보와 단위를 반환한다.
+   * 공개 조회는 sourceActive를 선택하지 않지만 조회 조건이 활성 배정만 허용하며 기존 런타임 검사를 유지한다.
+   */
+  private assignmentProjection(row: ProjectionStudent): StudentAssignmentProjection {
+    const rawClassNames = [...new Set<string>(row.assignments
+      .filter((assignment) => assignment.sourceActive !== false)
+      .map((assignment): string => typeof assignment.className === "string" ? assignment.className : ""))]
       .sort(this.classNameOrder);
     const normalizedClassNames = [...new Set(rawClassNames.map((className) => this.normalizedClassName(className)))]
       .sort(this.classNameOrder);
@@ -644,12 +672,16 @@ export class StudentsService {
   private readonly classNameOrder = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
 
-  private representative(row: any, projection = this.assignmentProjection(row)) {
+  /**
+   * 분류 사유와 후보 수를 대표 반 응답으로 반환한다.
+   * 정규화된 수학 반과 일치하는 활성 배정만 선택하며, 일치하지 않으면 배정 키는 null이다.
+   */
+  private representative(row: ProjectionStudent, projection = this.assignmentProjection(row)) {
     const resolution = row.classResolutionStatus === "ONE_REGULAR" ? "REGULAR"
       : row.classResolutionStatus === "SCIENCE_ONLY" ? "SCIENCE_ALIAS"
         : row.classResolutionReason === "MULTIPLE_REGULAR" ? "MULTIPLE_REGULAR"
           : row.classResolutionReason === "FUTURE_TERM_ONLY" ? "FUTURE_TERM_ONLY" : "NO_CLASS";
-    const selected = resolution === "REGULAR" ? row.assignments.find((assignment: any) =>
+    const selected = resolution === "REGULAR" ? row.assignments.find((assignment) =>
       assignment.sourceActive !== false
         && isRepresentativeStudentClass(assignment.className)
         && this.normalizedClassName(assignment.className) === projection.mathClassName) : null;
@@ -666,7 +698,8 @@ export class StudentsService {
     };
   }
 
-  private mapReviewRequired(row: any) {
+  /** 검토 대상 학생의 반 분류 사유를 응답 코드로 반환하며 연락처는 포함하지 않는다. */
+  private mapReviewRequired(row: StudentRow) {
     const projection = this.assignmentProjection(row);
     const reasonCodes: StudentReviewReasonCode[] = [];
     const originalClassName = this.normalizedClassName(row.className);
