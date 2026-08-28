@@ -34,6 +34,7 @@ interface ScannerContext {
   readonly sessionPublicId: string;
 }
 
+/** 스캐너 이름·입구·게이트·캠퍼스의 사건 당시 값을 감사 메타데이터로 고정한다. */
 export function scannerCheckInMetadata(scanner: Pick<ScannerContext, "name" | "location" | "gateCode" | "branchCode">) {
   return {
     scannerDeviceName: scanner.name,
@@ -43,6 +44,7 @@ export function scannerCheckInMetadata(scanner: Pick<ScannerContext, "name" | "l
   } as const;
 }
 
+/** 스캐너 입장 결과. 업무 거절은 {@link CheckInsService}가 이 결과와 사건으로 기록한다. */
 export interface CheckInOutcome {
   readonly eventId: string;
   readonly result: CheckInResult;
@@ -81,6 +83,7 @@ interface RepresentativeCandidate {
   readonly unitNameSnapshot: string | null;
 }
 
+/** 현재 참가자 중 학년 내림차순, 캠퍼스·단위명·반·이름·원천 학생번호 오름차순으로 대표 한 명을 결정한다. 없으면 null이다. */
 export function selectCheckInRepresentativeStudent(students: readonly RepresentativeCandidate[]) {
   const representative = [...students].sort((left, right) => {
     const byGrade = checkInGradeRank(right.gradeSnapshot, right.unitNameSnapshot, right.schoolNameSnapshot)
@@ -145,6 +148,7 @@ function checkInBranchRank(branch: string): number {
   return ({ SONGPA: 0, WIRYE: 1, GWANGJIN: 2 } as Record<string, number>)[branch] ?? 99;
 }
 
+/** 스캐너 컨텍스트, 입장 판정, 감사 사건과 시트 outbox를 한 입장 트랜잭션으로 묶는다. */
 @Injectable()
 export class CheckInsService {
   public constructor(
@@ -153,6 +157,7 @@ export class CheckInsService {
     private readonly sheetOutbox: SheetOutboxService,
   ) {}
 
+  /** 스캐너 캠퍼스에 맞는 OPEN 회차와 기기가 현재 잠근 회차를 반환한다. */
   public async listEligibleSessions(actor: AuthenticatedActor) {
     const device = await this.device(actor);
     const sessions = await this.prisma.seminarSession.findMany({
@@ -181,6 +186,7 @@ export class CheckInsService {
     };
   }
 
+  /** 잠긴 회차의 예약 중 연락처 뒤 네 자리가 일치하는 최대 20건을 반환한다. 잘못된 네 자리는 400이다. */
   public async manualCandidates(actor: AuthenticatedActor, phoneLast4: string) {
     if (!/^\d{4}$/.test(phoneLast4)) this.fail(400, "PHONE_LAST4_INVALID");
     const scanner = await this.context(actor);
@@ -217,6 +223,7 @@ export class CheckInsService {
     };
   }
 
+  /** QR 문자열을 검증·다이제스트화한 뒤 {@link CheckInsService.perform}의 감사 가능한 결과로 넘긴다. */
   public async byQr(
     actor: AuthenticatedActor,
     qrToken: string,
@@ -229,6 +236,7 @@ export class CheckInsService {
     return this.perform(actor, "QR", this.crypto.digest(qrToken), null, idempotencyKey, attendedCount);
   }
 
+  /** 예약 ID로 같은 입장 판정을 수행한다. 실제 인원 생략도 결과 사건으로 남긴다. */
   public byManual(
     actor: AuthenticatedActor,
     familyBookingId: string,
@@ -238,6 +246,7 @@ export class CheckInsService {
     return this.perform(actor, "MANUAL", null, familyBookingId, idempotencyKey, attendedCount);
   }
 
+  /** 관리자가 입장 사건을 sequence 오름차순으로 조회한다. 다음 커서가 없으면 더 볼 사건이 없다. */
   public async listEvents(filters: {
     familyBookingId?: string; sessionId?: string; deviceId?: string; result?: string;
     afterSequence?: string; limit?: number;
@@ -286,6 +295,13 @@ export class CheckInsService {
     };
   }
 
+  /**
+   * 멱등 키 잠금 뒤 스캐너, 회차 ID 오름차순, 예약, QR 자격 순으로 행을 잠근다.
+   * 입장 성공은 예약 변경·예약 사건·시트 outbox·입장 사건·멱등 응답을 함께 커밋한다.
+   * PARTY_SELECTION_REQUIRED 등 업무 실패는 예약을 바꾸지 않아도 입장 사건과 결과를 남긴다.
+   * 같은 키의 동일 요청은 저장된 결과에 replayed=true를 붙이고, 다른 요청은 HTTP 409다.
+   * @throws {DomainError} 멱등 키 오류, 기기 취소·회차 미선택, 키 재사용 충돌 시.
+   */
   private async perform(
     actor: AuthenticatedActor,
     source: CheckInSource,
@@ -338,11 +354,9 @@ export class CheckInsService {
         if (match !== undefined) located = { bookingId: match.id, sessionId: match.session_id, credentialId: null };
       }
       if (located !== undefined) {
-        // Global domain lock order: scanner -> seminar session -> booking -> QR credential.
-        // Lock both the lookup snapshot and the scanner's selected session in
-        // deterministic order. A concurrent booking move must finish first;
-        // after the booking lock below, resultFor revalidates its actual
-        // session before any check-in mutation is allowed.
+        // 전체 잠금 순서: 스캐너 → 회차 → 예약 → QR 자격. 조회 당시 회차와 스캐너가 선택한
+        // 회차를 ID 순으로 함께 잠근 뒤 예약의 실제 회차를 다시 판정한다. 동시 예약 이동이
+        // 먼저 끝나더라도 다른 회차의 예약을 잘못 입장 처리하지 않기 위해서다.
         const sessionIds = [...new Set([located.sessionId, scanner.sessionId])]
           .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
         const lockedSessions = await transaction.$queryRaw<Array<{ id: bigint }>>`
@@ -376,8 +390,8 @@ export class CheckInsService {
        * 보았는데 현장이 그렇지 않다: 1명으로 예약하고 두 분이 오거나 가족이 더 붙어 온다.
        * 예약 인원을 실제 입장으로 단정하면 그만큼 조용히 틀린 숫자가 쌓인다.
        *
-       * 인원을 받지 못했으면 **아무것도 바꾸지 않고** 스캐너에 되묻는다. 여기서 멈추는 편이
-       * 잘못된 숫자를 남기는 것보다 낫다.
+       * 인원을 받지 못했으면 예약 상태·입장 인원은 바꾸지 않고 결과 사건만 남겨
+       * 스캐너에 되묻는다. 잘못된 숫자를 예약에 남기지 않기 위해서다.
        *
        * 예약보다 많은 인원도 그대로 받는다 — 실제로 온 사람 수가 사실이고, 게이트가 사실을
        * 적지 못하면 운영자는 숫자를 포기하거나 거짓으로 적게 된다. 상한은 DB 제약(1~20)이
@@ -502,6 +516,7 @@ export class CheckInsService {
     }, { isolationLevel: "ReadCommitted", timeout: 10_000, maxWait: 5_000 });
   }
 
+  /** 잠긴 예약·QR 자격의 현재 상태를 결과코드로 좁힌다. 업무 실패는 HTTP 예외가 아니다. */
   private resultFor(
     source: CheckInSource,
     scanner: ScannerContext,
@@ -517,6 +532,7 @@ export class CheckInsService {
     return "CHECKED_IN";
   }
 
+  /** 활성 학생 스냅샷에서 입장 사건에 보여 줄 대표 한 명을 반환한다. 없으면 null이다. */
   private async representativeStudent(transaction: Prisma.TransactionClient, familyBookingId: bigint) {
     const students = await transaction.familyBookingStudent.findMany({
       where: { familyBookingId, active: true },
@@ -534,6 +550,7 @@ export class CheckInsService {
     return selectCheckInRepresentativeStudent(students);
   }
 
+  /** 읽기 경로에서 활성 기기와 잠긴 회차를 확인한다. 회차가 없으면 HTTP 409다. */
   private async context(actor: AuthenticatedActor): Promise<ScannerContext> {
     const device = await this.device(actor);
     if (device.selectedSession === null) this.fail(409, "SCANNER_SHIFT_REQUIRED");
@@ -549,6 +566,7 @@ export class CheckInsService {
     };
   }
 
+  /** 변경 경로의 첫 도메인 행 잠금. 취소 기기는 401, 회차 미선택은 409로 거절한다. */
   private async contextForUpdate(transaction: Prisma.TransactionClient, actor: AuthenticatedActor): Promise<ScannerContext> {
     if (actor.role !== "SCANNER" || actor.scannerDeviceId === undefined) this.fail(403, "SCANNER_ROLE_REQUIRED");
     const rows = await transaction.$queryRaw<Array<{
@@ -576,6 +594,7 @@ export class CheckInsService {
     };
   }
 
+  /** 세션의 스캐너 ID로 활성 기기를 조회한다. 취소된 기기는 HTTP 401이다. */
   private async device(actor: AuthenticatedActor) {
     if (actor.role !== "SCANNER" || actor.scannerDeviceId === undefined) this.fail(403, "SCANNER_ROLE_REQUIRED");
     const device = await this.prisma.scannerDevice.findFirst({
@@ -590,25 +609,30 @@ export class CheckInsService {
     return device;
   }
 
+  /** 멱등 요청 다이제스트를 길이 확인 후 상수 시간 비교한다. */
   private equal(left: Uint8Array, right: Uint8Array): boolean {
     const a = Buffer.from(left); const b = Buffer.from(right);
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
+  /** Prisma 바이트 필드에 넘길 독립 Uint8Array 복사본을 만든다. */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
     const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
   }
 
+  /** JSON 메타데이터 객체만 읽고 다른 값은 빈 객체로 취급한다. */
   private safeMetadata(value: Prisma.JsonValue): Readonly<Record<string, Prisma.JsonValue | undefined>> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value as Readonly<Record<string, Prisma.JsonValue | undefined>>;
   }
 
+  /** 스캐너 사건 메타데이터의 문자열 값을 읽고 없으면 null을 반환한다. */
   private metadataText(metadata: Readonly<Record<string, Prisma.JsonValue | undefined>>, key: string): string | null {
     const value = metadata[key];
     return typeof value === "string" && value.length > 0 ? value : null;
   }
 
+  /** 요청 자체가 실패했음을 HTTP 도메인 오류로 알린다. 업무 결과코드와 구분한다. */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The check-in operation could not be completed.");
   }
