@@ -61,3 +61,24 @@ SQL·필터·정렬·페이지 계산·반 분류를 바꾸지 않았다. TypeSc
 예약과 학생 연결 매핑의 `any`를 공통 Prisma 조회에서 도출한 타입으로 교체했다. 공개 변경·취소의 마스킹 응답과 연락처를 포함하는 관리자 응답을 구분하고, 멱등 결과를 JSON에서 재생할 때 날짜가 문자열일 수 있음을 관리자 반환 타입에 반영했다.
 
 SQL·권한·트랜잭션·잠금·실제 응답 필드는 유지했다. 주석을 제거한 JavaScript 결과가 수정 전과 같고 통합 API 타입검사·빌드·OpenAPI/Controller 검증을 통과했다. 합성 데이터의 관리자 예약 목록·상세와 공개 본인확인 상세는 변경 전후 모두 200이며 JSON이 같았다. 학생 조회와 합쳐 총 7종 읽기 응답의 완전 일치를 확인했다. 변경·취소 HTTP를 이 단계에서 별도로 실행한 것은 아니며, 타입 검사와 실행 코드 동일성으로 해당 경계를 점검했다. 테스트 코드·스위트는 변경하거나 실행하지 않았다.
+
+
+## 운영 모듈의 책임과 읽는 순서
+
+실제 HTTP 경계와 정책 처리는 NestJS Controller·구체 Service에, 조회·저장은 Prisma와 SQL에, 외부 통신은 gateway에 둔다. 비동기 작업은 outbox와 worker가 맡는다. 현재 구조를 설명하기 위해 별도의 Service 인터페이스나 단순 전달용 Repository 계층을 추가하지 않았다.
+
+| 영역 | 진입점과 책임 | 코드를 읽을 때 확인할 경계 |
+| --- | --- | --- |
+| 세미나·회차 | `SeminarsController` → `SeminarsService` | 공개 조회 조건, 관리자 가드·CSRF, 변경의 멱등성·버전 검사, 회차 수정의 행 잠금 |
+| 명단·통계 | `SessionRosterService`, `SessionStatisticsService` | 읽기 전용 조회, 대표 예약 선택, 연락처 복호화, XLSX 수식 방어, 예약 기준 예상 인원과 실제 입장의 차이 |
+| 입장 | `CheckInsController` → `CheckInsService` | 멱등 키·기기·회차·예약·QR 잠금 순서, HTTP 오류와 입장 결과 코드, 상태·이벤트·outbox의 단일 커밋 |
+| 스캐너 | `ScannerDevicesController` → `ScannerDevicesService` | Redis 페어링과 DB의 별도 경계, DB 커밋 이후 세션 저장·무효화, heartbeat 갱신 |
+| 학생 동기화 | `StudentSyncOrchestratorService` → `StudentPromotionService` | lease와 로그인 circuit, 외부 조회와 staging, 검증된 원장 승격 트랜잭션, 승격 이후 예약 보정 |
+| 문자 관리·발송 | `SmsAdminService` → outbox → `SmsWorkerService` | 미리보기 token 재검증, 전송 전 대기와 전송 중 상태 구분, 결과 불명확 처리와 제한된 재시도 |
+| Google Sheets | outbox → `SheetWorkerService` → gateway | 매핑·작업 lease, projection과 외부 적용, 회로 중단·조정 필요 상태와 재시도 |
+
+각 모듈의 Controller 또는 공개 Service 메서드에서 입력·권한·반환 계약을 읽고, 해당 메서드가 호출하는 트랜잭션·매핑·외부 통신 순서로 따라가면 된다. 예약과 학생의 공개 응답 경계는 앞 절의 타입 정리, 문자 편집 허용 변수는 정책 파일을 함께 참고한다.
+
+이 단계는 13개 파일의 한국어 주석을 보완했다. 기존의 “입장 인원이 없으면 아무것도 바꾸지 않는다”는 설명은 예약 상태를 유지하면서 입장 결과 사건은 기록한다는 실제 동작에 맞춰 고쳤다. 총 시도 횟수와 재시도 횟수, 감사 기록 조건, 외부 검증 주기, DB 커밋 뒤 처리도 구분했다.
+
+13개 파일의 TypeScript 변환 결과에서 주석을 제거한 JavaScript가 수정 전과 모두 동일했다. API 타입검사·빌드와 OpenAPI 81경로·96업무 operation 및 Controller 경로 검증을 통과했다. 교차 코드 리뷰로 주석과 실제 분기·SQL을 대조했다. 이 단계에서 입장·동기화·worker의 동작을 새로 실행 검증한 것은 아니다. 테스트 파일·스위트, DB·OpenAPI 계약·의존성·배포 설정은 변경하지 않았다. 실제 문자·학생 원천·Google Sheets 호출이나 AWS 배포도 수행하지 않았다.

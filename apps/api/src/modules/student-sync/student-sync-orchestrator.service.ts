@@ -14,6 +14,7 @@ const LEASE_NAME = "tongtontong-student-sync";
 const LEASE_MILLISECONDS = 30 * 60 * 1_000;
 const BATCH_SIZE = 500;
 
+/** 통통통 학생 스냅샷 조회부터 검증·승격까지 실행하고 인증 회로와 실행 lease를 관리한다. */
 @Injectable()
 export class StudentSyncOrchestratorService {
   private readonly logger = new Logger(StudentSyncOrchestratorService.name);
@@ -27,6 +28,10 @@ export class StudentSyncOrchestratorService {
     private readonly guestReconciler: GuestBookingReconcilerService,
   ) {}
 
+  /**
+   * 관리자 수동 실행을 접수하고 공개 실행 ID를 반환한다. 같은 멱등 키의 재요청은 기존 실행을 돌려준다.
+   * {@link claim} 전에 DB·외부 설정·만료 lease를 확인하며 회로가 열렸거나 실행 중이면 거절한다.
+   */
   public async runManual(reason: string, actorSubject: string, idempotencyKey: string): Promise<string> {
     this.requireDatabase(); this.gateway.assertReady();
     await this.recoverAbandonedLease();
@@ -38,6 +43,7 @@ export class StudentSyncOrchestratorService {
     return claimed.value.runId;
   }
 
+  /** 예약 실행을 한 번 접수하고 공개 실행 ID를 반환한다. 중복 실행은 {@link claim}에서 거절한다. */
   public async runScheduled(): Promise<string> {
     this.requireDatabase(); this.gateway.assertReady();
     await this.recoverAbandonedLease();
@@ -48,9 +54,8 @@ export class StudentSyncOrchestratorService {
   }
 
   /**
-   * Read-only runtime readiness used by the admin status endpoint. This calls
-   * only the adapter's local configuration guard; it never opens a session or
-   * sends an upstream request.
+   * 관리자 상태 조회에 쓸 외부 연동 설정 준비 여부를 반환한다.
+   * {@link TongTongTongGateway.assertReady}만 호출하고 로그인이나 외부 요청은 하지 않는다.
    */
   public liveSourceReady(): boolean {
     try {
@@ -61,6 +66,11 @@ export class StudentSyncOrchestratorService {
     }
   }
 
+  /**
+   * 접수 응답과 실행을 분리한다. 안전하게 밖으로 전파된 예외에는 가능한 실패 기록을 먼저 시도하고,
+   * 그 단계에서 예외가 없을 때 lease 해제를 시도한다. 외부 결과 불명확 상태는 {@link execute}가 lease를
+   * 보존해 만료 복구에 맡긴다.
+   */
   private startInBackground(publicRunId: string): void {
     void this.execute(publicRunId).catch(async (error: unknown) => {
       try {
@@ -73,6 +83,7 @@ export class StudentSyncOrchestratorService {
     });
   }
 
+  /** 실행·지점 행과 30분 lease를 한 트랜잭션에서 만들며 중복 실행을 409로 거절한다. */
   private async claim(transaction: Prisma.TransactionClient, runType: "MANUAL" | "SCHEDULED", actorSubject: string) {
     const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
       select status from tong_auth_circuit where singleton_id=1 for update`;
@@ -97,6 +108,7 @@ export class StudentSyncOrchestratorService {
     return { runId: run.publicId };
   }
 
+  /** 만료 lease의 실행을 정리한다. 로그인 시도 후 결과가 불명확하면 인증 회로를 열고 자동 재시도를 막는다. */
   private async recoverAbandonedLease(): Promise<void> {
     const opened = await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -158,6 +170,11 @@ export class StudentSyncOrchestratorService {
     if (opened) this.fail(409, "TONG_AUTH_CIRCUIT_OPEN");
   }
 
+  /**
+   * 로그인 시도를 먼저 영속화한 뒤 외부 로그인·세 지점 조회를 순서대로 수행한다.
+   * 외부 결과가 불명확하면 회로를 영속적으로 열기 전에는 lease를 놓지 않는다.
+   * 세 스냅샷 검증·적재 뒤 {@link StudentPromotionService.promote}를 호출하며, 이후 예약 연결 실패는 이미 끝난 승격을 되돌리지 않는다.
+   */
   private async execute(publicRunId: string): Promise<void> {
     let leaseReleaseSafe = true;
     try {
@@ -166,9 +183,8 @@ export class StudentSyncOrchestratorService {
       } });
       try { await this.markLoginAttempt(run.id); }
       catch (error) { await this.failValidation(run.id, this.errorCode(error, "TONG_LOGIN_ATTEMPT_NOT_ALLOWED")); return; }
-      // From the durable marker until every upstream call has a known result,
-      // only a durable OPEN circuit makes releasing the lease safe. Otherwise
-      // lease recovery must observe the RUNNING + loginAttempted state.
+      // 로그인 시도 이후 외부 결과가 확정되기 전에는 회로 OPEN을 기록한 뒤에만 lease를 놓는다.
+      // OPEN 기록도 실패하면 만료 lease 복구가 RUNNING·loginAttempted를 보고 회로를 연다.
       leaseReleaseSafe = false;
       let session: Awaited<ReturnType<TongTongTongGateway["login"]>>;
       try { session = await this.gateway.login(); }
@@ -231,6 +247,7 @@ export class StudentSyncOrchestratorService {
     }
   }
 
+  /** 외부 로그인 전에 회로와 실행 행을 잠그고 단 한 번의 로그인 시도 표식을 커밋한다. */
   private async markLoginAttempt(runId: bigint): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -247,6 +264,7 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 10_000, maxWait: 5_000 });
   }
 
+  /** 외부 인증·조회 결과가 불명확할 때 회로 OPEN과 실행 실패·감사를 한 트랜잭션에 기록한다. */
   private async openCircuitAndFail(runId: bigint, failedBranchRunId: bigint | null, actor: string, reasonCode: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -281,6 +299,7 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
+  /** 정규화된 전체 스냅샷과 해시·지점별 검증 기록을 원자적으로 적재한다. 아직 학생 원장을 바꾸지 않는다. */
   private async stage(runId: bigint, snapshot: NormalizedLiveSnapshot, branchIds: ReadonlyMap<BranchCode, bigint>): Promise<void> {
     const metrics = this.json({ counts: snapshot.counts, branches: snapshot.branchCounts });
     await this.prisma.$transaction(async (transaction) => {
@@ -316,6 +335,7 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 120_000, maxWait: 10_000 });
   }
 
+  /** 정규화 충돌을 저장하고 승격 없이 실행을 CONFLICT로 마무리한다. */
   private async persistConflicts(runId: bigint, snapshot: NormalizedLiveSnapshot): Promise<void> {
     const metrics = this.json({ counts: snapshot.counts, branches: snapshot.branchCounts });
     await this.prisma.$transaction(async (transaction) => {
@@ -341,6 +361,7 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
+  /** 검증·승격 실패를 실행 상태와 감사에 기록한다. 종료된 실행은 다시 실패 처리하지 않는다. */
   private async failValidation(runId: bigint, code: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const run = await transaction.syncRun.findUnique({ where: { id: runId }, select: { initiatedBy: true, status: true } });
@@ -357,6 +378,7 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
+  /** 직전 성공 조회가 20행 이상인 지점의 행 수가 절반 미만 또는 1.5배 초과로 변하면 거절한다. */
   private async validateRowCounts(runId: bigint, branches: readonly { id: bigint; branchId: bigint; fetched: number }[]): Promise<void> {
     for (const branch of branches) {
       const previous = await this.prisma.syncBranchRun.findFirst({ where: {
@@ -398,11 +420,13 @@ export class StudentSyncOrchestratorService {
     };
   }
 
+  /** 현재 실행이 소유한 lease만 30분 연장한다. 소유권을 잃으면 갱신 수는 0이다. */
   private heartbeat(publicRunId: string): Promise<unknown> {
     return this.prisma.syncLease.updateMany({ where: { lockName: LEASE_NAME, holderRunPublicId: publicRunId }, data: {
       lockedUntil: new Date(Date.now() + LEASE_MILLISECONDS), updatedAt: new Date(),
     } });
   }
+  /** 현재 실행이 소유한 lease만 해제한다. 다른 실행의 lease는 건드리지 않는다. */
   private async releaseLease(publicRunId: string): Promise<void> {
     if (!this.prisma.configured) return;
     await this.prisma.syncLease.updateMany({ where: { lockName: LEASE_NAME, holderRunPublicId: publicRunId }, data: {
