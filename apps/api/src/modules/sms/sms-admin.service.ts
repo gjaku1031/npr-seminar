@@ -110,6 +110,7 @@ export class SmsAdminService {
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
+  /** API 프로세스의 문자 설정 상태를 반환한다. provider 발송은 워커가 맡으므로 adapterAvailable은 false다. */
   public readiness() {
     const sendersConfigured = Object.values(this.environment.smsSenders).every((value) => value !== undefined);
     return {
@@ -130,17 +131,23 @@ export class SmsAdminService {
     return SMS_TEMPLATE_EDITING_POLICY;
   }
 
+  /** 활성 템플릿을 먼저 정렬한 전체 목록을 반환한다. 보관된 행도 관리자 조회에는 포함한다. */
   public async listTemplates() {
     const rows = await this.prisma.smsTemplate.findMany({ orderBy: [{ active: "desc" }, { key: "asc" }] });
     return { items: rows.map((row) => this.mapTemplate(row)) };
   }
 
+  /** 공개 ID로 템플릿을 조회하고 없으면 SMS_TEMPLATE_NOT_FOUND(404)를 던진다. */
   public async getTemplate(templateId: string) {
     const row = await this.prisma.smsTemplate.findUnique({ where: { publicId: templateId } });
     if (row === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
     return this.mapTemplate(row);
   }
 
+  /**
+   * 본문·제목·용도 변수를 검증한 뒤 멱등 키와 전체 입력으로 템플릿을 생성한다.
+   * {@link lockTemplates}로 기본 지정과 키 중복 확인을 직렬화하며, 생성과 멱등 응답은 함께 커밋된다.
+   */
   public createTemplate(
     input: { key: string; name: string; purpose: SmsSource; title?: string; body: string; isDefault?: boolean },
     actor: string,
@@ -175,6 +182,10 @@ export class SmsAdminService {
     }, 201);
   }
 
+  /**
+   * 버전이 일치할 때만 변경을 커밋한다. 용도별 기본 템플릿 교체도 {@link lockTemplates} 아래 처리한다.
+   * 현재 기본을 다른 기본 지정 없이 내리면 409, 비활성 행을 기본으로 지정하면 409를 반환한다.
+   */
   public updateTemplate(
     templateId: string,
     input: { name?: string; purpose?: SmsSource; title?: string | null; body?: string; active?: boolean; isDefault?: boolean; version: string },
@@ -227,6 +238,11 @@ export class SmsAdminService {
     });
   }
 
+  /**
+   * 버전·기본 지정 여부·사용 이력을 템플릿 CRUD가 공유하는 잠금 아래 확인한다.
+   * 발송 아웃박스 생성은 이 잠금을 쓰지 않으므로 사용 이력 조회와 발송의 직렬화까지 보장하지 않는다.
+   * 사용 이력이 없으면 삭제하고 있으면 비활성 보관하며, 결과와 멱등 기록을 함께 커밋한다.
+   */
   public removeTemplate(
     templateId: string,
     version: string,
@@ -312,6 +328,7 @@ export class SmsAdminService {
     };
   }
 
+  /** 실제 대상 선택·변수 치환·문자 분류를 계산하고 발송 검증용 previewToken과 최대 10개 표본을 돌려준다. */
   public async preview(input: TargetRequest) {
     const prepared = await this.prepare(input);
     const maximumMessageBytes = this.maximum(prepared.rows.map((row) => row.classification.messageBytes));
@@ -348,10 +365,9 @@ export class SmsAdminService {
   }
 
   /**
+   * 예약은 아웃박스 행의 next_attempt_at으로 표현된다. 같은 트랜잭션에서 대상과 previewToken을
+   * 다시 계산해 일치할 때만 암호화 아웃박스를 기록한다. 외부 문자 전송은 워커가 맡는다.
    * @param input.scheduledAt 예약 발송 시각(ISO). 생략하면 즉시 발송이다.
-   *
-   * 예약은 아웃박스 행의 next_attempt_at 하나로 표현된다 — 워커가 이미 그 시각을 보고 집기
-   * 때문에 스케줄러도 새 상태값도 없다.
    */
   public enqueue(
     input: TargetRequest & { previewToken: string; scheduledAt?: string },
@@ -403,6 +419,7 @@ export class SmsAdminService {
     }, 202);
   }
 
+  /** 조건에 맞는 개별 아웃박스와 배치 집계를 조회한다. 배치 건수를 개별 행과 다시 합산하지 않는다. */
   public async history(filters: {
     status?: string;
     source?: string;
@@ -431,6 +448,7 @@ export class SmsAdminService {
     return { batches, items: rows.map((row) => this.mapOutbox(row)) };
   }
 
+  /** 발송 행과 시도 기록을 조회한다. 없으면 SMS_MESSAGE_NOT_FOUND(404)를 던지고 수신 번호는 마스킹한다. */
   public async detail(messageId: string) {
     const row = await this.prisma.smsOutbox.findUnique({
       where: { publicId: messageId },
@@ -451,6 +469,7 @@ export class SmsAdminService {
     };
   }
 
+  /** 대상별 치환 본문·문자 종류와 예약/템플릿 버전을 묶어 프리뷰 토큰을 만든다. 저장·전송은 하지 않는다. */
   private async prepare(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
     const payload = await this.payload(input, transaction);
     this.validateTemplatePayload(payload.messageTemplate, payload.titleTemplate, payload.purpose ?? undefined);
@@ -500,6 +519,7 @@ export class SmsAdminService {
     return { payload, rows, previewToken: digest.digest("base64url") };
   }
 
+  /** 템플릿 ID 또는 직접 입력 중 하나를 확정한다. 템플릿은 활성 행만 허용하며 혼합 입력은 400이다. */
   private async payload(
     input: TargetRequest,
     transaction: Prisma.TransactionClient | PrismaService = this.prisma,
@@ -590,6 +610,7 @@ export class SmsAdminService {
     return at;
   }
 
+  /** 지점·회차·대상 상태와 테스트 구분으로 실제 수신 가족을 고른다. 회차가 없거나 학생명이 비면 오류다. */
   private async targets(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
     const session = await transaction.seminarSession.findUnique({
       where: { publicId: input.seminarSessionId },
@@ -657,6 +678,7 @@ export class SmsAdminService {
     };
   }
 
+  /** 취소 대상은 마지막 해제 시각의 학생만, 나머지는 현재 활성 학생만 지점별로 선택한다. */
   private relevantStudents(
     audience: SmsAudience,
     students: readonly {
@@ -680,6 +702,7 @@ export class SmsAdminService {
       && student.releasedAt?.getTime() === latestReleasedAt);
   }
 
+  /** 대상 구분을 예약 상태 집합으로 바꾼다. 테스트 예약은 실제 가족과 별도 조건으로 제한된다. */
   private audienceStatuses(audience: SmsAudience): string[] {
     switch (audience) {
       case "BOOKED_FAMILIES": return ["RESERVED", "CHECKED_IN"];
@@ -692,6 +715,7 @@ export class SmsAdminService {
     }
   }
 
+  /** 아웃박스를 배치 ID로 한 번만 집계해 수신·성공·실패·대기 수를 반환한다. */
   private async batchHistory(
     filters: { status?: string; source?: string; branch?: string; seminarSessionId?: string; batchId?: string },
     limit: number,
@@ -747,6 +771,7 @@ export class SmsAdminService {
     }));
   }
 
+  /** 처리 중 행을 우선해 배치 상태를 고른다. 미확정·차단 결과는 성공으로 세지 않는다. */
   private batchStatus(row: BatchAggregateRow): "QUEUED" | "PROCESSING" | "COMPLETED" | "PARTIAL" | "FAILED" {
     if (row.pending_count > 0) return row.processing_count > 0 ? "PROCESSING" : "QUEUED";
     if (row.failure_count === 0) return "COMPLETED";
@@ -754,6 +779,7 @@ export class SmsAdminService {
     return "PARTIAL";
   }
 
+  /** 용도별 변수와 메시지 길이·문자 표현 가능성을 검증한다. 위반 시 렌더러/정책 오류를 전달한다. */
   private validateTemplatePayload(body: string, title: string | null, purpose?: SmsTemplatePurpose): SmsPayloadClassification {
     this.renderer.validate(body, "message", purpose);
     if (title !== null) this.renderer.validate(title, "title", purpose);
@@ -785,6 +811,7 @@ export class SmsAdminService {
     return `${part("year")}.${part("month")}.${part("day")}(${part("weekday")}) ${part("hour")}:${part("minute")}`;
   }
 
+  /** 생성·수정·삭제가 공유하는 트랜잭션 단위 advisory lock으로 기본 템플릿 불변식을 직렬화한다. */
   private async lockTemplates(transaction: Prisma.TransactionClient): Promise<void> {
     await transaction.$executeRaw`select pg_advisory_xact_lock(hashtextextended(${TEMPLATE_LOCK_NAME}::text, 0::bigint))`;
   }

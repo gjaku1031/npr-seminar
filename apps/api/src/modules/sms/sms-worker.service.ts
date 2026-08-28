@@ -3,6 +3,7 @@ import { PhoneProtector } from "../../common/crypto/phone-protector.service.js";
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 import { AligoGateway, type SmsGatewayResult } from "./aligo.gateway.js";
 
+/** DB에서 lease와 함께 받은 암호화된 발송 행. 평문은 발송 중 메모리에서만 꺼낸다. */
 interface ClaimedSms {
   readonly id: bigint;
   readonly lease_token: string;
@@ -14,6 +15,7 @@ interface ClaimedSms {
   readonly message_type: "SMS" | "LMS";
 }
 
+/** 문자 아웃박스를 소유권 표식으로 집어 Aligo에 전달하고 결과를 기록한다. */
 @Injectable()
 export class SmsWorkerService {
   private static readonly maxAttempts = 5;
@@ -24,6 +26,7 @@ export class SmsWorkerService {
     private readonly gateway: AligoGateway,
   ) {}
 
+  /** 만료 lease를 정리한 뒤 최대 50건을 처리한다. 반환값은 성공 건수가 아닌 claim한 행 수다. */
   public async runOnce(batchSize = 10): Promise<number> {
     await this.reconcileExpiredLeases();
     const claimed = await this.claim(Math.min(Math.max(batchSize, 1), 50));
@@ -31,6 +34,7 @@ export class SmsWorkerService {
     return claimed.length;
   }
 
+  /** 전송 시각이 된 PENDING 행만 SKIP LOCKED로 집어 30초 CLAIMED lease를 부여한다. */
   private async claim(limit: number): Promise<ClaimedSms[]> {
     return this.prisma.$queryRaw<ClaimedSms[]>`
       with candidates as (
@@ -47,6 +51,7 @@ export class SmsWorkerService {
                 o.message_ciphertext,o.title_ciphertext,o.message_type`;
   }
 
+  /** 외부 호출 전 CLAIMED 만료는 재대기시키고, SENDING 만료는 중복 전송을 피하도록 DELIVERY_UNKNOWN으로 확정한다. */
   private async reconcileExpiredLeases(): Promise<void> {
     await this.prisma.smsOutbox.updateMany({
       where: { status: "CLAIMED", leaseExpiresAt: { lt: new Date() } },
@@ -65,6 +70,7 @@ export class SmsWorkerService {
       on conflict(sms_outbox_id,attempt_no) do nothing`;
   }
 
+  /** 평문을 복호화한 뒤 소유권을 다시 확인해 SENDING으로 전환하고 {@link AligoGateway.send}를 호출한다. */
   private async process(row: ClaimedSms): Promise<void> {
     let recipient: string;
     let message: string;
@@ -86,6 +92,7 @@ export class SmsWorkerService {
     await this.finish({ ...row, attempt_count: row.attempt_count + 1 }, result);
   }
 
+  /** 발송 전 복호화 실패만 현재 lease의 영구 실패로 기록한다. 외부 전송은 시도하지 않는다. */
   private async failClaimed(row: ClaimedSms, errorCode: string): Promise<void> {
     await this.prisma.smsOutbox.updateMany({
       where: { id: row.id, status: "CLAIMED", leaseToken: row.lease_token },
@@ -93,6 +100,10 @@ export class SmsWorkerService {
     });
   }
 
+  /**
+   * 현재 SENDING lease만 완료한다. 결과와 시도 내역을 한 트랜잭션에 기록한다.
+   * RETRYABLE만 지수 지연 재대기하며 총 시도 5회에 도달하면 DEAD로 남긴다.
+   */
   private async finish(row: ClaimedSms, result: SmsGatewayResult): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const current = await transaction.smsOutbox.findFirst({
