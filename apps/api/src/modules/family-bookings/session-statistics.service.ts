@@ -65,10 +65,15 @@ const EMPTY_OPERATIONS_SUMMARY: OperationsSummaryRow = {
   attendee_count: 0n,
 };
 
+/** 회차 예약의 상태별 합계와 지점·단위·채널별 운영 통계를 읽기 전용 SQL로 제공한다. */
 @Injectable()
 export class SessionStatisticsService {
   public constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * 테스트 예약을 포함한 상태별 예약 수와 예약 기준 예상 참석 인원을 반환한다.
+   * 실제 입장 인원은 계산하지 않으며 회차가 없으면 404를 던진다.
+   */
   public async operationsSummary(sessionPublicId: string) {
     const session = await this.session(sessionPublicId);
     const rows = await this.prisma.$queryRaw<OperationsSummaryRow[]>(Prisma.sql`
@@ -93,6 +98,11 @@ export class SessionStatisticsService {
     };
   }
 
+  /**
+   * 회차·요청 지점 범위의 전체·단위·예약 채널 통계와 명단 모니터링 수치를 반환한다.
+   * 지점 회차에 연결 지점이 없으면 409, 요청 지점이 다르면 빈 집계로 제한한다.
+   * 회차가 없으면 404, 집계 행이 없으면 500을 던지며 명시적 행 잠금은 사용하지 않는다.
+   */
   public async statistics(sessionPublicId: string, requestedBranch?: string) {
     const session = await this.session(sessionPublicId);
     const sessionBranch = session.scope === "BRANCH" ? session.branch?.code ?? null : null;
@@ -388,6 +398,7 @@ export class SessionStatisticsService {
     };
   }
 
+  /** 회차의 내부 ID·범위·지점을 조회하며 공개 ID가 없으면 404를 던진다. */
   private async session(publicId: string) {
     const session = await this.prisma.seminarSession.findUnique({
       where: { publicId },
@@ -397,6 +408,7 @@ export class SessionStatisticsService {
     return session;
   }
 
+  /** 지정한 상태와 코드의 {@link DomainError}를 던지며 정상 반환하지 않는다. */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The session statistics could not be loaded.");
   }
