@@ -17,10 +17,16 @@ interface MutationCounts {
 
 const BRANCH_ORDER: readonly BranchCode[] = ["SONGPA", "WIRYE", "GWANGJIN"];
 
+/** 검증된 staging 스냅샷을 학생 원장과 수업 배정에 원자적으로 반영한다. 외부 시스템은 호출하지 않는다. */
 @Injectable()
 export class StudentPromotionService {
   public constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * 호출부가 적재한 세 지점의 staging 해시와 상태를 잠금 아래 재검증한다.
+   * 학생·배정 생성/갱신/비활성화와 실행 상태·감사를 한 트랜잭션에 커밋하며 변경이 없으면 NO_CHANGES를 반환한다.
+   * staging이 불완전하거나 해시가 다르면 409로 거절하고 원장 변경을 롤백한다.
+   */
   public async promote(
     runId: bigint,
     snapshot: NormalizedLiveSnapshot,
@@ -154,6 +160,7 @@ export class StudentPromotionService {
     return { status, metrics };
   }
 
+  /** 현재 원장과 스냅샷을 비교해 지점별 학생·배정 변경 건수를 계산한다. DB 변경은 하지 않는다. */
   private async mutations(rows: readonly StagedSnapshotRow[], branchIds: ReadonlyMap<BranchCode, bigint>): Promise<Record<BranchCode, MutationCounts>> {
     const ids = [...branchIds.values()];
     const existing = await this.prisma.student.findMany({ where: { branchId: { in: ids } }, include: { assignments: true } });
@@ -206,6 +213,7 @@ export class StudentPromotionService {
   }
   private zeroMutations(): MutationCounts { return { insertedStudentCount: 0, updatedStudentCount: 0, inactivatedStudentCount: 0,
     insertedAssignmentCount: 0, updatedAssignmentCount: 0, inactivatedAssignmentCount: 0 }; }
+  /** 적재 행의 순서·포함·대표 선택까지 묶은 해시를 다시 계산해 원본 스냅샷과 대조한다. */
   private stagingHash(rows: ReadonlyArray<{ sourceOrdinal: number; rowHash: Buffer; included: boolean; primarySelected: boolean }>): Buffer {
     const hash = createHash("sha256");
     for (const row of rows) hash.update(`${row.sourceOrdinal}\u0000${row.rowHash.toString("base64url")}\u0000${Number(row.included)}\u0000${Number(row.primarySelected)}\n`);

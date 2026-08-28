@@ -24,6 +24,7 @@ import {
   type SheetGatewayResult,
 } from "./google-sheets.gateway.js";
 
+/** 매핑·아웃박스 lease를 함께 소유한 시트 작업과 투영에 필요한 식별자. */
 interface ClaimedSheet {
   readonly id: bigint;
   readonly mapping_id: bigint;
@@ -101,6 +102,7 @@ type ProjectionLink = Prisma.FamilyBookingStudentGetPayload<{ select: typeof pro
 export type SheetAttendanceParty = "MOTHER" | "FATHER" | "BOTH";
 export type SheetProjectionStatus = "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW";
 
+/** 활성 수업의 대표 수학·과학 반을 나눈다. 활성 반이 없을 때만 예약 당시 반을 사용한다. */
 export function sheetStudentClassColumns(
   assignments: readonly { readonly className: string; readonly sourceActive: boolean }[],
   historicClassName: string | null,
@@ -120,6 +122,7 @@ export function sheetStudentClassColumns(
   };
 }
 
+/** 예약 상태를 시트가 표현하는 네 상태로 제한한다. 알 수 없는 상태는 예외다. */
 export function sheetProjectionStatus(value: string): SheetProjectionStatus {
   if (["RESERVED", "CHECKED_IN", "CANCELLED", "NO_SHOW"].includes(value)) {
     return value as SheetProjectionStatus;
@@ -127,6 +130,7 @@ export function sheetProjectionStatus(value: string): SheetProjectionStatus {
   throw new Error("SHEET_BOOKING_STATUS_INVALID");
 }
 
+/** 예약이 다른 회차로 이동했으면 기존 회차의 시트에서는 취소 상태로 표현한다. */
 export function sheetFamilyProjectionStatus(
   familySessionPublicId: string,
   workbookSessionPublicId: string,
@@ -137,6 +141,7 @@ export function sheetFamilyProjectionStatus(
     : "CANCELLED";
 }
 
+/** 비재원생의 검증된 연락처 하나를 참석 보호자 열에 배치한다. BOTH도 모 연락처 열만 채운다. */
 export function guestContactColumns(
   attendanceParty: SheetAttendanceParty,
   contact: string,
@@ -149,6 +154,7 @@ export function guestContactColumns(
   }
 }
 
+/** 예약·입장·취소 상태와 참석 보호자 수를 시트 표시 문구로 만든다. */
 export function sheetReservationState(
   status: SheetProjectionStatus,
   party: SheetAttendanceParty,
@@ -162,6 +168,7 @@ export function sheetReservationState(
   return `${statusLabel} (${partyLabel}) · ${personCount}명`;
 }
 
+/** 예약 당시 지점 코드를 한국어 캠퍼스 이름으로 바꾼다. 미지원 코드는 예외다. */
 export function sheetCampus(branchCodeAtBooking: string | null): "송파" | "위례" | "광진" {
   switch (branchCodeAtBooking) {
     case "SONGPA": return "송파";
@@ -171,6 +178,7 @@ export function sheetCampus(branchCodeAtBooking: string | null): "송파" | "위
   }
 }
 
+/** 예약 이벤트 아웃박스를 현재 DB 상태로 투영해 Google Sheets에 반영하고 시도 결과를 기록한다. */
 @Injectable()
 export class SheetWorkerService {
   private nextMappingValidationAt = 0;
@@ -182,6 +190,7 @@ export class SheetWorkerService {
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
+  /** 매핑 검증·만료 lease 복구 후 최대 한 작업을 처리한다. 반환값은 성공 여부가 아닌 claim 건수다. */
   public async runOnce(): Promise<number> {
     await this.refreshActiveMappingsIfDue();
     await this.reconcileExpiredLease();
@@ -204,6 +213,7 @@ export class SheetWorkerService {
     return 1;
   }
 
+  /** 활성·회로 CLOSED·스키마 일치 매핑과 PENDING/RETRY 행을 잠가 120초 lease를 함께 부여한다. */
   private async claim(): Promise<ClaimedSheet | undefined> {
     const rows = await this.prisma.$queryRaw<ClaimedSheet[]>`
       with mapping_candidate as (
@@ -243,6 +253,7 @@ export class SheetWorkerService {
     return rows[0];
   }
 
+  /** 만료된 CLAIMED를 재조정 필요 RETRY로 옮기고 매핑 lease를 해제한다. 외부 적용 여부는 단정하지 않는다. */
   private async reconcileExpiredLease(): Promise<void> {
     await this.prisma.$executeRaw`
       with expired as (
@@ -261,6 +272,11 @@ export class SheetWorkerService {
     });
   }
 
+  /**
+   * 현재 예약·학생·이벤트를 다시 읽어 한 작업의 행·가족·이벤트 투영을 만든다.
+   * DB 원천이 없거나 상태가 유효하지 않으면 예외이며 {@link runOnce}가 DEAD로 기록한다.
+   * 복호화한 연락처는 계획의 셀 값에만 담고 이 서비스의 로그에는 남기지 않는다.
+   */
   private async plan(row: ClaimedSheet): Promise<SheetDispatchPlan> {
     const source = await this.prisma.familyBookingStudent.findUnique({
       where: { publicId: row.family_booking_student_public_id },
@@ -411,6 +427,7 @@ export class SheetWorkerService {
     };
   }
 
+  /** 같은 회차의 학생 원장 ID 또는 비재원생 연락처 해시·이름으로 현재 행 후보를 찾는다. */
   private async identityCandidates(source: ProjectionLink, sessionPublicId: string): Promise<ProjectionLink[]> {
     if (source.participantType === "ENROLLED") {
       if (source.studentId === null) throw new Error("SHEET_ENROLLED_STUDENT_MISSING");
@@ -437,6 +454,7 @@ export class SheetWorkerService {
     return possible.filter((candidate) => this.identityText(candidate.studentNameSnapshot) === sourceName);
   }
 
+  /** 활성·미취소 예약을 우선하고 생성 시각과 ID로 동률을 정해 한 행을 고른다. 후보가 없으면 예외다. */
   private selectCurrentProjection(candidates: readonly ProjectionLink[]): ProjectionLink {
     const sorted = [...candidates].sort((left, right) => {
       const leftCurrent = left.active && left.familyBooking.status !== "CANCELLED" ? 1 : 0;
@@ -451,6 +469,7 @@ export class SheetWorkerService {
     return selected;
   }
 
+  /** 시트에 쓸 모·부 연락처를 메모리에서만 복호화한다. 비재원생은 참석 보호자 열을 따른다. */
   private projectionPhones(link: ProjectionLink): { readonly mother: string; readonly father: string } {
     if (link.participantType === "ENROLLED") {
       return {
@@ -521,6 +540,7 @@ export class SheetWorkerService {
     return children.filter((child) => (child.releasedAt?.getTime() ?? -1) === latest);
   }
 
+  /** 설정한 검증 주기가 지났을 때만 외부 시트 설정·스키마를 확인하고, 불일치나 기능 비활성 시 매핑 회로를 차단한다. */
   private async refreshActiveMappingsIfDue(): Promise<void> {
     const now = Date.now();
     if (now < this.nextMappingValidationAt) return;
@@ -585,6 +605,10 @@ export class SheetWorkerService {
     }
   }
 
+  /**
+   * 현재 lease 소유자만 결과와 시도 내역을 함께 커밋한다. RETRY는 지수 지연하며 총 시도 8회에 도달하면 DEAD다.
+   * 차단 결과의 openCircuit 표식은 매핑을 비활성화한다. {@link GoogleSheetsGateway.apply}는 이 커밋 전에 끝난다.
+   */
   private async finish(row: ClaimedSheet, result: SheetGatewayResult): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const current = await transaction.sheetOutbox.findFirst({ where: { id: row.id, status: "CLAIMED", leaseOwner: row.mapping_lease_owner }, select: { id: true } });
