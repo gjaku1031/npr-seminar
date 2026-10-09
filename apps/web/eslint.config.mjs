@@ -3,7 +3,7 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
 /**
- * 레이어 확장 규율 (docs/architecture.md §4) — 참고 구조(fe-architecture-v2)의
+ * 레이어 확장 규율 — 참고 구조(fe-architecture-v2)의
  * no-restricted-imports 방식을 승계하고, server 존 규칙(R1·R5)을 추가했다.
  *
  * 클라이언트 레이어 (참고 구조 §3·§4 그대로):

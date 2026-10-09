@@ -8,7 +8,6 @@
 | `apps/api` | 백엔드 | NestJS API/worker, 인증, Prisma/PostgreSQL, 외부 연동 |
 | `packages/contracts` | 공동 | OpenAPI와 계약/컨트롤러 일치 검증 |
 | `docs/specs` | 공동 | 제품·API·운영 결정 기록 |
-| `docs/design` | 프론트엔드 | 디자인 시스템, 사용자 흐름, 핸드오프 |
 | `ops/pve-release` | 운영 | datastore, systemd, Tailscale Serve, 원자 배포 |
 
 `apps/web`과 `apps/api`는 서로의 내부 코드를 import하지 않는다. 웹은 DB

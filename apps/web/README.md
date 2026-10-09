@@ -5,7 +5,6 @@ npr 입시설명회 **Next.js 정적 export UI**. 화면·라우팅·접근성�
 업무 API·데이터·OTP·SMS·QR·체크인의 **소유자는 `apps/api`(NestJS)** 다. 이 앱은 서버가 아니다.
 
 > 계약(단일 진실): [`packages/contracts/openapi.yaml`](../../packages/contracts/openapi.yaml)
-> 이전 구조 기록: [`docs/architecture.md`](../../docs/architecture.md)
 
 ## 아키텍처 경계
 
@@ -98,4 +97,3 @@ pnpm build
 Nest가 API 권한을 최종 판정한다. 이전 서버 인증 구조는
 [`src/server/README.md`](src/server/README.md)에 기록되어 있다.
 
-이전 풀스택 구조의 설계 기록은 [`docs/architecture.md`](../../docs/architecture.md) 에 보존한다.
