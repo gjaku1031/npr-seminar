@@ -20,7 +20,7 @@ server/
 
 > 2026-08 정리: Drizzle 스키마·리포지토리·도메인 서비스·SOLAPI 게이트웨이와 이를 쓰던
 > `features/*/api/actions.ts` Server Action 을 제거했다. 전환 기간 동안만 남아 있던 병렬
-> 백엔드였고 어떤 화면도 참조하지 않았다. 이전 구조의 기록은 `docs/architecture.md` 에 있다.
+> 백엔드였고 어떤 화면도 참조하지 않았다.
 
 ## 규칙 (ESLint 강제, 설계 §4.2)
 
