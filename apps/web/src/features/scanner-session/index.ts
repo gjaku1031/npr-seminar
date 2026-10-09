@@ -1,4 +1,4 @@
-// features/scanner-session 공개 API (barrel) — iPad(SCANNER 세션) 전용.
+// features/scanner-session 공개 API (barrel) — iPad(SCANNER 세션) 전용
 export { useScannerSession } from "./model/useScannerSession";
 export type { ScannerSessionState, ScannerSessionStatus } from "./model/useScannerSession";
 

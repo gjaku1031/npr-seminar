@@ -1,3 +1,5 @@
+# QA 서버 문자·Google Sheets 워커
+# 기본 env 와 선택 연동 env(integrations-worker.env, 없으면 무시)를 읽음
 [Unit]
 Description=NPR Seminar QA isolated worker
 After=network-online.target docker.service
@@ -11,12 +13,14 @@ WorkingDirectory=/home/ken/develop/npr-seminar/apps/api
 EnvironmentFile=/etc/npr-seminar-qa/worker.env
 EnvironmentFile=-/etc/npr-seminar-qa/integrations-worker.env
 Environment=NODE_ENV=production
+# 빌드 산출물이 없으면 시작하지 않음
 ExecStartPre=/usr/bin/test -f /home/ken/develop/npr-seminar/apps/api/dist/worker.js
 ExecStart=/usr/bin/node /home/ken/develop/npr-seminar/apps/api/dist/worker.js
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=30s
 UMask=0077
+# 샌드박스. 앱 디렉터리 외 파일 시스템은 읽기 전용
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

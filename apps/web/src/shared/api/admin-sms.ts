@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * 관리자 문자 어댑터 (계약 tag: Admin SMS) — `/api/v1/admin/sms/*`.
+ * 관리자 문자 어댑터 (계약 tag: Admin SMS) — `/api/v1/admin/sms/*`
  *
- * 계약이 확정돼 정규화 계층이 사라졌다 — 응답을 그대로 읽는다. 이 모듈이 지키는 규칙:
- * - 서버가 이미 센 값을 다시 세지 않는다. 배치 집계는 `batches` 가 유일한 진실이고,
- *   그 배치의 `items` 를 다시 묶으면 같은 건을 두 번 센다.
- * - 발송은 프리뷰가 준 `previewToken` 을 그대로 되돌려 보낸다.
- * - 연락처는 어떤 경로로도 평문이 오지 않는다 — 서버가 `***-****-1234` 로만 준다.
+ * 계약이 확정돼 정규화 계층이 사라졌음 — 응답을 그대로 읽음. 이 모듈이 지키는 규칙:
+ * - 서버가 이미 센 값을 다시 세지 않음. 배치 집계는 `batches` 가 유일한 진실이고,
+ *   그 배치의 `items` 를 다시 묶으면 같은 건을 두 번 셈
+ * - 발송은 프리뷰가 준 `previewToken` 을 그대로 되돌려 보냄
+ * - 연락처는 어떤 경로로도 평문이 오지 않음 — 서버가 `*-**-1234` 로만 줌
  */
 
 import { apiRequest } from "./client";
@@ -35,22 +35,27 @@ import type {
 
 /* ── 게이트웨이 준비 상태 ────────────────────────────────────────────────── */
 
+/**
+ * 문자 게이트웨이 준비 상태 조회
+ */
 export async function getSmsGatewayReadiness(signal?: AbortSignal): Promise<SmsGatewayReadiness> {
   return apiRequest<SmsGatewayReadiness>("/admin/sms/gateway-readiness", { method: "GET", signal });
 }
 
 /**
- * 발송을 **막아야 하는가**.
+ * 발송을 막아야 하는가
  *
  * `configured` 는 HTTP API 프로세스에 provider 시크릿이 있는지일 뿐이고, `adapterAvailable`
- * 은 계약상 그 프로세스에서 항상 false 다 — 실제 발송은 자기 시크릿을 가진 워커가 한다.
- * 이 값들로 버튼을 잠그면 멀쩡한 기능을 끄는 셈이라, 기능 자체가 꺼진 `enabled:false` 만 본다.
+ * 은 계약상 그 프로세스에서 항상 false 임 — 실제 발송은 자기 시크릿을 가진 워커가 함
+ * 이 값들로 버튼을 잠그면 멀쩡한 기능을 끄는 셈이라, 기능 자체가 꺼진 `enabled:false` 만 봄
  */
 export function isSmsSendDisabled(readiness: SmsGatewayReadiness | null): boolean {
   return readiness !== null && readiness.enabled === false;
 }
 
-/** 화면에 띄울 짧은 경고 — 없으면 null (문제 없을 때 배너를 만들지 않는다). */
+/**
+ * 화면에 띄울 짧은 경고 — 없으면 null (문제 없을 때 배너를 만들지 않음)
+ */
 export function smsReadinessWarning(readiness: SmsGatewayReadiness | null): string | null {
   if (readiness === null) return null;
   if (readiness.enabled === false) {
@@ -68,10 +73,10 @@ export function smsReadinessWarning(readiness: SmsGatewayReadiness | null): stri
 /* ── 본문·변수 오류 문구 ─────────────────────────────────────────────────── */
 
 /**
- * 본문/제목/변수 때문에 서버가 거절한 경우의 한국어 문구. 해당 없으면 null.
+ * 본문/제목/변수 때문에 서버가 거절한 경우의 한국어 문구. 해당 없으면 null
  *
  * 템플릿 저장·프리뷰·발송이 같은 검증(SmsTemplateRenderer + SmsMessagePolicy)을 통과하므로
- * 문구도 한 곳에서 고른다 — 같은 원인에 화면마다 다른 말을 하지 않기 위해서다.
+ * 문구도 한 곳에서 고름 — 같은 원인에 화면마다 다른 말을 하지 않기 위해서임
  */
 export function smsContentErrorMessage(error: unknown): string | null {
   if (!isApiError(error)) return null;
@@ -81,7 +86,7 @@ export function smsContentErrorMessage(error: unknown): string | null {
       return "쓸 수 없는 변수가 있어요. 변수 칩에 있는 것만 사용해 주세요.";
     case "SMS_TEMPLATE_VARIABLE_INVALID":
       return "중괄호 `{}` 짝이 맞지 않아요. 변수는 칩으로 넣어 주세요.";
-    // 변수 자리에 채울 값이 서버에 없다 (예: 공개 주소 미설정으로 {QR링크} 가 빈 값).
+    // 변수 자리에 채울 값이 서버에 없음 (예: 공개 주소 미설정으로 {QR링크} 가 빈 값)
     case "SMS_TEMPLATE_VARIABLE_UNRESOLVED":
       return "변수에 채울 값이 서버에 없어요. 해당 변수를 빼고 다시 시도해 주세요.";
     case "SMS_MESSAGE_SIZE_INVALID":
@@ -94,7 +99,7 @@ export function smsContentErrorMessage(error: unknown): string | null {
       return "제목은 44 byte 이하여야 해요.";
     case "SMS_TITLE_UNREPRESENTABLE":
       return "제목에 문자로 보낼 수 없는 문자가 있어요.";
-    // 대상 가족의 학생 이름 스냅샷이 비어 있어 {학생명} 을 채울 수 없다 — 데이터 쪽 문제다.
+    // 대상 가족의 학생 이름 스냅샷이 비어 있어 {학생명} 을 채울 수 없음 — 데이터 쪽 문제임
     case "SMS_STUDENT_NAME_MISSING":
       return "대상 중 학생 이름이 비어 있는 예약이 있어 발송할 수 없어요. 예약 명단을 확인해 주세요.";
     case "SMS_CONTENT_SOURCE_INVALID":
@@ -106,17 +111,23 @@ export function smsContentErrorMessage(error: unknown): string | null {
 
 /* ── 템플릿 ──────────────────────────────────────────────────────────────── */
 
-/** 계약에 있는 편집 용도의 집합. 노출 순서와 내용은 서버 응답에서만 읽는다. */
+/**
+ * 계약에 있는 편집 용도의 집합. 노출 순서와 내용은 서버 응답에서만 읽음
+ */
 const EDITABLE_PURPOSE_SET: ReadonlySet<string> = new Set<SmsEditablePurpose>([
   "ADMIN_GROUP", "OTP", "BOOKING_CONFIRMED", "BOOKING_UPDATED", "BOOKING_CANCELLED",
 ]);
 
-/** 정책 응답이 계약과 다를 때 화면에 표시할 안전한 오류를 만든다. */
+/**
+ * 정책 응답이 계약과 다를 때 화면에 표시할 안전한 오류를 만듦
+ */
 function invalidSmsTemplatePolicy(): Error {
   return new Error("문자 편집 정책 응답이 올바르지 않아요. 다시 시도해 주세요.");
 }
 
-/** 잘못된 정책 응답을 편집 가능한 데이터로 취급하지 않도록 구조와 중복을 확인한다. */
+/**
+ * 잘못된 정책 응답을 편집 가능한 데이터로 취급하지 않도록 구조와 중복을 확인함
+ */
 function parseSmsTemplatePolicy(value: unknown): SmsTemplatePolicy {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalidSmsTemplatePolicy();
   const response = value as Record<string, unknown>;
@@ -145,35 +156,77 @@ function parseSmsTemplatePolicy(value: unknown): SmsTemplatePolicy {
   return { defaultPurpose: response.defaultPurpose as SmsEditablePurpose, purposes };
 }
 
-/** 관리자 문자 편집 정책을 읽고 검증한다. 취소 신호는 화면 이탈·재조회 때 전달한다. */
+/**
+ * 관리자 문자 편집 정책을 읽고 검증함. 취소 신호는 화면 이탈·재조회 때 전달함
+ */
 export async function getSmsTemplatePolicy(signal?: AbortSignal): Promise<SmsTemplatePolicy> {
   const response = await apiRequest<unknown>("/admin/sms/template-policy", { method: "GET", signal });
   return parseSmsTemplatePolicy(response);
 }
 
+/**
+ * 템플릿 버전 충돌 오류 코드. 다른 곳에서 먼저 수정됨
+ */
 export const SMS_TEMPLATE_VERSION_CONFLICT_CODE = "SMS_TEMPLATE_VERSION_CONFLICT";
+
+/**
+ * 템플릿 키 중복 오류 코드
+ */
 export const SMS_TEMPLATE_KEY_CONFLICT_CODE = "SMS_TEMPLATE_KEY_CONFLICT";
-/** 현재 기본 템플릿을 보관하려면 먼저 다른 템플릿을 기본으로 지정해야 한다. */
+/**
+ * 현재 기본 템플릿을 보관하려면 먼저 다른 템플릿을 기본으로 지정해야 함
+ */
 export const SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED_CODE = "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED";
-/** 비활성 템플릿은 기본으로 지정할 수 없다. */
+/**
+ * 비활성 템플릿은 기본으로 지정할 수 없음
+ */
 export const SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE_CODE = "SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE";
 
+/**
+ * 문자 템플릿 목록 조회
+ */
 export async function listSmsTemplates(signal?: AbortSignal): Promise<SmsTemplate[]> {
   const list = await apiRequest<SmsTemplateList>("/admin/sms/templates", { method: "GET", signal });
   return list.items;
 }
 
+/**
+ * 문자 템플릿 생성 입력
+ */
 export interface CreateSmsTemplateInput {
+  /**
+   * 템플릿 키. 중복 불가
+   */
   key: string;
+
+  /**
+   * 이름
+   */
   name: string;
+
+  /**
+   * 용도
+   */
   purpose: SmsPurpose;
+
+  /**
+   * LMS 제목
+   */
   title?: string;
+
+  /**
+   * 본문
+   */
   body: string;
-  /** 이 용도의 활성 기본 템플릿으로 만든다. */
+  /**
+   * 이 용도의 활성 기본 템플릿으로 만듦
+   */
   isDefault?: boolean;
 }
 
-/** durable 변경 — `idempotencyKey` 는 조작을 소유한 훅이 넘긴다 (여기서 만들지 않는다). */
+/**
+ * durable 변경 — `idempotencyKey` 는 조작을 소유한 훅이 넘김 (여기서 만들지 않음)
+ */
 export async function createSmsTemplate(
   input: CreateSmsTemplateInput,
   options: { idempotencyKey: string; signal?: AbortSignal },
@@ -186,19 +239,46 @@ export async function createSmsTemplate(
   });
 }
 
+/**
+ * 문자 템플릿 수정 입력. 생략한 필드는 바꾸지 않음
+ */
 export interface UpdateSmsTemplateInput {
+  /**
+   * 이름
+   */
   name?: string;
+
+  /**
+   * 용도
+   */
   purpose?: SmsPurpose;
-  /** null 은 제목 제거다 — undefined(변경 없음)와 구분해야 해서 명시적으로 받는다. */
+  /**
+   * null 은 제목 제거임 — undefined(변경 없음)와 구분해야 해서 명시적으로 받음
+   */
   title?: string | null;
+
+  /**
+   * 본문
+   */
   body?: string;
+
+  /**
+   * 활성 여부
+   */
   active?: boolean;
-  /** true 면 같은 용도의 활성 기본을 이 템플릿으로 옮긴다(서버가 이전 기본을 동시에 내린다). */
+  /**
+   * true 면 같은 용도의 활성 기본을 이 템플릿으로 옮김(서버가 이전 기본을 동시에 내림)
+   */
   isDefault?: boolean;
-  /** 현재 버전 문자열. 다르면 서버가 409 로 거절한다. */
+  /**
+   * 현재 버전 문자열. 다르면 서버가 409 로 거절함
+   */
   version: string;
 }
 
+/**
+ * 문자 템플릿 수정. 버전이 다르면 409
+ */
 export async function updateSmsTemplate(
   templateId: string,
   input: UpdateSmsTemplateInput,
@@ -215,10 +295,10 @@ export async function updateSmsTemplate(
 /**
  * 템플릿 제거 — 계약 DELETE /admin/sms/templates/{templateId}.
  *
- * 현재 version 을 `If-Match` 헤더로 싣고(낙관적 잠금), durable 변경이라 Idempotency-Key 도 넘긴다.
- * 서버가 결과를 정한다: 사용 이력이 없으면 하드 삭제(`disposition:"DELETED"`, archivedTemplate:null),
+ * 현재 version 을 `If-Match` 헤더로 싣고(낙관적 잠금), durable 변경이라 Idempotency-Key 도 넘김
+ * 서버가 결과를 정함: 사용 이력이 없으면 하드 삭제(`disposition:"DELETED"`, archivedTemplate:null),
  * 이력이 있으면 inactive 로 보관(`disposition:"ARCHIVED"`, archivedTemplate 에 내려간 행). 현재 기본
- * 템플릿은 다른 템플릿을 먼저 기본으로 지정하기 전엔 409(`SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED`)로 거절된다.
+ * 템플릿은 다른 템플릿을 먼저 기본으로 지정하기 전엔 409(`SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED`)로 거절됨
  */
 export async function removeSmsTemplate(
   templateId: string,
@@ -235,22 +315,46 @@ export async function removeSmsTemplate(
 
 /* ── 대상별 수신 인원 ────────────────────────────────────────────────────── */
 
+/**
+ * 발송 대상별 수신 인원
+ */
 export interface SmsAudienceCount {
+  /**
+   * 발송 대상
+   */
   audience: SmsAudience;
+
+  /**
+   * 수신자 수
+   */
   recipientCount: number;
 }
 
+/**
+ * 캠퍼스·회차의 발송 대상별 수신 인원
+ */
 export interface SmsTargetCounts {
+  /**
+   * 캠퍼스
+   */
   branch: Branch;
+
+  /**
+   * 회차 ID
+   */
   seminarSessionId: string;
+
+  /**
+   * 대상별 수신 인원
+   */
   counts: SmsAudienceCount[];
 }
 
 /**
- * 대상 탭에 붙일 수신 인원 — 발송이 쓰는 것과 **같은 선택 로직**으로 서버가 센 값이다.
+ * 대상 탭에 붙일 수신 인원 — 발송이 쓰는 것과 같은 선택 로직으로 서버가 센 값임
  *
- * 프리뷰와 달리 previewToken 을 만들지 않는다. 캠퍼스·회차를 바꿀 때마다 부르는 값이라,
- * 이 호출이 발송 자격을 남기면 안 된다.
+ * 프리뷰와 달리 previewToken 을 만들지 않음. 캠퍼스·회차를 바꿀 때마다 부르는 값이라,
+ * 이 호출이 발송 자격을 남기면 안 됨
  */
 export async function countSmsTargets(
   input: { branch: Branch; seminarSessionId: string },
@@ -265,32 +369,54 @@ export async function countSmsTargets(
 
 /* ── 대상 프리뷰 ─────────────────────────────────────────────────────────── */
 
+/**
+ * 단체 문자 대상 미리보기 요청
+ */
 export interface SmsTargetRequest {
+  /**
+   * 캠퍼스
+   */
   branch: Branch;
+
+  /**
+   * 회차 ID
+   */
   seminarSessionId: string;
+
+  /**
+   * 발송 대상
+   */
   audience: SmsAudience;
   /**
    * 계약 oneOf: `templateId` 하나만 보내거나(그때 message·title 금지),
-   * `message`(+선택 `title`) 를 보내거나 — 둘 다 보내면 400 이다.
+   * `message`(+선택 `title`) 를 보내거나 — 둘 다 보내면 400 임
    */
   templateId?: string;
+
+  /**
+   * 직접 입력한 본문. templateId 와 함께 보내지 않음
+   */
   message?: string;
+
+  /**
+   * 직접 입력한 LMS 제목
+   */
   title?: string;
 }
 
 /**
- * 확인 화면·폰 미리보기가 읽을 대표 표본.
+ * 확인 화면·폰 미리보기가 읽을 대표 표본
  *
- * 수신자가 0 명이면 `samples` 가 비어 있다 — 그때는 null 을 주고, 화면이 "치환 표본 없음"을
- * 분명히 말하게 한다. 원문(messageTemplate)을 표본인 척 돌려주지 않는다.
+ * 수신자가 0 명이면 `samples` 가 비어 있음 — 그때는 null 을 주고, 화면이 "치환 표본 없음"을
+ * 분명히 말하게 함. 원문(messageTemplate)을 표본인 척 돌려주지 않음
  */
 export function primarySample(preview: SmsTargetPreview): SmsRenderedSample | null {
   return preview.samples[0] ?? null;
 }
 
 /**
- * 대상 프리뷰 — 발송 전 권위 있는 대상 수·치환 표본·바이트/타입·previewToken 을 받는다.
- * 계약상 ephemeral(x-idempotency: exempt) 이라 Idempotency-Key 를 붙이지 않는다.
+ * 대상 프리뷰 — 발송 전 권위 있는 대상 수·치환 표본·바이트/타입·previewToken 을 받음
+ * 계약상 ephemeral(x-idempotency: exempt) 이라 Idempotency-Key 를 붙이지 않음
  */
 export async function previewSmsTargets(
   input: SmsTargetRequest,
@@ -305,14 +431,16 @@ export async function previewSmsTargets(
 
 /* ── 발송 ────────────────────────────────────────────────────────────────── */
 
-/** 프리뷰 이후 대상·본문·회차가 바뀌어 토큰이 무효해졌다 — **아무것도 큐에 들어가지 않았다**. */
+/**
+ * 프리뷰 이후 대상·본문·회차가 바뀌어 토큰이 무효해졌음 — 아무것도 큐에 들어가지 않았음
+ */
 const SMS_PREVIEW_TOKEN_CHANGED_CODE = "SMS_PREVIEW_TOKEN_CHANGED";
 
 /**
- * 실제 발송 — **확인 대화상자에서 사용자가 명시적으로 확인했을 때만** 호출한다.
+ * 실제 발송 — 확인 대화상자에서 사용자가 명시적으로 확인했을 때만 호출함
  *
  * `idempotencyKey` 는 한 번의 발송 시도를 소유한 훅이 만들고, 결과가 미상인 동안 같은 값을
- * 재사용한다. 여기서 키를 만들면 응답 유실 뒤의 재시도가 **문자를 두 번 보낸다**.
+ * 재사용함. 여기서 키를 만들면 응답 유실 뒤의 재시도가 문자를 두 번 보냄
  */
 export async function enqueueSmsSend(
   input: SmsTargetRequest,
@@ -329,20 +457,34 @@ export async function enqueueSmsSend(
   });
 }
 
+/**
+ * 예약 발송 취소 결과
+ */
 export interface SmsBatchCancellation {
+  /**
+   * 발송 배치 ID
+   */
   batchId: string;
-  /** 아직 안 나가서 막은 건수. */
+  /**
+   * 아직 안 나가서 막은 건수
+   */
   cancelledCount: number;
-  /** 이미 워커가 쥐었거나 발송된 건수 — 이건 못 막는다. */
+  /**
+   * 이미 워커가 쥐었거나 발송된 건수 — 이건 못 막음
+   */
   alreadyLeftCount: number;
+
+  /**
+   * 배치 전체 건수
+   */
   totalCount: number;
 }
 
 /**
- * 예약 발송 취소 — 아직 나가지 않은 건만 막는다.
+ * 예약 발송 취소 — 아직 나가지 않은 건만 막음
  *
- * 보낸 문자는 되돌릴 수 없으므로, 화면은 `cancelledCount` 와 `alreadyLeftCount` 를 **함께**
- * 말해야 한다. "취소했습니다" 한 줄만 보여 주면 부분 차단을 전부 막은 것으로 읽는다.
+ * 보낸 문자는 되돌릴 수 없으므로, 화면은 `cancelledCount` 와 `alreadyLeftCount` 를 함께
+ * 말해야 함. "취소했습니다" 한 줄만 보여 주면 부분 차단을 전부 막은 것으로 읽음
  */
 export async function cancelSmsBatch(
   batchId: string,
@@ -355,21 +497,34 @@ export async function cancelSmsBatch(
 }
 
 /**
- * 발송 실패를 화면이 취할 **행동**으로 좁힌다.
+ * 발송 실패를 화면이 취할 행동으로 좁힘
  *
  * - `retry-same`: 결과 미상(네트워크·취소·5xx). 서버가 이미 처리했을 수 있으므로 같은 키·같은
- *   토큰으로만 다시 보낸다. 확인 화면에 머문다.
- * - `re-preview`: 토큰이 무효해졌다(409). 큐에 들어간 게 없으니 프리뷰를 버리고 다시 확인받는다.
- *   같은 토큰 재시도를 제안하면 안 된다 — 반드시 실패한다.
- * - `edit`: 그 밖의 확정 4xx. 같은 내용 재시도는 같은 실패다. 고치거나 다시 프리뷰해야 한다.
+ *   토큰으로만 다시 보냄. 확인 화면에 머묾
+ * - `re-preview`: 토큰이 무효해졌음(409). 큐에 들어간 게 없으니 프리뷰를 버리고 다시 확인받음
+ *   같은 토큰 재시도를 제안하면 안 됨 — 반드시 실패함
+ * - `edit`: 그 밖의 확정 4xx. 같은 내용 재시도는 같은 실패임. 고치거나 다시 프리뷰해야 함
  */
 export type SmsSendFailureAction = "retry-same" | "re-preview" | "edit";
 
+/**
+ * 발송 실패를 화면 조치로 좁힌 결과
+ */
 export interface SmsSendFailure {
+  /**
+   * 다음 조치
+   */
   action: SmsSendFailureAction;
+
+  /**
+   * 사용자 안내 문구
+   */
   message: string;
 }
 
+/**
+ * 발송 오류를 같은 키 재시도·다시 미리보기·수정 중 하나로 분류
+ */
 export function classifySmsSendFailure(error: unknown): SmsSendFailure {
   if (!isApiError(error)) {
     return { action: "retry-same", message: "알 수 없는 오류가 발생했어요. 발송 여부를 확인할 수 없어요." };
@@ -382,7 +537,7 @@ export function classifySmsSendFailure(error: unknown): SmsSendFailure {
     };
   }
 
-  // 결과 미상 — 서버가 이미 큐에 넣었을 수 있다. 새 키로 다시 보내면 두 번 나간다.
+  // 결과 미상 — 서버가 이미 큐에 넣었을 수 있음. 새 키로 다시 보내면 두 번 나감
   if (error.kind === "network" || error.kind === "aborted" || error.status === 0 || error.status >= 500) {
     return {
       action: "retry-same",
@@ -393,7 +548,7 @@ export function classifySmsSendFailure(error: unknown): SmsSendFailure {
     };
   }
 
-  // 본문·변수 문제는 고쳐야 풀린다 — 같은 내용 재시도는 같은 실패다.
+  // 본문·변수 문제는 고쳐야 풀림 — 같은 내용 재시도는 같은 실패임
   const content = smsContentErrorMessage(error);
   if (content !== null) return { action: "edit", message: content };
 
@@ -413,16 +568,43 @@ export function classifySmsSendFailure(error: unknown): SmsSendFailure {
 
 /* ── 이력 ────────────────────────────────────────────────────────────────── */
 
+/**
+ * 문자 이력 조회 조건
+ */
 export interface ListSmsMessagesParams {
+  /**
+   * 배송 상태 필터
+   */
   status?: SmsDeliveryStatus;
+
+  /**
+   * 문자 용도 필터
+   */
   source?: SmsPurpose;
+
+  /**
+   * 캠퍼스 필터
+   */
   branch?: Branch;
+
+  /**
+   * 회차 필터
+   */
   seminarSessionId?: string;
+
+  /**
+   * 발송 배치 필터
+   */
   batchId?: string;
-  /** 계약 최대 200. */
+  /**
+   * 계약 최대 200
+   */
   limit?: number;
 }
 
+/**
+ * 문자 이력 조회
+ */
 export async function listSmsMessages(
   params: ListSmsMessagesParams = {},
   signal?: AbortSignal,
@@ -442,14 +624,17 @@ export async function listSmsMessages(
 }
 
 /**
- * 배송 상태를 로그가 세는 칸으로 접는다.
+ * 배송 상태를 로그가 세는 칸으로 접음
  *
- * 서버의 배치 집계와 **같은 기준**을 쓴다 (sms-admin.service.ts batchHistory):
- * 성공 = SENT, 대기 = PENDING·CLAIMED·SENDING, 실패 = 차단·영구실패·미상·DEAD.
- * 기준이 갈리면 배치 행과 미배치 행의 성공률이 서로 다른 뜻이 된다.
+ * 서버의 배치 집계와 같은 기준을 씀 (sms-admin.service.ts batchHistory):
+ * 성공 = SENT, 대기 = PENDING·CLAIMED·SENDING, 실패 = 차단·영구실패·미상·DEAD
+ * 기준이 갈리면 배치 행과 미배치 행의 성공률이 서로 다른 뜻이 됨
  */
 export type SmsOutcome = "success" | "failure" | "pending";
 
+/**
+ * 배송 상태를 성공·실패·대기로 분류
+ */
 export function smsOutcomeOf(status: SmsDeliveryStatus): SmsOutcome {
   switch (status) {
     case "SENT":
@@ -464,31 +649,83 @@ export function smsOutcomeOf(status: SmsDeliveryStatus): SmsOutcome {
 }
 
 /**
- * 로그 한 줄.
+ * 로그 한 줄
  *
  * 서버 배치(`batches`)는 그대로 한 줄이 되고, 배치에 속하지 않는 행(`batchId:null` — OTP 같은
- * 자동 발송)만 따로 한 줄씩 만든다. 배치의 구성원 행을 다시 묶지 않는다 — 두 번 세게 된다.
+ * 자동 발송)만 따로 한 줄씩 만듦. 배치의 구성원 행을 다시 묶지 않음 — 두 번 세게 됨
  */
 export interface SmsLogRow {
+  /**
+   * 행 ID. 배치 ID 또는 `message:<문자 ID>`
+   */
   id: string;
-  /** 서버 배치면 true. false 면 배치에 속하지 않은 단건이다. */
+  /**
+   * 서버 배치면 true. false 면 배치에 속하지 않은 단건임
+   */
   batched: boolean;
+
+  /**
+   * 문자 용도
+   */
   source: SmsPurpose;
+
+  /**
+   * 캠퍼스
+   */
   branch: Branch;
+
+  /**
+   * 회차 ID. 없으면 null
+   */
   seminarSessionId: string | null;
+
+  /**
+   * 발송 대상. 단건이면 null
+   */
   audience: SmsAudience | null;
+
+  /**
+   * 템플릿 이름. 없으면 null
+   */
   templateName: string | null;
-  /** 서버 배치 상태. 단건에는 없다. */
+  /**
+   * 서버 배치 상태. 단건에는 없음
+   */
   status: SmsBatchSummary["status"] | null;
+
+  /**
+   * 생성 시각
+   */
   createdAt: string;
+
+  /**
+   * 수신자 수
+   */
   recipientCount: number;
+
+  /**
+   * 성공 건수
+   */
   successCount: number;
+
+  /**
+   * 실패 건수
+   */
   failureCount: number;
+
+  /**
+   * 대기·처리 중 건수
+   */
   pendingCount: number;
-  /** 배치가 아닌 단건일 때만 — 마스킹된 수신자. */
+  /**
+   * 배치가 아닌 단건일 때만 — 마스킹된 수신자
+   */
   maskedRecipient: string | null;
 }
 
+/**
+ * 서버 배치 한 건을 로그 행으로 변환
+ */
 function batchRow(batch: SmsBatchSummary): SmsLogRow {
   return {
     id: batch.batchId,
@@ -500,7 +737,7 @@ function batchRow(batch: SmsBatchSummary): SmsLogRow {
     templateName: batch.templateName,
     status: batch.status,
     createdAt: batch.createdAt,
-    // 전부 서버가 SQL 로 센 값이다 — 여기서 더하거나 고치지 않는다.
+    // 전부 서버가 SQL 로 센 값임 — 여기서 더하거나 고치지 않음
     recipientCount: batch.recipientCount,
     successCount: batch.successCount,
     failureCount: batch.failureCount,
@@ -509,6 +746,9 @@ function batchRow(batch: SmsBatchSummary): SmsLogRow {
   };
 }
 
+/**
+ * 배치에 속하지 않은 단건 문자를 로그 행으로 변환
+ */
 function looseRow(item: SmsMessageSummary): SmsLogRow {
   const outcome = smsOutcomeOf(item.status);
   return {
@@ -530,10 +770,10 @@ function looseRow(item: SmsMessageSummary): SmsLogRow {
 }
 
 /**
- * 서버 배치 + 미배치 단건을 한 목록으로.
+ * 서버 배치 + 미배치 단건을 한 목록으로
  *
- * 배치에 속한 `items` 는 **버린다** — 그 수치는 이미 `batches` 에 집계돼 있고, 여기서 다시
- * 세면 같은 발송이 두 줄로 잡힌다.
+ * 배치에 속한 `items` 는 버림 — 그 수치는 이미 `batches` 에 집계돼 있고, 여기서 다시
+ * 세면 같은 발송이 두 줄로 잡힘
  */
 export function toSmsLogRows(list: SmsMessageList): SmsLogRow[] {
   const rows = list.batches.map(batchRow);
@@ -542,10 +782,10 @@ export function toSmsLogRows(list: SmsMessageList): SmsLogRow[] {
 }
 
 /**
- * 불러온 이력의 성공률.
+ * 불러온 이력의 성공률
  *
- * 분모는 **결과가 확정된 건**뿐이다 — 대기까지 넣으면 발송 직후 성공률이 0% 로 보인다.
- * 확정 건이 없으면 null 이고, 화면은 그때 배지를 그리지 않는다 (100% 라고 쓰지 않는다).
+ * 분모는 결과가 확정된 건뿐임 — 대기까지 넣으면 발송 직후 성공률이 0% 로 보임
+ * 확정 건이 없으면 null 이고, 화면은 그때 배지를 그리지 않음 (100% 라고 쓰지 않음)
  */
 export function smsSuccessRate(rows: readonly SmsLogRow[]): number | null {
   let success = 0;

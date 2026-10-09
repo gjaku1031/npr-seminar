@@ -11,20 +11,72 @@ import { SmsOutboxService, type SmsBranch } from "../sms/sms-outbox.service.js";
 import { SmsTemplateCatalog } from "../sms/sms-template-catalog.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
+/**
+ * OTP 용도. 새 예약 또는 기존 예약 관리
+ */
 type OtpPurpose = "FAMILY_BOOKING" | "BOOKING_MANAGE";
 
+/**
+ * 연락처 OTP 발송과 확인
+ *
+ * 확인에 성공하면 10분 유효 예약 증명(원문은 응답에만, DB에는 다이제스트)을 발급
+ */
 @Injectable()
 export class OtpService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 시도 제한 카운터
+     */
     private readonly redis: RedisService,
+
+    /**
+     * 연락처 정규화·암호화
+     */
     private readonly phoneProtector: PhoneProtector,
+
+    /**
+     * 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
+
+    /**
+     * 문자 대기열
+     */
     private readonly smsOutbox: SmsOutboxService,
+
+    /**
+     * 문자 템플릿
+     */
     private readonly smsTemplates: SmsTemplateCatalog,
+
+    /**
+     * 실행 환경. 문자 사용 여부·허용 목록·OTP pepper
+     */
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
+  /**
+   * OTP 발송 요청
+   *
+   * 1. 문자 비활성·허용 목록 밖 번호는 503으로 동일하게 거부
+   * 2. 새 예약 용도는 캠퍼스 필수
+   * 3. 연락처별 5회·IP별 20회(15분), 전체 600회(1분) 제한
+   * 4. 6자리 코드를 HMAC으로만 저장하고 5분 만료 챌린지 생성
+   * 5. 발신 지점 결정: 새 예약은 선택 캠퍼스, 관리는 재원생 지점 → 예약 이력 지점 순
+   * 6. OTP 템플릿 렌더링 후 문자 대기열 적재. 챌린지와 같은 트랜잭션
+   *
+   * @param selectedBranch 새 예약 학생 검색 캠퍼스. 관리 용도에서는 생략
+   * @returns 챌린지 ID, 만료 시각, 재요청 대기(초)
+   * @throws {DomainError} 503 문자 불가, 400 캠퍼스 누락·번호 형식, 409 발신 지점 없음, 429 시도 초과
+   */
   public async create(request: Request, contactValue: string, purpose: OtpPurpose, idempotencyKey: string, selectedBranch?: SmsBranch) {
     if (!this.environment.smsEnabled) throw new DomainError(503, "SMS_UNAVAILABLE", "SMS delivery is unavailable.");
     const normalizedContact = this.phoneProtector.normalize(contactValue);
@@ -41,6 +93,7 @@ export class OtpService {
       "OTP_CHALLENGE_CREATE", idempotencyKey, replayRequest,
     );
     if (replay !== null) return replay;
+    // 시도 제한 키는 IP 원문 대신 SHA-256 사용
     const ipKey = createHash("sha256").update(request.ip ?? request.socket.remoteAddress ?? "unknown").digest("base64url");
     await Promise.all([
       this.rateLimit(`${this.redis.prefix}otp:request:contact:${contactKey}`, 5, 15 * 60),
@@ -63,6 +116,7 @@ export class OtpService {
         select: { branch: { select: { code: true } } },
         distinct: ["branchId"],
       });
+      // 발신 지점 결정
       let branch = purpose === "FAMILY_BOOKING"
         ? selectedBranch ?? null
         : this.selectBranch(activeStudentBranches.map((row) => row.branch.code));
@@ -116,6 +170,20 @@ export class OtpService {
     }, 201);
   }
 
+  /**
+   * OTP 확인
+   *
+   * 1. 챌린지별 10회·IP별 40회(15분), 전체 1,200회(1분) 시도 제한
+   * 2. 멱등 키 advisory lock 후 이전 결과가 있으면 재생(증명 원문은 재생하지 않음)
+   * 3. 챌린지 행 잠금 후 이미 확인됐으면 재생 결과, 만료·잠김이면 실패
+   * 4. 코드가 틀리면 시도 횟수 증가, 최대 횟수에 도달하면 LOCKED
+   * 5. 맞으면 예약 증명 발급, 챌린지 VERIFIED 전환
+   *
+   * 실패 결과도 멱등 기록으로 남겨 같은 키 재요청은 같은 오류로 응답
+   *
+   * @returns 최초 성공에만 bookingProof 원문 포함
+   * @throws {DomainError} 400 코드 오류·만료, 409 키 재사용, 429 시도 초과
+   */
   public async verify(request: Request, challengeId: string, code: string, idempotencyKey: string) {
     const suppliedDigest = this.codeDigest(challengeId, code);
     const replayRequest = { challengeId, codeDigest: suppliedDigest.toString("base64url") };
@@ -152,6 +220,7 @@ export class OtpService {
              from otp_challenges where public_id=${challengeId}::uuid for update`;
       const challenge = rows[0];
       if (challenge === undefined) return this.recordVerification(transaction, keyDigest, requestDigest, { ok: false, code: "OTP_INVALID_OR_EXPIRED" }, 400);
+      // 이미 확인된 챌린지는 증명 원문 없이 재생 응답
       if (challenge.status === "VERIFIED" && challenge.otp_proof_audit_id !== null) {
         const proof = await transaction.otpProofAudit.findUniqueOrThrow({ where: { id: challenge.otp_proof_audit_id } });
         const replay = { ok: true as const, replayed: true as const, expiresAt: proof.expiresAt.toISOString(), scopes: this.scopes(challenge.purpose) };
@@ -161,6 +230,7 @@ export class OtpService {
         if (challenge.status === "PENDING") await transaction.otpChallenge.update({ where: { id: challenge.id }, data: { status: "EXPIRED" } });
         return this.recordVerification(transaction, keyDigest, requestDigest, { ok: false, code: "OTP_INVALID_OR_EXPIRED" }, 400);
       }
+      // 코드 불일치: 시도 횟수 증가, 최대에 도달하면 잠금
       if (!this.equal(challenge.code_digest, suppliedDigest)) {
         const attempts = challenge.attempt_count + 1;
         await transaction.otpChallenge.update({
@@ -169,6 +239,7 @@ export class OtpService {
         });
         return this.recordVerification(transaction, keyDigest, requestDigest, { ok: false, code: "OTP_INVALID_OR_EXPIRED" }, 400);
       }
+      // 예약 증명 발급. 멱등 기록에는 원문 없이 재생 형태로 저장
       const bookingProof = randomBytes(32).toString("base64url");
       const proofDigest = createHash("sha256").update(bookingProof).digest();
       const proof = await transaction.otpProofAudit.create({
@@ -202,6 +273,11 @@ export class OtpService {
       : { bookingProof: outcome.bookingProof, expiresAt: outcome.expiresAt, scopes: outcome.scopes, replayed: false };
   }
 
+  /**
+   * OTP 확인 결과 멱등 기록(24시간)
+   *
+   * @returns 기록한 응답
+   */
   private async recordVerification<T extends Prisma.InputJsonObject>(
     transaction: Prisma.TransactionClient,
     keyDigest: Buffer,
@@ -218,31 +294,53 @@ export class OtpService {
     return response;
   }
 
+  /**
+   * 용도별 증명 권한 범위
+   */
   private scopes(purpose: OtpPurpose): [string, string] {
     return purpose === "FAMILY_BOOKING" ? ["STUDENT_SEARCH", "FAMILY_BOOKING"] : ["BOOKING_READ", "BOOKING_MANAGE"];
   }
 
+  /**
+   * 챌린지 ID와 코드의 HMAC-SHA256. 코드 원문은 저장하지 않음
+   *
+   * @throws {DomainError} 503 OTP pepper 미설정
+   */
   private codeDigest(challengeId: string, code: string): Buffer {
     if (this.environment.otpPepper === undefined) throw new DomainError(503, "OTP_NOT_CONFIGURED", "OTP verification is not configured.");
     return createHmac("sha256", Buffer.from(this.environment.otpPepper, "base64")).update(`${challengeId}\u0000${code}`).digest();
   }
 
+  /**
+   * 지점 우선순위(A·B·C)로 하나 선택. 없으면 null
+   */
   private selectBranch(values: readonly string[]): SmsBranch | null {
     const set = new Set(values);
     return (["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const).find((branch) => set.has(branch)) ?? null;
   }
 
+  /**
+   * 고정 창 OTP 시도 제한
+   *
+   * @throws {DomainError} 429 OTP_RATE_LIMITED
+   */
   private async rateLimit(key: string, maximum: number, ttlSeconds: number): Promise<void> {
     const attempts = await this.redis.client.incr(key);
     if (attempts === 1) await this.redis.client.expire(key, ttlSeconds);
     if (attempts > maximum) throw new DomainError(429, "OTP_RATE_LIMITED", "Too many OTP requests.");
   }
 
+  /**
+   * 다이제스트 상수 시간 비교
+   */
   private equal(left: Uint8Array, right: Uint8Array): boolean {
     const a = Buffer.from(left); const b = Buffer.from(right);
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
+  /**
+   * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+   */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
     const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
   }

@@ -1,9 +1,12 @@
 "use client";
 
-/** DS Tag — 핸드오프 components/core/Tag.jsx 이식. 필터 칩·선택 토글. */
+// 디자인 시스템 태그. 필터 칩·선택 토글
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 
+/**
+ * 선택 가능한 칩
+ */
 export function Tag({
   children,
   selected = false,
@@ -12,11 +15,34 @@ export function Tag({
   count,
   style,
 }: {
+  /**
+   * 내용
+   */
   children?: ReactNode;
+
+  /**
+   * 선택 여부
+   */
   selected?: boolean;
+
+  /**
+   * 클릭 처리. 있으면 호버 효과
+   */
   onClick?: () => void;
+
+  /**
+   * 제거 처리. 있으면 X 표시
+   */
   onRemove?: () => void;
+
+  /**
+   * 뒤쪽 개수 표시. null·undefined면 생략
+   */
   count?: number | string | null;
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }) {
   const [hover, setHover] = useState(false);

@@ -1,3 +1,4 @@
+// 합성 QA DB 초기화·적재. 안전 조건을 통과한 격리 QA DB에서만 호출
 import { PrismaPg } from "@prisma/adapter-pg";
 import { createHash } from "node:crypto";
 import { PhoneProtector, type ProtectedPhone } from "../common/crypto/phone-protector.service.js";
@@ -17,32 +18,90 @@ import {
 } from "./synthetic-qa-data.js";
 import { requireCanonicalKey } from "./synthetic-qa-safety.js";
 
+/**
+ * 일괄 저장 단위
+ */
 const BATCH_SIZE = 400;
 
+/**
+ * 합성 스캐너 표시 정보
+ */
 interface SyntheticScannerSnapshot {
+  /**
+   * 기기 이름
+   */
   readonly name: string;
+
+  /**
+   * 설치 위치
+   */
   readonly location: string;
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 캠퍼스
+   */
   readonly branchCode: QaBranchCode;
 }
 
+/**
+ * 합성 입장 이벤트 메타데이터. 운영 입장과 같은 형식
+ */
 export function syntheticQaCheckInMetadata(scanner: SyntheticScannerSnapshot) {
   return scannerCheckInMetadata(scanner);
 }
 
+/**
+ * 적재 결과
+ */
 export interface SyntheticQaResult {
+  /**
+   * 활성 학생 수
+   */
   readonly students: number;
+
+  /**
+   * 활성 수강 등록 수
+   */
   readonly assignments: number;
+
+  /**
+   * 예약 수
+   */
   readonly bookings: number;
+
+  /**
+   * 스캐너 수
+   */
   readonly scanners: number;
+
+  /**
+   * 문자 대기열 행 수. 항상 0
+   */
   readonly smsOutbox: 0;
+
+  /**
+   * 시트 반영 대기열 행 수. 항상 0
+   */
   readonly sheetOutbox: 0;
 }
 
+/**
+ * QA DB 전용 Prisma 클라이언트
+ */
 export function createSyntheticQaPrisma(databaseUrl: string): PrismaClient {
   return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
 }
 
+/**
+ * QA DB 초기화
+ *
+ * 업무 테이블을 비우고 지점 3곳만 다시 만든 뒤, QA가 아닌 템플릿의 용도별 기본 지정을 복구. 한 트랜잭션
+ */
 export async function resetSyntheticQaDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$transaction(async (transaction) => {
     await resetWithinTransaction(transaction);
@@ -57,6 +116,16 @@ export async function resetSyntheticQaDatabase(prisma: PrismaClient): Promise<vo
   }, { maxWait: 30_000, timeout: 120_000 });
 }
 
+/**
+ * 합성 QA 데이터 적재
+ *
+ * 한 트랜잭션에서 초기화 후 지점·동기화 실행·학생·수강 등록·설명회·회차·OTP 증명·예약·참가자·QR·관리 링크·스캐너·
+ * 예약 이벤트·입장 이벤트·QA 템플릿을 순서대로 만들고 건수를 검증. 커밋 후 통계 갱신
+ * 연락처·QR은 환경 변수의 실제 키로 암호화해 앱에서 그대로 읽을 수 있게 함
+ *
+ * @returns 검증된 건수
+ * @throws {Error} 키 누락·건수 불일치
+ */
 export async function seedSyntheticQaDatabase(
   prisma: PrismaClient,
   environment: NodeJS.ProcessEnv,
@@ -78,6 +147,7 @@ export async function seedSyntheticQaDatabase(
       select: { id: true, code: true },
     });
     const branchIds = new Map(branches.map((branch) => [branch.code as QaBranchCode, branch.id]));
+    // 학생 원장이 반영된 것처럼 보이도록 게시 완료 동기화 실행 생성
     const syncRun = await transaction.syncRun.create({
       data: {
         publicId: stableQaUuid("sync-run", "published-v1"), runType: "MANUAL", status: "PUBLISHED",
@@ -93,6 +163,7 @@ export async function seedSyntheticQaDatabase(
       },
     });
 
+    // 같은 번호는 한 번만 암호화해 재사용
     const protectedPhones = new Map<string, ProtectedPhone>();
     const protect = (phone: string): ProtectedPhone => {
       const cached = protectedPhones.get(phone);
@@ -102,6 +173,7 @@ export async function seedSyntheticQaDatabase(
       return value;
     };
 
+    // 학생 일괄 저장
     const studentIdByPublicId = new Map<string, bigint>();
     for (const batch of chunks(plan.students, BATCH_SIZE)) {
       const inserted = await transaction.student.createManyAndReturn({
@@ -128,6 +200,7 @@ export async function seedSyntheticQaDatabase(
       for (const student of inserted) studentIdByPublicId.set(student.publicId, student.id);
     }
 
+    // 수강 등록 일괄 저장
     const studentByKey = new Map(plan.students.map((student) => [student.key, student]));
     for (const batch of chunks(plan.students.flatMap((student) => student.assignments.map((assignment) => ({ student, assignment }))), BATCH_SIZE)) {
       await transaction.studentClassAssignment.createMany({
@@ -145,6 +218,7 @@ export async function seedSyntheticQaDatabase(
       });
     }
 
+    // 지점별 동기화 실행과 게시 감사
     for (const [index, branchCode] of (["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"] as const).entries()) {
       const branchStudents = plan.students.filter((student) => student.branchCode === branchCode);
       const assignmentCount = branchStudents.reduce((sum, student) => sum + student.assignments.length, 0);
@@ -163,6 +237,7 @@ export async function seedSyntheticQaDatabase(
       safeMetadata: { fixture: "synthetic-qa-v1" }, occurredAt: seededAt,
     } });
 
+    // 설명회·회차
     const seminarIdByKey = new Map<string, bigint>();
     for (const seminar of await transaction.seminar.createManyAndReturn({
       data: plan.seminars.map((row) => ({
@@ -193,6 +268,7 @@ export async function seedSyntheticQaDatabase(
       sessionPublicIdByKey.set(draft.key, session.publicId);
     }
 
+    // 예약마다 소비 완료 OTP 증명. 예약의 외래 키 대상
     const otpIdByBookingKey = new Map<string, bigint>();
     for (const batch of chunks(plan.bookings, BATCH_SIZE)) {
       const inserted = await transaction.otpProofAudit.createManyAndReturn({
@@ -214,6 +290,7 @@ export async function seedSyntheticQaDatabase(
       }
     }
 
+    // 예약. 입장·취소 시각은 생성 2시간 후
     const bookingIdByKey = new Map<string, bigint>();
     for (const batch of chunks(plan.bookings, BATCH_SIZE)) {
       const inserted = await transaction.familyBooking.createManyAndReturn({
@@ -239,6 +316,7 @@ export async function seedSyntheticQaDatabase(
       }
     }
 
+    // 참가자. 취소 예약은 해제 상태
     const participantRows: Prisma.FamilyBookingStudentCreateManyInput[] = [];
     for (const booking of plan.bookings) {
       if (booking.guest !== null) {
@@ -275,6 +353,7 @@ export async function seedSyntheticQaDatabase(
       await transaction.familyBookingStudent.createMany({ data: batch });
     }
 
+    // QR·관리 링크. 취소는 폐기, 미참석은 만료
     const credentialIdByBookingKey = new Map<string, bigint>();
     for (const batch of chunks(plan.bookings, BATCH_SIZE)) {
       const inserted = await transaction.qrCredential.createManyAndReturn({
@@ -313,6 +392,7 @@ export async function seedSyntheticQaDatabase(
       });
     }
 
+    // 스캐너 6대. 접속 상태 확인용으로 마지막 상태 보고 시각을 다르게 설정
     const scannerIdByIndex = new Map<number, bigint>();
     const scannerSnapshotByIndex = new Map<number, SyntheticScannerSnapshot>();
     const heartbeatOffsets: readonly (number | null)[] = [15, 30, 45, 90, 300, null];
@@ -346,6 +426,7 @@ export async function seedSyntheticQaDatabase(
       safeMetadata: { fixture: true }, occurredAt: seededAt,
     })) });
 
+    // 예약 이벤트. 입장 이벤트에는 입장 예약을 스캐너에 순환 배정한 메타데이터 포함
     const checkedIn = plan.bookings.filter((booking) => booking.status === "CHECKED_IN");
     const scannerIndexByBookingKey = new Map(checkedIn.map((booking, index) => [
       booking.key,
@@ -380,6 +461,7 @@ export async function seedSyntheticQaDatabase(
     }
     for (const batch of chunks(eventRows, BATCH_SIZE)) await transaction.bookingEvent.createMany({ data: batch });
 
+    // 입장 이벤트
     for (const batch of chunks(checkedIn, BATCH_SIZE)) {
       await transaction.checkInEvent.createMany({ data: batch.map((booking, index) => {
         const globalIndex = checkedIn.indexOf(booking);
@@ -404,6 +486,11 @@ export async function seedSyntheticQaDatabase(
   return result;
 }
 
+/**
+ * 트랜잭션 안 초기화
+ *
+ * 루트 테이블을 restart identity cascade로 비우고 비재원생 일련번호·QA 템플릿·로그인 회로·동기화 lease 초기화
+ */
 async function resetWithinTransaction(transaction: Prisma.TransactionClient): Promise<void> {
   await transaction.$executeRawUnsafe(`
     truncate table
@@ -423,6 +510,9 @@ async function resetWithinTransaction(transaction: Prisma.TransactionClient): Pr
   await transaction.syncLease.create({ data: { lockName: "tongtontong-student-sync" } });
 }
 
+/**
+ * QA 문자 템플릿 생성. 기존 템플릿의 기본 지정을 모두 해제하고 QA 템플릿을 용도별 기본으로 지정
+ */
 async function seedQaTemplates(transaction: Prisma.TransactionClient, seededAt: Date): Promise<void> {
   await transaction.smsTemplate.updateMany({ data: { isDefault: false } });
   const templates: Prisma.SmsTemplateCreateManyInput[] = [
@@ -470,6 +560,9 @@ async function seedQaTemplates(transaction: Prisma.TransactionClient, seededAt: 
   await transaction.smsTemplate.createMany({ data: templates });
 }
 
+/**
+ * QA가 아닌 활성 템플릿 중 용도별 ID가 가장 작은 것을 기본으로 복구
+ */
 async function restoreNonQaTemplateDefaults(transaction: Prisma.TransactionClient): Promise<void> {
   await transaction.$executeRawUnsafe(`
     with ranked as (
@@ -484,6 +577,14 @@ async function restoreNonQaTemplateDefaults(transaction: Prisma.TransactionClien
   `);
 }
 
+/**
+ * 적재 결과 검증
+ *
+ * 학생·수강 등록·예약·스캐너 건수, 지점별 학생 수, 다중 수강 학생 수를 기대값과 대조
+ * 문자·시트 대기열과 시트 매핑이 비어 있어야 함
+ *
+ * @throws {Error} 불일치
+ */
 async function verifyDatabase(transaction: Prisma.TransactionClient): Promise<SyntheticQaResult> {
   const [students, assignments, bookings, scanners, smsOutbox, sheetOutbox, mappings] = await Promise.all([
     transaction.student.count({ where: { sourceActive: true } }),
@@ -521,10 +622,18 @@ async function verifyDatabase(transaction: Prisma.TransactionClient): Promise<Sy
   return { students, assignments, bookings, scanners, smsOutbox: 0, sheetOutbox: 0 };
 }
 
+/**
+ * 지점 행
+ */
 function branchRow(code: QaBranchCode, displayName: string, sourceCode: string) {
   return { publicId: stableQaUuid("branch", code), code, displayName, sourceCode, active: true };
 }
 
+/**
+ * 예약의 캠퍼스. 비재원생은 비재원생 정보, 재원생은 첫 학생 기준
+ *
+ * @throws {Error} 참가자 없음
+ */
 function bookingBranch(booking: QaBookingDraft, students: ReadonlyMap<string, QaStudentDraft>): QaBranchCode {
   if (booking.guest !== null) return booking.guest.branchCode;
   const first = students.get(booking.studentKeys[0] ?? "");
@@ -532,16 +641,27 @@ function bookingBranch(booking: QaBookingDraft, students: ReadonlyMap<string, Qa
   return first.branchCode;
 }
 
+/**
+ * 결정적 토큰(base64url 43자)
+ */
 function deterministicToken(kind: string, key: string): string {
   return createHash("sha256").update(`npr:synthetic-qa:v1:${kind}:${key}`).digest("base64url");
 }
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function prismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
   return copy;
 }
 
+/**
+ * 연락처·QR 암호화용 최소 실행 환경. 키는 환경 변수에서 읽음
+ *
+ * @throws {Error} 키 누락·형식 오류
+ */
 function qaCryptoEnvironment(environment: NodeJS.ProcessEnv): AppEnvironment {
   return {
     appEnv: "staging", processRole: "api", port: 4100,
@@ -555,14 +675,30 @@ function qaCryptoEnvironment(environment: NodeJS.ProcessEnv): AppEnvironment {
   };
 }
 
+/**
+ * 고정 크기 묶음 분할
+ */
 function chunks<T>(rows: readonly T[], size: number): T[][] {
   const result: T[][] = [];
   for (let index = 0; index < rows.length; index += size) result.push(rows.slice(index, index + size));
   return result;
 }
 
+/**
+ * Map에서 필수 값 조회
+ */
 function required<Key, Value>(map: ReadonlyMap<Key, Value>, key: Key): Value;
+
+/**
+ * 필수 값 확인
+ */
 function required<Value>(value: Value | undefined, label: string): Value;
+
+/**
+ * 필수 관계 값 확인
+ *
+ * @throws {Error} 값 없음
+ */
 function required<Key, Value>(mapOrValue: ReadonlyMap<Key, Value> | Value | undefined, keyOrLabel: Key | string): Value {
   const value = mapOrValue instanceof Map ? mapOrValue.get(keyOrLabel as Key) : mapOrValue;
   if (value === undefined) throw new Error(`Missing synthetic QA relation: ${String(keyOrLabel)}`);

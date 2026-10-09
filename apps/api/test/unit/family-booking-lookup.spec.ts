@@ -6,17 +6,26 @@ import { PhoneProtector } from "../../src/common/crypto/phone-protector.service.
 import { RedisService } from "../../src/common/redis/redis.service.js";
 import { FamilyBookingLookupService } from "../../src/modules/family-bookings/family-booking-lookup.service.js";
 
+/**
+ * 연락처 암호화 키를 가진 테스트 실행 환경
+ */
 const environment = {
   appEnv: "test",
   phoneEncryptionKey: Buffer.alloc(32, 1).toString("base64"),
   phoneHmacKey: Buffer.alloc(32, 2).toString("base64"),
 } as AppEnvironment;
 
+/**
+ * 시도 제한 키 계산용 최소 요청
+ */
 const request = {
   ip: "198.51.100.20",
   socket: { remoteAddress: "198.51.100.20" },
 } as Request;
 
+/**
+ * 조회 결과로 돌려줄 예약 행
+ */
 function bookingRow() {
   return {
     publicId: randomUUID(),
@@ -41,6 +50,11 @@ function bookingRow() {
   };
 }
 
+/**
+ * 가짜 DB·Redis로 구성한 조회 서비스와 호출 기록
+ *
+ * @param rows 예약 조회 결과
+ */
 function configuredService(rows: ReturnType<typeof bookingRow>[]) {
   const findMany = vi.fn().mockResolvedValue(rows);
   const auditCreate = vi.fn().mockResolvedValue({});
@@ -59,7 +73,9 @@ function configuredService(rows: ReturnType<typeof bookingRow>[]) {
   };
 }
 
+// 연락처 예약 조회
 describe("FamilyBookingLookupService", () => {
+  // 정규화한 전체 연락처로 찾고 정확한 마스킹 형식만 반환
   it("matches a normalized full phone while returning only the exact masked DTO", async () => {
     const row = bookingRow();
     const fixture = configuredService([row]);
@@ -118,6 +134,7 @@ describe("FamilyBookingLookupService", () => {
     expect(JSON.stringify(fixture.auditCreate.mock.calls)).not.toContain("01055557629");
   });
 
+  // 일치하는 예약이 없으면 빈 목록과 감사 기록
   it("returns an audited empty list for no match", async () => {
     const fixture = configuredService([]);
     await expect(fixture.service.lookup(request, "010-5555-0000")).resolves.toEqual({ items: [] });
@@ -126,6 +143,7 @@ describe("FamilyBookingLookupService", () => {
     }));
   });
 
+  // 조회 전용 IP·연락처·전체 제한을 쓰고 제한 초과 후에는 DB를 조회하지 않음
   it("uses the lookup-specific IP/contact/global limiter and never queries after a limit", async () => {
     const fixture = configuredService([bookingRow()]);
     fixture.evaluate.mockImplementation(async (_script: string, options: { keys: string[] }) => (
@@ -145,6 +163,7 @@ describe("FamilyBookingLookupService", () => {
     }));
   });
 
+  // Redis 미설정이면 DB 조회 전에 REDIS_NOT_CONFIGURED로 실패
   it("naturally fails with REDIS_NOT_CONFIGURED before a database lookup", async () => {
     const findMany = vi.fn();
     const prisma = { familyBooking: { findMany }, authAudit: { create: vi.fn() } };

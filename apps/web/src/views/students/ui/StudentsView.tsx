@@ -1,19 +1,19 @@
 "use client";
 
 /**
- * 예약 명단 (계약 tag: Admin family bookings — 회차 roster).
+ * 예약 명단 (계약 tag: Admin family bookings — 회차 roster)
  *
- * ★ 행 하나 = 그 회차의 **예약과 연결된 참가자 한 명**이다. 서버가 페이지를 나누기 전에
- *   booked-only 범위를 적용하므로, 예약이 없는 재원생은 행으로 오지 않는다.
+ * 행 하나 = 그 회차의 예약과 연결된 참가자 한 명임. 서버가 페이지를 나누기 전에
+ *   booked-only 범위를 적용하므로, 예약이 없는 재원생은 행으로 오지 않음
  *
- * ★ 그런데 **바뀌는 단위는 여전히 가족 예약**이다. 형제는 각자 행이지만 같은
- *   familyBookingId 를 되풀이하므로, 참석 학부모 변경·취소는 형제 모두에게 걸린다.
- *   그래서 조작 전에 그 사실을 먼저 말한다.
+ * 그런데 바뀌는 단위는 여전히 가족 예약임. 형제는 각자 행이지만 같은
+ *   familyBookingId 를 되풀이하므로, 참석 학부모 변경·취소는 형제 모두에게 걸림
+ *   그래서 조작 전에 그 사실을 먼저 말함
  *
- * ★ 단위(초등·중1…) 판정과 담임 정규화는 **서버 몫**이다. 반명을 뜯어 다시 계산하지 않고
- *   탭은 계약 enum 만 보낸다.
+ * 단위(초등·중1…) 판정과 담임 정규화는 서버 몫임. 반명을 뜯어 다시 계산하지 않고
+ *   탭은 계약 enum 만 보냄
  *
- * ★ 응답은 전체 연락처를 담은 ADMIN 전용 민감 데이터다 — 저장·로깅·URL 노출 금지.
+ * 응답은 전체 연락처를 담은 ADMIN 전용 민감 데이터임 — 저장·로깅·URL 노출 금지
  */
 
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -77,23 +77,37 @@ import {
 import { BookingEventsDialog } from "./BookingEventsDialog";
 import { ParticipationMonitoringTag } from "./ParticipationMonitoringTag";
 
+/**
+ * 참석 보호자 선택지
+ */
 const PARTY_OPTIONS: ReadonlyArray<{ value: AttendanceParty; label: string }> = [
   { value: "MOTHER", label: ATTENDANCE_PARTY_LABELS.MOTHER },
   { value: "FATHER", label: ATTENDANCE_PARTY_LABELS.FATHER },
   { value: "BOTH", label: ATTENDANCE_PARTY_LABELS.BOTH },
 ];
 
+/**
+ * 관리자 예약 경로 선택지
+ */
 const SOURCE_OPTIONS: AdminBookingSource[] = ["PHONE", "TEACHER", "ON_SITE"];
 
+/**
+ * ISO 시각을 짧은 날짜·시간으로
+ */
 const at = (iso: string) => fmtDateTimeShort(new Date(iso));
 
+/**
+ * 회차 선택지 표시 문구
+ */
 function sessionLabel(option: SeminarSessionOption): string {
   const { session, seminarTitle } = option;
   const scope = session.branch === null ? "전체" : BRANCH_LABELS[session.branch];
   return `${seminarTitle} · ${fmtSessionDate(new Date(session.startsAt))} · ${scope}`;
 }
 
-/** 지금 페이지에서 같은 가족 예약을 공유하는 다른 학생들 — 조작이 누구에게 걸리는지 밝힌다. */
+/**
+ * 지금 페이지에서 같은 가족 예약을 공유하는 다른 학생들 — 조작이 누구에게 걸리는지 밝힘
+ */
 function siblingsOf(rows: readonly SessionRosterRow[], row: SessionRosterRow): SessionRosterRow[] {
   const familyBookingId = row.booking?.familyBookingId;
   if (familyBookingId === undefined) return [];
@@ -103,33 +117,36 @@ function siblingsOf(rows: readonly SessionRosterRow[], row: SessionRosterRow): S
 }
 
 /**
- * 조작 요청 — 확인 대화상자가 뜨기 전까지 붙잡아 두는 자리.
+ * 조작 요청 — 확인 대화상자가 뜨기 전까지 붙잡아 두는 자리
  *
- * ★ 여기 오는 건 **활성 예약이 있는 행**뿐이다. 참석 변경은 PATCH 이므로 바꿀 집계가 있어야
- *   하고, 취소도 마찬가지다. 예약이 없거나 취소된 행에서 고른 참석은 이 갈래가 아니라
- *   `BookingDraft`(새 집계를 만드는 대화상자)로 간다.
+ * 여기 오는 건 활성 예약이 있는 행뿐임. 참석 변경은 PATCH 이므로 바꿀 집계가 있어야
+ *   하고, 취소도 마찬가지임. 예약이 없거나 취소된 행에서 고른 참석은 이 갈래가 아니라
+ *   `BookingDraft`(새 집계를 만드는 대화상자)로 감
  */
 type PendingRequest =
   | { kind: "party"; row: SessionRosterRow; party: AttendanceParty }
   | { kind: "cancel"; row: SessionRosterRow };
 
 /**
- * 확인 대화상자가 돌려주는 값 — 참석 변경은 자유 사유, 취소는 정해진 취소 갈래다.
- * 관리자 취소는 계약상 자유 사유를 받지 않으므로 문자열이 아니라 `cancellationType` 을 낸다.
+ * 확인 대화상자가 돌려주는 값 — 참석 변경은 자유 사유, 취소는 정해진 취소 갈래임
+ * 관리자 취소는 계약상 자유 사유를 받지 않으므로 문자열이 아니라 `cancellationType` 을 냄
  */
 type ConfirmResult =
   | { kind: "party"; reason: string }
   | { kind: "cancel"; cancellationType: AdminCancellationType };
 
 /**
- * 새 예약을 만들려는 참 — 아직 아무것도 보내지 않았다.
+ * 새 예약을 만들려는 참 — 아직 아무것도 보내지 않았음
  *
- * 드랍다운에서 `예약 (모)` 를 골랐다고 바로 서버로 나가지 않는다: 활성 예약이 없으면 PATCH 할
- * 집계가 없고, 새 집계는 대표 연락처·경로·사유를 **명시적으로** 받아야 하기 때문이다.
- * `party` 는 그 대화상자에 미리 채워 줄 값이고, `수동 예약`으로 열었으면 null 이다.
+ * 드랍다운에서 `예약 (모)` 를 골랐다고 바로 서버로 나가지 않음: 활성 예약이 없으면 PATCH 할
+ * 집계가 없고, 새 집계는 대표 연락처·경로·사유를 명시적으로 받아야 하기 때문임
+ * `party` 는 그 대화상자에 미리 채워 줄 값이고, `수동 예약`으로 열었으면 null 임
  */
 type BookingDraft = { row: SessionRosterRow; party: AttendanceParty | null };
 
+/**
+ * 예약 명단 화면. 회차 명단 조회·수동 예약·변경·취소
+ */
 export function StudentsView() {
   const sessions = useBookableSessions();
   const fallbackSessionId = sessions.options[0]?.session.seminarSessionId;
@@ -140,38 +157,33 @@ export function StudentsView() {
   const xlsx = useRosterXlsxExport(roster.filters.sessionId);
 
   const [searchDraft, setSearchDraft] = useState(roster.filters.query);
-  /** 상단 `수동 추가` 메뉴로 여는, 명단 행과 무관한 새 비재원생 대화상자(밑값이 없다). */
+  // 상단 `수동 추가` 메뉴로 여는, 명단 행과 무관한 새 비재원생 대화상자(밑값이 없음)
   const [guestOpen, setGuestOpen] = useState(false);
-  /** 상단 `수동 추가` 메뉴로 여는 재원생 검색·예약 대화상자. */
+  // 상단 `수동 추가` 메뉴로 여는 재원생 검색·예약 대화상자
   const [enrolledSearchOpen, setEnrolledSearchOpen] = useState(false);
   const [eventsFor, setEventsFor] = useState<SessionRosterRow | null>(null);
-  /** 명단 행 드랍다운에서 여는 재원생 새 집계 대화상자(수동 예약·취소 후 재예약). */
+  // 명단 행 드랍다운에서 여는 재원생 새 집계 대화상자(수동 예약·취소 후 재예약)
   const [manualFor, setManualFor] = useState<BookingDraft | null>(null);
-  /** 취소된 비재원생 행에서 그 행의 값으로 다시 예약하는 대화상자. */
+  // 취소된 비재원생 행에서 그 행의 값으로 다시 예약하는 대화상자
   const [guestRebook, setGuestRebook] = useState<BookingDraft | null>(null);
   const [request, setRequest] = useState<PendingRequest | null>(null);
 
-  /**
-   * 예약 칸에서 "새 예약을 만들자"가 눌렸을 때 — 재원생·비재원생 각자의 대화상자를 연다.
-   * 어느 쪽이든 **여는 것뿐**이고, 서버로 나가는 건 대화상자가 사유·경로까지 받은 뒤다.
-   */
+  // 예약 칸에서 "새 예약을 만들자"가 눌렸을 때 — 재원생·비재원생 각자의 대화상자를 엶
+  // 어느 쪽이든 여는 것뿐이고, 서버로 나가는 건 대화상자가 사유·경로까지 받은 뒤임
   const openBookingDraft = (row: SessionRosterRow, party: AttendanceParty | null) => {
     if (row.participantType === "GUEST") setGuestRebook({ row, party });
     else setManualFor({ row, party });
   };
 
-  /**
-   * 붙잡힌 의도의 **그대로 재시도**가 성공하면, 그 조작을 시작했던 대화상자를 닫는다.
-   *
-   * 재시도는 옛(붙잡힌) 페이로드를 보낸다 — 성공했는데 편집된 값이 뜬 대화상자를 열어 두면
-   * 사용자가 다시 제출을 눌러 새 키로 같은 변경을 중복 발행할 수 있다. action 별로 정확히 그
-   * 대화상자만 닫는다.
-   */
+  // 붙잡힌 의도의 그대로 재시도가 성공하면, 그 조작을 시작했던 대화상자를 닫음
+  // 재시도는 옛(붙잡힌) 페이로드를 보냄 — 성공했는데 편집된 값이 뜬 대화상자를 열어 두면
+  // 사용자가 다시 제출을 눌러 새 키로 같은 변경을 중복 발행할 수 있음. action 별로 정확히 그
+  // 대화상자만 닫음
   const closeDialogsForRetainedRetry = (action: BookingMutationKind) => {
     for (const dialog of mutationDialogsForRetainedAction(action)) {
       if (dialog === "confirm") setRequest(null);
       else if (dialog === "manualEnrolled") {
-        // 재원생 예약은 두 곳에서 나간다(행 드랍다운의 수동 예약·상단 검색) — 둘 다 닫는다.
+        // 재원생 예약은 두 곳에서 나감(행 드랍다운의 수동 예약·상단 검색) — 둘 다 닫음
         setManualFor(null);
         setEnrolledSearchOpen(false);
       } else {
@@ -181,7 +193,7 @@ export function StudentsView() {
     }
   };
 
-  // URL 이 바깥에서 바뀌면 입력창도 따라간다 (렌더 중 조정 — effect 는 낡은 값을 한 프레임 그린다).
+  // URL 이 바깥에서 바뀌면 입력창도 따라감 (렌더 중 조정 — effect 는 낡은 값을 한 프레임 그림)
   const [syncedQuery, setSyncedQuery] = useState(roster.filters.query);
   if (syncedQuery !== roster.filters.query) {
     setSyncedQuery(roster.filters.query);
@@ -193,27 +205,25 @@ export function StudentsView() {
     [sessions.options, roster.filters.sessionId],
   );
 
-  /** 분원 열은 "전체"일 때만 의미가 있다 — 한 분원을 고르면 모든 행이 같은 값이라 소음이다. */
+  // 분원 열은 "전체"일 때만 의미가 있음 — 한 분원을 고르면 모든 행이 같은 값이라 소음임
   const showBranchColumn = showsBranchColumn(roster.filters.branch);
 
   const rows = roster.page?.items ?? [];
-  /** 현재 캠퍼스·단위·담임·검색 조건의 학생/가족/실 참가자 집계 — 목록 페이지와 분리된 서버 값. */
+  // 현재 캠퍼스·단위·담임·검색 조건의 학생/가족/실 참가자 집계 — 목록 페이지와 분리된 서버 값
   const monitoring = roster.page?.monitoring;
-  /** 담임 선택지는 서버 facets 그대로 — 화면이 목록에서 긁어 모으면 페이지마다 달라진다. */
+  // 담임 선택지는 서버 facets 그대로 — 화면이 목록에서 긁어 모으면 페이지마다 달라짐
   const teachers = roster.page?.facets.teachers ?? [];
   const unmatchedUnitCount = roster.page?.facets.unmatchedUnitCount ?? 0;
 
-  /**
-   * URL 의 담임이 지금 분원의 facets 에 없을 수 있다(분원을 바꿨거나 링크를 받은 경우).
-   * 그래도 필터는 서버에 걸려 있으므로 선택지에 남겨 둔다 — 빈 칸으로 보이면 왜 명단이
-   * 비었는지 알 수 없다.
-   */
+  // URL 의 담임이 지금 분원의 facets 에 없을 수 있음(분원을 바꿨거나 링크를 받은 경우)
+  // 그래도 필터는 서버에 걸려 있으므로 선택지에 남겨 둠 — 빈 칸으로 보이면 왜 명단이
+  // 비었는지 알 수 없음
   const teacherOptions =
     roster.filters.teacherName !== undefined && !teachers.includes(roster.filters.teacherName)
       ? [roster.filters.teacherName, ...teachers]
       : teachers;
 
-  // 두 줄 필터의 라벨(캠퍼스·단위) — group 을 가리키는 접근성 연결. 조기 반환 전에 부른다.
+  // 두 줄 필터의 라벨(캠퍼스·단위) — group 을 가리키는 접근성 연결. 조기 반환 전에 부름
   const campusLabelId = useId();
   const unitLabelId = useId();
 
@@ -243,8 +253,8 @@ export function StudentsView() {
           <h1 style={{ fontSize: "var(--text-h1)", fontWeight: 800, whiteSpace: "nowrap" }}>예약 명단</h1>
         </div>
         <span style={{ flex: 1, minWidth: 8 }} />
-        {/* 엑셀 다운로드는 고른 회차·필터 기준 내보내기라 회차 선택 옆 header action 으로 둔다 —
-            아래 필터의 action 컬럼(수동 추가·담임)을 방해하지 않는다. */}
+        {/* 엑셀 다운로드는 고른 회차·필터 기준 내보내기라 회차 선택 옆 header action 으로 둠 —
+            아래 필터의 action 컬럼(수동 추가·담임)을 방해하지 않음*/}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, flexShrink: 0 }}>
           <Select
             options={sessions.options.map((o) => ({ label: sessionLabel(o), value: o.session.seminarSessionId }))}
@@ -273,8 +283,8 @@ export function StudentsView() {
 
       {/*
         필터 — 학생 현황과 같은 두 줄 구조. 왼쪽 두 줄은 각자 nowrap + 가로 스크롤이라 페이지가
-        아니라 그 줄만 밀린다. 오른쪽 action 컬럼은 `수동 추가`(위)·담임(아래)을 수직 정렬한다.
-        1행 검색폭 = 2행 여백이라 `캠퍼스`·`단위` 라벨이 같은 x 에서 시작한다.
+        아니라 그 줄만 밀림. 오른쪽 action 컬럼은 `수동 추가`(위)·담임(아래)을 수직 정렬함
+        1행 검색폭 = 2행 여백이라 `캠퍼스`·`단위` 라벨이 같은 x 에서 시작함
       */}
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginTop: 18 }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -342,10 +352,10 @@ export function StudentsView() {
           </div>
         </div>
 
-        {/* 오른쪽 action 컬럼 — `수동 추가`가 담임 드롭다운 바로 위에 수직 정렬된다. */}
+        {/* 오른쪽 action 컬럼 — `수동 추가`가 담임 드롭다운 바로 위에 수직 정렬됨 */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, flexShrink: 0 }}>
           <AddMenu onAddEnrolled={() => setEnrolledSearchOpen(true)} onAddGuest={() => setGuestOpen(true)} />
-          {/* 담임 선택지는 서버 facets 그대로다 — 목록에서 긁어 모으면 페이지마다 흔들린다. */}
+          {/* 담임 선택지는 서버 facets 그대로임 — 목록에서 긁어 모으면 페이지마다 흔들림 */}
           <Select
             options={[{ label: "담임 전체", value: "" }, ...teacherOptions.map((teacher) => ({ label: teacher, value: teacher }))]}
             value={roster.filters.teacherName ?? ""}
@@ -357,7 +367,7 @@ export function StudentsView() {
 
       {/*
         서버가 어느 단위 규칙에도 걸리지 않는다고 알려 준 학생들 — 단위 탭을 고르면 이들은
-        어느 탭에도 나타나지 않는다. 조용히 빠뜨리면 명단이 전부인 척하게 되므로 밝힌다.
+        어느 탭에도 나타나지 않음. 조용히 빠뜨리면 명단이 전부인 척하게 되므로 밝힘
       */}
       {unmatchedUnitCount > 0 && roster.filters.unitGroup !== "ALL" && (
         <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--text-faint)", lineHeight: 1.5 }}>
@@ -373,13 +383,13 @@ export function StudentsView() {
         pendingId={mutations.pendingId}
         onChangeParty={(row, party) => setRequest({ kind: "party", row, party })}
         onCancel={(row) => setRequest({ kind: "cancel", row })}
-        // 테스트 예약 전용 — 확인 대화상자를 거치지 않는다. 되돌려도 잃는 것이 없고,
-        // QR 리허설은 이 동작을 반복해야 해서 매번 확인을 물으면 방해만 된다.
+        // 테스트 예약 전용 — 확인 대화상자를 거치지 않음. 되돌려도 잃는 것이 없고,
+        // QR 리허설은 이 동작을 반복해야 해서 매번 확인을 물으면 방해만 됨
         onRollbackCheckIn={(row) => {
           const familyBookingId = row.booking?.familyBookingId;
           if (familyBookingId !== undefined) void mutations.rollbackCheckIn(familyBookingId);
         }}
-        // 테스트 계정 전용 — 확인 대화상자를 거치지 않는다. 되돌려도 잃는 것이 없다.
+        // 테스트 계정 전용 — 확인 대화상자를 거치지 않음. 되돌려도 잃는 것이 없음
         onChangeTestBranch={(row, branch) => {
           const familyBookingId = row.booking?.familyBookingId;
           if (familyBookingId !== undefined) void mutations.changeTestBranch(familyBookingId, branch);
@@ -432,7 +442,7 @@ export function StudentsView() {
         />
       )}
 
-      {/* 상단 메뉴의 재원생 추가 — 활성 재원생을 검색해 새 가족 예약을 만든다(자유 사유 없음). */}
+      {/* 상단 메뉴의 재원생 추가 — 활성 재원생을 검색해 새 가족 예약을 만듦(자유 사유 없음) */}
       {enrolledSearchOpen && selected !== null && (
         <EnrolledSearchDialog
           option={selected}
@@ -446,7 +456,7 @@ export function StudentsView() {
         />
       )}
 
-      {/* 전역 추가 — 밑값이 없다. 명단에 없는 새 비재원생을 처음부터 받는 자리다. */}
+      {/* 전역 추가 — 밑값이 없음. 명단에 없는 새 비재원생을 처음부터 받는 자림 */}
       {guestOpen && selected !== null && (
         <GuestDialog
           option={selected}
@@ -460,8 +470,8 @@ export function StudentsView() {
       )}
 
       {/*
-        취소된 비재원생 재예약 — 같은 대화상자를 그 행의 값으로 채워서 연다. 옛 집계는 그대로
-        두고 **새 집계**를 만든다(계약상 취소된 집계를 되살리는 길은 없다).
+        취소된 비재원생 재예약 — 같은 대화상자를 그 행의 값으로 채워서 엶. 옛 집계는 그대로
+        두고 새 집계를 만듦(계약상 취소된 집계를 되살리는 길은 없음)
       */}
       {guestRebook !== null && selected !== null && (
         <GuestDialog
@@ -479,7 +489,7 @@ export function StudentsView() {
 
       <BookingEventsDialog row={eventsFor} onClose={() => setEventsFor(null)} />
 
-      {/* 다운로드 실패는 명단 조작 토스트와 겹치지 않게 위쪽에 따로 띄운다. */}
+      {/* 다운로드 실패는 명단 조작 토스트와 겹치지 않게 위쪽에 따로 띄움 */}
       {xlsx.error !== null && (
         <div style={{ position: "fixed", bottom: 82, left: "50%", transform: "translateX(-50%)", zIndex: 120 }}>
           <Toast tone="danger" action="닫기" onAction={xlsx.dismiss}>
@@ -491,8 +501,8 @@ export function StudentsView() {
       {(mutations.notice !== null || mutations.error !== null) && (
         <div style={{ position: "fixed", bottom: 26, left: "50%", transform: "translateX(-50%)", zIndex: 120 }}>
           {/*
-            결과 미상인 의도가 붙잡혀 있으면 재시도를 **그 의도 그대로** 내준다 — 화면에 편집된
-            값이 떠 있어도 몰래 옛 페이로드를 보내지 않고, 누르는 것이 무엇인지 말해 준다.
+            결과 미상인 의도가 붙잡혀 있으면 재시도를 그 의도 그대로 내줌 — 화면에 편집된
+            값이 떠 있어도 몰래 옛 페이로드를 보내지 않고, 누르는 것이 무엇인지 말해 줌
           */}
           {(() => {
             const retry = mutations.error !== null ? mutations.retryRetained : null;
@@ -504,7 +514,7 @@ export function StudentsView() {
                   retry !== null
                     ? async () => {
                         // 재시도가 확정 성공하면 그 조작을 시작했던 대화상자를 닫아, 편집된 값으로
-                        // 다시 제출해 새 키로 중복 발행하는 길을 막는다.
+                        // 다시 제출해 새 키로 중복 발행하는 길을 막음
                         const outcome = await retry();
                         if (outcome.ok) closeDialogsForRetainedRetry(outcome.action);
                       }
@@ -524,14 +534,14 @@ export function StudentsView() {
 /* ── 수동 추가 메뉴 ─────────────────────────────────────────────────────── */
 
 /**
- * 상단 `수동 추가` 메뉴 — `재원생 추가` / `비재원생 추가` 두 갈래를 연다.
+ * 상단 `수동 추가` 메뉴 — `재원생 추가` / `비재원생 추가` 두 갈래를 엶
  *
  * 트리거는 기존 primary 버튼과 같은 토큰(보라 그라디언트)으로 그리되, DS Button 은 ref·aria·
- * keydown 을 넘겨받지 못하므로 접근성을 위해 native `<button>` 으로 둔다.
+ * keydown 을 넘겨받지 못하므로 접근성을 위해 native `<button>` 으로 둠
  *
  * 접근성: 트리거는 `aria-haspopup="menu"` + `aria-expanded`, 팝오버는 `role="menu"` 에
  * `role="menuitem"` 버튼들. 열리면 첫 항목으로 포커스가 가고, ↑/↓·Home/End 로 이동, Enter/Space
- * 로 실행, Escape·Tab·바깥 포인터로 닫는다. Escape 로 닫으면 트리거로 포커스를 되돌린다.
+ * 로 실행, Escape·Tab·바깥 포인터로 닫음. Escape 로 닫으면 트리거로 포커스를 되돌림
  */
 function AddMenu({ onAddEnrolled, onAddGuest }: { onAddEnrolled: () => void; onAddGuest: () => void }) {
   const [open, setOpen] = useState(false);
@@ -564,7 +574,7 @@ function AddMenu({ onAddEnrolled, onAddGuest }: { onAddEnrolled: () => void; onA
   }, [open]);
 
   useEffect(() => {
-    // 열리면 첫 항목으로 포커스를 옮긴다 — 키보드로 바로 고를 수 있게.
+    // 열리면 첫 항목으로 포커스를 옮김 — 키보드로 바로 고를 수 있게
     if (open) itemsRef.current[0]?.focus();
   }, [open]);
 
@@ -726,8 +736,8 @@ function AddMenu({ onAddEnrolled, onAddGuest }: { onAddEnrolled: () => void; onA
 
 /**
  * 열 폭 — 12(캠퍼스 없음)·13(캠퍼스) 열이 1031px 뷰포트(콘텐츠 ≈ 983px)에 들어가도록 좁게
- * 잡는다. 페이지 가로 스크롤은 표를 감싼 `overflowX:auto` 가 막고, 좁은 폭에서만 표 내부에서
- * 아주 조금 스크롤된다. 반명 한 칸을 **수학반·과학반** 두 칸으로 나눈 것이 이번 변경이다.
+ * 잡음. 페이지 가로 스크롤은 표를 감싼 `overflowX:auto` 가 막고, 좁은 폭에서만 표 내부에서
+ * 아주 조금 스크롤됨. 반명 한 칸을 수학반·과학반 두 칸으로 나눈 것이 이번 변경임
  */
 function gridCols(showBranch: boolean): string {
   return showBranch
@@ -735,21 +745,26 @@ function gridCols(showBranch: boolean): string {
     : "28px 52px 1fr 78px 92px 1fr 38px 56px 116px 100px 70px 1.35fr";
 }
 
-/** 열 사이 간격 — 헤더·행·최소폭 계산이 같은 값을 쓴다. */
+/**
+ * 열 사이 간격 — 헤더·행·최소폭 계산이 같은 값을 씀
+ */
 const COL_GAP = 7;
 
+/**
+ * 명단 표 머리글. 캠퍼스 열은 전체 보기에서만
+ */
 function headers(showBranch: boolean): string[] {
   return [
     "No",
     "학번",
-    // 열 이름표는 "캠퍼스" — 내부 속성/API 는 그대로 branch 다.
+    // 열 이름표는 "캠퍼스" — 내부 속성/API 는 그대로 branch 임
     ...(showBranch ? ["캠퍼스"] : []),
     "학생이름",
-    // 반명 한 칸을 서버가 주는 두 배정으로 나눈다 — 대표 반이 아니라 실제 수학반·과학반이다.
+    // 반명 한 칸을 서버가 주는 두 배정으로 나눔 — 대표 반이 아니라 실제 수학반·과학반임
     "수학반",
     "과학반",
     "학교",
-    // 열 이름표는 "단위" — 서버가 판정한 unitName 을 그룹 라벨로 접어 보여 준다.
+    // 열 이름표는 "단위" — 서버가 판정한 unitName 을 그룹 라벨로 접어 보여 줌
     "단위",
     "담임명",
     "학부모연락처",
@@ -759,6 +774,9 @@ function headers(showBranch: boolean): string[] {
   ];
 }
 
+/**
+ * 회차 명단 표
+ */
 function RosterTable({
   roster,
   rows,
@@ -812,7 +830,7 @@ function RosterTable({
           aria-busy={loading || refreshing}
           style={{
             // 12열(캠퍼스 없음)은 1031px 뷰포트의 콘텐츠 폭(≈983px)에 맞춰 내부 스크롤이 없게, 13열
-            // (캠퍼스=전체)은 열이 하나 더라 아주 조금만 내부에서 스크롤되게 둔다.
+            // (캠퍼스=전체)은 열이 하나 더라 아주 조금만 내부에서 스크롤되게 둠
             minWidth: showBranchColumn ? 1060 : 980,
             opacity: refreshing ? 0.6 : 1,
             transition: "opacity var(--dur-fast)",
@@ -873,7 +891,9 @@ function RosterTable({
   );
 }
 
-/** 서버가 나눈 페이지 그대로 — 총계도 서버 값이다(한 페이지를 전체인 척하지 않는다). */
+/**
+ * 서버가 나눈 페이지 그대로 — 총계도 서버 값임(한 페이지를 전체인 척하지 않음)
+ */
 function Pagination({ roster }: { roster: ReturnType<typeof useSessionRoster> }) {
   const meta = roster.page!.page;
   const first = meta.page <= 1;
@@ -912,9 +932,15 @@ function Pagination({ roster }: { roster: ReturnType<typeof useSessionRoster> })
   );
 }
 
+/**
+ * 값 없음이면 흐린 —
+ */
 const faint = (value: string | null) =>
   value === null ? <span style={{ color: "var(--text-faint)" }}>—</span> : <span>{value}</span>;
 
+/**
+ * 회차 명단 한 행
+ */
 function RosterRow({
   row,
   no,
@@ -965,9 +991,9 @@ function RosterRow({
       <span style={{ color: "var(--text-faint)", fontFeatureSettings: '"tnum"' }}>{no}</span>
 
       {/*
-        비재원생의 합성 학번(`비재원-…`)은 내부 값이라 노출하지 않는다.
+        비재원생의 합성 학번(`비재원-…`)은 내부 값이라 노출하지 않음
         학번은 한 줄로 — body 전역 `overflow-wrap: anywhere` 가 좁은 학번 칸에서 숫자를 두 줄로
-        쪼개므로 여기서 nowrap 으로 막는다. 7자리도 이 칸 폭(50·52px) 안에 들어가 잘리지 않는다.
+        쪼개므로 여기서 nowrap 으로 막음. 7자리도 이 칸 폭(50·52px) 안에 들어가 잘리지 않음
       */}
       <span style={{ fontFeatureSettings: '"tnum"', color: "var(--text-muted)", fontSize: 12, width: "100%", minWidth: 0, whiteSpace: "nowrap" }}>
         {guest ? faint(null) : row.sourceStudentNo}
@@ -975,9 +1001,9 @@ function RosterRow({
 
       {showBranchColumn && (
         /*
-          테스트 계정만 캠퍼스를 바꿀 수 있다 — 캠퍼스별 문자 발송을 확인하려면 리허설 예약이
-          옮겨 다녀야 하기 때문이다. 실제 예약에는 드롭다운이 아예 나오지 않는다: 서버도 막지만,
-          고를 수 있게 두는 것만으로 "바꿔도 되는 값"이라는 잘못된 기대가 생긴다.
+          테스트 계정만 캠퍼스를 바꿀 수 있음 — 캠퍼스별 문자 발송을 확인하려면 리허설 예약이
+          옮겨 다녀야 하기 때문임. 실제 예약에는 드롭다운이 아예 나오지 않음: 서버도 막지만,
+          고를 수 있게 두는 것만으로 "바꿔도 되는 값"이라는 잘못된 기대가 생김
         */
         row.booking?.isTest === true ? (
           <select
@@ -1005,14 +1031,14 @@ function RosterRow({
         )
       )}
 
-      {/* 비재원생임은 수학반·과학반·학번·단위로 이미 드러난다 — 이름 옆에 딱지를 덧붙이지 않는다. */}
+      {/* 비재원생임은 수학반·과학반·학번·단위로 이미 드러남 — 이름 옆에 딱지를 덧붙이지 않음 */}
       <span style={{ fontWeight: 700, color: "var(--text-strong)", fontSize: 12.5 }}>{row.name}</span>
 
-      {/* 반명 한 칸이 아니라 서버가 준 수학반·과학반 두 칸이다. 과학반이 여럿이면 첫 이름 +N. */}
+      {/* 반명 한 칸이 아니라 서버가 준 수학반·과학반 두 칸임. 과학반이 여럿이면 첫 이름 +N */}
       <MathClassCell name={row.mathClassName} />
       <ScienceClassCell names={row.scienceClassNames} />
       <span style={{ fontSize: 12.5 }}>{faint(row.schoolName)}</span>
-      {/* 단위는 raw 학년(row.grade)이 아니라 서버 unitName 을 그룹 라벨로 접어 찍는다. */}
+      {/* 단위는 raw 학년(row.grade)이 아니라 서버 unitName 을 그룹 라벨로 접어 찍음 */}
       <span style={{ fontSize: 12.5 }}>{rosterUnitGroupLabel(row.unitName)}</span>
       <span style={{ fontSize: 12.5 }}>{faint(row.primaryTeacher)}</span>
 
@@ -1035,9 +1061,9 @@ function RosterRow({
 }
 
 /**
- * 학부모연락처 — 관리자 응답은 마스킹하지 않는다(계약 SensitiveResponse).
- * 재원생은 모/부 두 줄, 비재원생은 예약 연락처 한 줄이다. 비재원생 번호가 모인지 부인지는
- * 계약이 말하지 않으므로 **짐작해서 이름표를 붙이지 않는다**.
+ * 학부모연락처 — 관리자 응답은 마스킹하지 않음(계약 SensitiveResponse)
+ * 재원생은 모/부 두 줄, 비재원생은 예약 연락처 한 줄임. 비재원생 번호가 모인지 부인지는
+ * 계약이 말하지 않으므로 짐작해서 이름표를 붙이지 않음
  */
 function ContactCell({ row }: { row: SessionRosterRow }) {
   const style = { fontFeatureSettings: '"tnum"', fontSize: 11.5, lineHeight: 1.5 } as const;
@@ -1061,7 +1087,9 @@ function ContactCell({ row }: { row: SessionRosterRow }) {
   );
 }
 
-/** 수학반 한 칸 — 하나뿐이라 넘치면 …로 줄이고 title 로 전체를 보인다. */
+/**
+ * 수학반 한 칸 — 하나뿐이라 넘치면 …로 줄이고 title 로 전체를 보임
+ */
 function MathClassCell({ name }: { name: string | null }) {
   if (name === null) return <span style={{ fontSize: 12.5 }}>{faint(null)}</span>;
   return (
@@ -1075,8 +1103,8 @@ function MathClassCell({ name }: { name: string | null }) {
 }
 
 /**
- * 과학반 칸 — 없으면 —, 하나면 그대로, **여럿이면 첫 이름 +N** 팝업으로 보인다.
- * 세로로 이름을 쌓아 행 높이를 늘리지 않는다(지시) — 넘치는 이름은 팝업이 감당한다.
+ * 과학반 칸 — 없으면 —, 하나면 그대로, 여럿이면 첫 이름 +N 팝업으로 보임
+ * 세로로 이름을 쌓아 행 높이를 늘리지 않음(지시) — 넘치는 이름은 팝업이 감당함
  */
 function ScienceClassCell({ names }: { names: readonly string[] }) {
   if (names.length === 0) return <span style={{ fontSize: 12.5 }}>{faint(null)}</span>;
@@ -1094,27 +1122,27 @@ function ScienceClassCell({ names }: { names: readonly string[] }) {
 }
 
 /**
- * 과학반이 여럿일 때의 `첫 이름 +N` 팝업.
+ * 과학반이 여럿일 때의 `첫 이름 +N` 팝업
  *
- * ★ 폭 안전: 팝업은 이름을 세로로 나열하되 `max-content`(최대 260px)로 줄바꿈하고, 셀 폭을
- *   늘리거나 행을 세로로 접지 않는다.
- * ★ hover·focus·touch 세 갈래로 연다 — 포인터는 hover, 키보드는 focus, 터치는 클릭 토글.
- *   Escape·바깥 포인터·스크롤·리사이즈로 닫는다.
- * ★ 표는 `overflow:auto` 스크롤 컨테이너 안이라 셀 안 absolute 는 잘린다 — body 포털 + fixed 로
- *   앵커해 클리핑·쌓임 문제를 피한다(스캐너와 같은 포털 방식).
+ * 폭 안전: 팝업은 이름을 세로로 나열하되 `max-content`(최대 260px)로 줄바꿈하고, 셀 폭을
+ *   늘리거나 행을 세로로 접지 않음
+ * hover·focus·touch 세 갈래로 엶 — 포인터는 hover, 키보드는 focus, 터치는 클릭 토글
+ *   Escape·바깥 포인터·스크롤·리사이즈로 닫음
+ * 표는 `overflow:auto` 스크롤 컨테이너 안이라 셀 안 absolute 는 잘림 — body 포털 + fixed 로
+ *   앵커해 클리핑·쌓임 문제를 피함(스캐너와 같은 포털 방식)
  */
 function SciencePopover({ names }: { names: readonly string[] }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  // 트리거→포털 팝업으로 포인터가 건너뛰는 짧은 틈에 바로 닫히지 않도록 120ms 유예를 둔다.
+  // 트리거→포털 팝업으로 포인터가 건너뛰는 짧은 틈에 바로 닫히지 않도록 120ms 유예를 둠
   const closeTimer = useRef<number | null>(null);
   const popoverId = useId();
   const first = names[0] ?? "";
   const extra = names.length - 1;
 
-  /** 뷰포트 좌우 여백 — fixed 팝업이 화면 밖으로 삐져나가지 않게 이 안으로 가둔다. */
+  // 뷰포트 좌우 여백 — fixed 팝업이 화면 밖으로 삐져나가지 않게 이 안으로 가둠
   const VIEWPORT_MARGIN = 8;
 
   const cancelClose = () => {
@@ -1134,7 +1162,7 @@ function SciencePopover({ names }: { names: readonly string[] }) {
     const trigger = triggerRef.current;
     if (trigger !== null) {
       const rect = trigger.getBoundingClientRect();
-      // 최대 320이되 뷰포트 여백을 넘지 않는 폭을 잡고, 그 폭 기준으로 중앙을 좌우 여백 안에 가둔다.
+      // 최대 320이되 뷰포트 여백을 넘지 않는 폭을 잡고, 그 폭 기준으로 중앙을 좌우 여백 안에 가둠
       const width = Math.min(320, window.innerWidth - VIEWPORT_MARGIN * 2);
       const half = width / 2;
       const center = rect.left + rect.width / 2;
@@ -1144,7 +1172,7 @@ function SciencePopover({ names }: { names: readonly string[] }) {
     setOpen(true);
   };
 
-  // 언마운트 시 남은 닫기 타이머를 정리한다.
+  // 언마운트 시 남은 닫기 타이머를 정리함
   useEffect(() => cancelClose, []);
 
   useEffect(() => {
@@ -1155,7 +1183,7 @@ function SciencePopover({ names }: { names: readonly string[] }) {
       if (triggerRef.current?.contains(target) === true || popoverRef.current?.contains(target) === true) return;
       setOpen(false);
     };
-    // 표 내부 스크롤·창 크기 변경이면 앵커가 어긋난다 — 다시 계산하지 않고 닫는다.
+    // 표 내부 스크롤·창 크기 변경이면 앵커가 어긋남 — 다시 계산하지 않고 닫음
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     document.addEventListener("pointerdown", onDown, true);
@@ -1265,10 +1293,10 @@ function SciencePopover({ names }: { names: readonly string[] }) {
 }
 
 /**
- * 예약 칸의 상태 컨트롤은 한 가족이다 — 조작 가능한 native `<select>` 든, 읽기 전용 표기든
- * **같은 폭·높이·라운드·타이포·정렬**을 쓴다. 색만 상태에 따라 갈린다. 아래 base 와 tone 이
- * 그 유일한 출처라, 드랍다운과 읽기 전용이 따로 놀지 않게 막는다. (상호작용/의미 차이는
- * 그대로다 — 읽기 전용은 절대 조작 가능한 컨트롤이 되지 않는다.)
+ * 예약 칸의 상태 컨트롤은 한 가족임 — 조작 가능한 native `<select>` 든, 읽기 전용 표기든
+ * 같은 폭·높이·라운드·타이포·정렬을 씀. 색만 상태에 따라 갈림. 아래 base 와 tone 이
+ * 그 유일한 출처라, 드랍다운과 읽기 전용이 따로 놀지 않게 막음. (상호작용/의미 차이는
+ * 그대로임 — 읽기 전용은 절대 조작 가능한 컨트롤이 되지 않음.)
  */
 const STATUS_CONTROL_BASE = {
   width: "100%",
@@ -1287,9 +1315,14 @@ const STATUS_CONTROL_BASE = {
   justifyContent: "center",
 } as const;
 
+/**
+ * 예약 칸 상태 색조
+ */
 type StatusControlTone = "empty" | "booked" | "cancelled" | "checkedIn" | "noShow";
 
-/** 상태별 배경·글자·테두리 색 — 드랍다운과 읽기 전용 표기가 공유하는 유일한 색 출처. */
+/**
+ * 상태별 배경·글자·테두리 색 — 드랍다운과 읽기 전용 표기가 공유하는 유일한 색 출처
+ */
 function statusControlColors(tone: StatusControlTone): { background: string; color: string; borderColor: string } {
   switch (tone) {
     case "cancelled":
@@ -1307,8 +1340,8 @@ function statusControlColors(tone: StatusControlTone): { background: string; col
 }
 
 /**
- * 예약 칸 — 서버가 허락하는 조작만 연다.
- * 입장 완료·미참석처럼 서버가 변경을 막는 상태에서는 드랍다운 자체를 주지 않는다.
+ * 예약 칸 — 서버가 허락하는 조작만 엶
+ * 입장 완료·미참석처럼 서버가 변경을 막는 상태에서는 드랍다운 자체를 주지 않음
  */
 function BookingCell({
   row,
@@ -1329,7 +1362,7 @@ function BookingCell({
     if (control.readOnlyLabel === ROSTER_BOOKING_LABELS.none) {
       return <span style={{ color: "var(--text-faint)", fontSize: 12.5 }}>{ROSTER_BOOKING_LABELS.none}</span>;
     }
-    // 읽기 전용 표기도 드랍다운과 같은 컨트롤 문법을 쓴다 — 단, 상호작용은 절대 열지 않는다.
+    // 읽기 전용 표기도 드랍다운과 같은 컨트롤 문법을 씀 — 단, 상호작용은 절대 열지 않음
     const tone: StatusControlTone = control.cancelled
       ? "cancelled"
       : control.readOnlyLabel === ROSTER_BOOKING_LABELS.checkedIn
@@ -1342,7 +1375,7 @@ function BookingCell({
       <span style={{ ...STATUS_CONTROL_BASE, ...colors }}>{control.readOnlyLabel}</span>
     );
     if (control.blockedReason === null) return box;
-    // 막힌 이유가 있으면 회색으로 죽여 놓지 않고 왜인지 말한다 — 되는 척도, 침묵도 아니다.
+    // 막힌 이유가 있으면 회색으로 죽여 놓지 않고 왜인지 말함 — 되는 척도, 침묵도 아님
     return (
       <span title={control.blockedReason} style={{ display: "block" }}>
         {box}
@@ -1363,8 +1396,8 @@ function BookingCell({
       value={control.value}
       onChange={(event) => {
         const action = rosterBookingActionOf(control, event.target.value);
-        // 칸은 언제나 **서버 상태**를 보여 준다 — 고른 값은 의도일 뿐 아직 사실이 아니다.
-        // 되돌려 두지 않으면 대화상자를 닫거나 실패했을 때 칸만 거짓말을 하고 남는다.
+        // 칸은 언제나 서버 상태를 보여 줌 — 고른 값은 의도일 뿐 아직 사실이 아님
+        // 되돌려 두지 않으면 대화상자를 닫거나 실패했을 때 칸만 거짓말을 하고 남음
         event.target.value = control.value;
         if (action === null || action.kind === "none") return;
         if (action.kind === "cancel") {
@@ -1375,8 +1408,8 @@ function BookingCell({
           onBook(row, null);
           return;
         }
-        // 참석 선택: 바꿀 활성 집계가 있으면 PATCH, 없으면 **새 집계**다.
-        // 후자는 대표 연락처·경로·사유를 대화상자가 명시적으로 받아야 하므로 API 호출이 아니다.
+        // 참석 선택: 바꿀 활성 집계가 있으면 PATCH, 없으면 새 집계임
+        // 후자는 대표 연락처·경로·사유를 대화상자가 명시적으로 받아야 하므로 API 호출이 아님
         if (rosterHasActiveBooking(row)) onChangeParty(row, action.party);
         else onBook(row, action.party);
       }}
@@ -1396,7 +1429,9 @@ function BookingCell({
   );
 }
 
-/** 입장 — 예약이 말해 주는 사실만. 스캐너 번호는 계약이 주지 않으므로 지어내지 않는다. */
+/**
+ * 입장 — 예약이 말해 주는 사실만. 스캐너 번호는 계약이 주지 않으므로 지어내지 않음
+ */
 function EntryCell({
   row,
   pending,
@@ -1409,11 +1444,9 @@ function EntryCell({
   const booking = row.booking;
 
   if (booking !== null && booking.checkedInAt !== null) {
-    /**
-     * **실제 입장 인원**을 말한다 — 예약 인원이 아니다. 2명 예약에 한 분만 온 경우가 있어
-     * 게이트에서 스태프가 고른 값이 여기로 온다. 도입 전 입장 건은 값이 없을 수 있으므로,
-     * 없으면 인원을 지어내지 않고 예전처럼 `입장` 으로만 둔다.
-     */
+    // 실제 입장 인원을 말함 — 예약 인원이 아님. 2명 예약에 한 분만 온 경우가 있어
+    // 게이트에서 스태프가 고른 값이 여기로 옴. 도입 전 입장 건은 값이 없을 수 있으므로,
+    // 없으면 인원을 지어내지 않고 예전처럼 `입장` 으로만 둠
     const entered = booking.attendedCount;
     return (
       <span style={{ fontSize: 11.5, lineHeight: 1.5, fontFeatureSettings: '"tnum"' }}>
@@ -1422,8 +1455,8 @@ function EntryCell({
         </b>
         <br />
         <span style={{ color: "var(--text-muted)" }}>{at(booking.checkedInAt)}</span>
-        {/* 테스트 예약만 되돌릴 수 있다. 실제 입장 기록에는 이 버튼이 아예 나오지 않는다 —
-            서버도 거절하지만, 누를 수 있게 두는 것 자체가 잘못된 기대를 만든다. */}
+        {/* 테스트 예약만 되돌릴 수 있음. 실제 입장 기록에는 이 버튼이 아예 나오지 않음 —
+            서버도 거절하지만, 누를 수 있게 두는 것 자체가 잘못된 기대를 만듦*/}
         {booking.isTest && (
           <>
             <br />
@@ -1460,14 +1493,14 @@ function EntryCell({
 }
 
 /**
- * 최신 로그 — 서버가 붙인 문구와 시각을 그대로 인라인으로 보여 주고, 누르면 전체 이력을 연다.
- * 여기서 이력을 미리 읽지 않는다 — 셀은 트리거일 뿐이다(행마다 읽으면 곧 N+1).
+ * 최신 로그 — 서버가 붙인 문구와 시각을 그대로 인라인으로 보여 주고, 누르면 전체 이력을 엶
+ * 여기서 이력을 미리 읽지 않음 — 셀은 트리거일 뿐임(행마다 읽으면 곧 N+1)
  */
 function LatestLogCell({ row, onOpenEvents }: { row: SessionRosterRow; onOpenEvents: (row: SessionRosterRow) => void }) {
   const latest = row.latestOperationalEvent;
   if (latest === null) return <span style={{ color: "var(--text-faint)", fontSize: 12.5 }}>—</span>;
 
-  /** 취소 뒤 재예약이면 이력이 여러 예약에 걸쳐 있다 — 그 사실을 셀에서도 알린다. */
+  // 취소 뒤 재예약이면 이력이 여러 예약에 걸쳐 있음 — 그 사실을 셀에서도 알림
   const extra = row.bookingHistory.length - 1;
 
   return (
@@ -1515,6 +1548,9 @@ function LatestLogCell({ row, onOpenEvents }: { row: SessionRosterRow; onOpenEve
 
 /* ── 확인 (참석 학부모 변경 · 취소) ─────────────────────────────────────── */
 
+/**
+ * 예약 변경·취소 확인 대화상자
+ */
 function ConfirmRequestDialog({
   request,
   siblings,
@@ -1532,7 +1568,7 @@ function ConfirmRequestDialog({
   const [reason, setReason] = useState("");
   const [cancellationType, setCancellationType] = useState<AdminCancellationType>("PHONE");
 
-  // 참석 변경은 자유 사유가 필수다. 취소는 정해진 갈래 하나를 고르므로 언제나 유효하다.
+  // 참석 변경은 자유 사유가 필수임. 취소는 정해진 갈래 하나를 고르므로 언제나 유효함
   const valid = cancelling ? true : isValidBookingReason(reason);
 
   return (
@@ -1569,7 +1605,7 @@ function ConfirmRequestDialog({
           {cancelling && " 취소해도 기록은 지워지지 않아요 — 예약이 해제되고 QR 이 폐기돼요."}
         </p>
 
-        {/* 형제는 각자 행이지만 예약은 하나다 — 조작이 누구에게까지 걸리는지 먼저 말한다. */}
+        {/* 형제는 각자 행이지만 예약은 하나임 — 조작이 누구에게까지 걸리는지 먼저 말함 */}
         {siblings.length > 0 && (
           <p
             role="note"
@@ -1589,7 +1625,7 @@ function ConfirmRequestDialog({
         )}
 
         {cancelling ? (
-          // 관리자 취소는 자유 사유가 아니라 계약이 정한 취소 갈래 하나다 — 전화·선생님·기타.
+          // 관리자 취소는 자유 사유가 아니라 계약이 정한 취소 갈래 하나임 — 전화·선생님·기타
           <Field label="취소 유형">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {ADMIN_CANCELLATION_TYPE_OPTIONS.map((option) => (
@@ -1614,6 +1650,9 @@ function ConfirmRequestDialog({
 
 /* ── 재원생 수동 예약 (신규 · 취소 후 재예약) ──────────────────────────── */
 
+/**
+ * 관리자 수동 예약 대화상자. 재원생·비재원생
+ */
 function ManualBookingDialog({
   row,
   initialParty,
@@ -1624,7 +1663,9 @@ function ManualBookingDialog({
   onSubmit,
 }: {
   row: SessionRosterRow;
-  /** 드랍다운에서 참석을 골라 열었으면 그 값. `수동 예약`으로 열었으면 null. */
+  /**
+   * 드랍다운에서 참석을 골라 열었으면 그 값. `수동 예약`으로 열었으면 null
+   */
   initialParty: AttendanceParty | null;
   option: SeminarSessionOption;
   candidates: readonly SessionRosterRow[];
@@ -1639,10 +1680,10 @@ function ManualBookingDialog({
   }) => void;
 }) {
   const contacts = rosterContactChoices(row);
-  // 후보가 하나뿐이면 고를 것이 없으니 미리 고른다. 둘이면 **비워 둔다** — 모/부 중 어느 쪽이
-  // 대표인지는 화면이 짐작할 수 없고, 참석이 모+부(BOTH)여도 대표는 여전히 한쪽이다.
+  // 후보가 하나뿐이면 고를 것이 없으니 미리 고름. 둘이면 비워 둠 — 모/부 중 어느 쪽이
+  // 대표인지는 화면이 짐작할 수 없고, 참석이 모+부(BOTH)여도 대표는 여전히 한쪽임
   const [contact, setContact] = useState<RosterContactChoice | null>(contacts.length === 1 ? contacts[0]! : null);
-  // 드랍다운에서 `예약 (모/부)` 를 골라 왔으면 참석은 이미 정해졌다 — 대표 연락처는 아니다.
+  // 드랍다운에서 `예약 (모/부)` 를 골라 왔으면 참석은 이미 정해졌음 — 대표 연락처는 아님
   const [party, setParty] = useState<AttendanceParty | null>(initialParty);
   const [source, setSource] = useState<AdminBookingSource>("PHONE");
   const [withSiblings, setWithSiblings] = useState<string[]>([]);
@@ -1650,17 +1691,17 @@ function ManualBookingDialog({
   const rebooking = row.booking?.status === "CANCELLED";
 
   // 취소된 재원생 가족의 재예약 — 명단에 안 보이는 형제까지 함께 담아야 하므로, 대화상자를 연
-  // 지금(클릭) 그 취소된 집계 1건을 불러 재원생 전부를 끌어온다. 신규 예약이면 부르지 않는다.
+  // 지금(클릭) 그 취소된 집계 1건을 불러 재원생 전부를 끌어옴. 신규 예약이면 부르지 않음
   const familyRebook = useCancelledFamilyRebook(
     rebooking && row.booking !== null ? row.booking.familyBookingId : null,
     row.studentId,
   );
 
-  // 신규(booking===null) 예약에서만 같은 대표 연락처의 형제를 체크박스로 고른다.
-  // 재예약은 취소된 집계에서 재원생 전원을 고정으로 담으므로 이 후보를 쓰지 않는다.
+  // 신규(booking===null) 예약에서만 같은 대표 연락처의 형제를 체크박스로 고름
+  // 재예약은 취소된 집계에서 재원생 전원을 고정으로 담으므로 이 후보를 쓰지 않음
   const siblings = rebooking || contact === null ? [] : enrolledBookingCandidates(candidates, row, contact.contact);
 
-  // 보낼 studentIds: 재예약이면 취소된 가족 전원(선택 행이 맨 앞, 중복 제거), 신규면 선택 행 + 고른 형제.
+  // 보낼 studentIds: 재예약이면 취소된 가족 전원(선택 행이 맨 앞, 중복 제거), 신규면 선택 행 + 고른 형제
   const studentIds =
     row.studentId === null ? null : rebooking ? familyRebook.studentIds : [row.studentId, ...withSiblings];
 
@@ -1703,7 +1744,7 @@ function ManualBookingDialog({
         </p>
 
         {contacts.length === 0 ? (
-          // 연락처가 없으면 서버가 소유 검증을 통과시킬 방법이 없다 — 되는 척하지 않는다.
+          // 연락처가 없으면 서버가 소유 검증을 통과시킬 방법이 없음 — 되는 척하지 않음
           <p role="alert" style={{ margin: 0, padding: "10px 12px", borderRadius: "var(--radius-xs)", background: "var(--status-danger-soft)", fontSize: 12, color: "var(--status-danger)", lineHeight: 1.55 }}>
             이 학생은 저장된 학부모 연락처가 없어 여기서 예약할 수 없어요. 학생 정보를 먼저 동기화해 주세요.
           </p>
@@ -1716,7 +1757,7 @@ function ManualBookingDialog({
                   selected={contact?.party === choice.party}
                   onClick={() => {
                     setContact(choice);
-                    // 연락처가 바뀌면 형제 후보 자체가 달라진다 — 고른 것을 들고 가지 않는다.
+                    // 연락처가 바뀌면 형제 후보 자체가 달라짐 — 고른 것을 들고 가지 않음
                     setWithSiblings([]);
                   }}
                   style={{ height: 34 }}
@@ -1739,9 +1780,9 @@ function ManualBookingDialog({
         </Field>
 
         {/*
-          취소된 재원생 가족 재예약 — 형제를 고르는 게 아니라 취소된 집계의 재원생 **전원**을
-          함께 담는다. 일부만 다시 예약하면 나머지 형제가 나중에 ACTIVE_FAMILY_BOOKING_EXISTS 로
-          막히기 때문이다. 명단에 안 보이는 형제도 포함되므로 몇 명인지 밝힌다.
+          취소된 재원생 가족 재예약 — 형제를 고르는 게 아니라 취소된 집계의 재원생 전원을
+          함께 담음. 일부만 다시 예약하면 나머지 형제가 나중에 ACTIVE_FAMILY_BOOKING_EXISTS 로
+          막히기 때문임. 명단에 안 보이는 형제도 포함되므로 몇 명인지 밝힘
         */}
         {rebooking && (
           <>
@@ -1811,7 +1852,7 @@ function ManualBookingDialog({
           </div>
         </Field>
 
-        {/* 자유 사유는 받지 않는다 — 서버가 예약 경로로 감사 사유를 파생한다. */}
+        {/* 자유 사유는 받지 않음 — 서버가 예약 경로로 감사 사유를 파생함 */}
       </div>
     </Dialog>
   );
@@ -1820,12 +1861,12 @@ function ManualBookingDialog({
 /* ── 비재원생 수동 추가 · 취소된 비재원생 재예약 ──────────────────────── */
 
 /**
- * 비재원생 새 집계 대화상자 — 두 곳에서 쓴다.
+ * 비재원생 새 집계 대화상자 — 두 곳에서 씀
  *
- * 1. 전역 `+ 비재원생 수동 추가` — `prefill: null`. 명단에 없는 사람을 처음부터 받는다.
- * 2. 취소된 비재원생 행의 재예약 — `prefill` 이 그 행의 이름·분원·학교·학년·연락처다.
- *    옛 집계를 되살리는 게 아니라 같은 값으로 **새 집계**를 만든다(계약에 되살리기가 없다).
- *    밑값은 잠기지 않는다 — 잘못 남아 있는 값을 고쳐 보낼 수 있어야 한다.
+ * 1. 전역 `+ 비재원생 수동 추가` — `prefill: null`. 명단에 없는 사람을 처음부터 받음
+ * 2. 취소된 비재원생 행의 재예약 — `prefill` 이 그 행의 이름·분원·학교·학년·연락처임
+ *    옛 집계를 되살리는 게 아니라 같은 값으로 새 집계를 만듦(계약에 되살리기가 없음)
+ *    밑값은 잠기지 않음 — 잘못 남아 있는 값을 고쳐 보낼 수 있어야 함
  */
 function GuestDialog({
   option,
@@ -1837,7 +1878,9 @@ function GuestDialog({
 }: {
   option: SeminarSessionOption;
   prefill?: RosterGuestRebookPrefill | null;
-  /** 드랍다운에서 참석을 골라 열었을 때만 채워진다. */
+  /**
+   * 드랍다운에서 참석을 골라 열었을 때만 채워짐
+   */
   initialParty?: AttendanceParty | null;
   pending: boolean;
   onClose: () => void;
@@ -1861,14 +1904,14 @@ function GuestDialog({
     source: "PHONE" as AdminBookingSource,
   });
 
-  // BRANCH 회차는 그 분원만 받는다 — 고를 여지를 주면 서버가 409 로 거절할 뿐이다.
+  // BRANCH 회차는 그 분원만 받음 — 고를 여지를 주면 서버가 409 로 거절할 뿐임
   const branchLocked = sessionBranch !== null;
   const contactOk = form.contact.trim().length >= 8 && form.contact.trim().length <= 40;
-  // 계약: 비재원 guest 는 학교·학년(정확한 enum)이 모두 필수다.
+  // 계약: 비재원 guest 는 학교·학년(정확한 enum)이 모두 필수임
   const schoolOk = form.schoolName.trim() !== "";
   const gradeOk = form.grade !== "";
-  // 비재원생 수동 추가는 자유 사유를 받지 않는다 — reason 은 아예 보내지 않고 서버가 예약
-  // 경로로 감사 사유를 파생한다(지어낸 값을 채우지 않는다).
+  // 비재원생 수동 추가는 자유 사유를 받지 않음 — reason 은 아예 보내지 않고 서버가 예약
+  // 경로로 감사 사유를 파생함(지어낸 값을 채우지 않음)
   const valid = form.name.trim() !== "" && contactOk && schoolOk && gradeOk;
 
   return (
@@ -1924,7 +1967,7 @@ function GuestDialog({
           <Input label="이름 *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
           <Input label="학부모 연락처 *" placeholder="010-0000-0000" value={form.contact} onChange={(v) => setForm({ ...form, contact: v })} />
           <Input label="학교 *" value={form.schoolName} onChange={(v) => setForm({ ...form, schoolName: v })} />
-          {/* 계약 grade 는 초1~고3 정확한 enum 이라 자유 입력이 아니라 Select 로 받는다. */}
+          {/* 계약 grade 는 초1~고3 정확한 enum 이라 자유 입력이 아니라 Select 로 받음 */}
           <Select
             label="학년 *"
             placeholder="선택"
@@ -1971,6 +2014,9 @@ function GuestDialog({
   );
 }
 
+/**
+ * 라벨·안내가 붙은 입력 칸
+ */
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -1983,7 +2029,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 /* ── 재원생 추가 (활성 재원생 검색 → 새 가족 예약) ─────────────────────── */
 
-/** 후보의 수학반·과학반을 한 줄로 — 과학반이 여럿이면 첫 이름 +N 로 접는다(검색 목록·요약 공용). */
+/**
+ * 후보의 수학반·과학반을 한 줄로 — 과학반이 여럿이면 첫 이름 +N 로 접음(검색 목록·요약 공용)
+ */
 function candidateClassSummary(candidate: EnrolledStudentCandidate): string {
   const math = candidate.mathClassName ?? "—";
   const science =
@@ -1996,13 +2044,13 @@ function candidateClassSummary(candidate: EnrolledStudentCandidate): string {
 }
 
 /**
- * 상단 `수동 추가 › 재원생 추가` — 활성 재원생을 검색해 새 가족 예약을 만든다.
+ * 상단 `수동 추가 › 재원생 추가` — 활성 재원생을 검색해 새 가족 예약을 만듦
  *
  * 흐름: 이름·학교·학번·연락처 뒤 4자리로 검색(디바운스) → 대표 학생 하나 선택(이미 활성/입장
  * 예약이 있는 학생은 비활성) → 대표 연락처·참석·예약 경로 선택 → 같은 연락처 형제(선택, 총
- * 1~10) → 예약. 자유 사유는 받지 않는다(서버가 예약 경로로 파생). 중복은 서버가 최종 판정한다.
+ * 1~10) → 예약. 자유 사유는 받지 않음(서버가 예약 경로로 파생). 중복은 서버가 최종 판정함
  *
- * ★ 연락처는 write-only 다 — 대표 연락처·형제 매칭에만 쓰고 저장·로깅하지 않는다.
+ * 연락처는 write-only 임 — 대표 연락처·형제 매칭에만 쓰고 저장·로깅하지 않음
  */
 function EnrolledSearchDialog({
   option,
@@ -2012,7 +2060,9 @@ function EnrolledSearchDialog({
   onSubmit,
 }: {
   option: SeminarSessionOption;
-  /** 상단에서 캠퍼스를 골랐으면 그 범위로 검색을 좁힌다. */
+  /**
+   * 상단에서 캠퍼스를 골랐으면 그 범위로 검색을 좁힘
+   */
   branch: Branch | undefined;
   pending: boolean;
   onClose: () => void;
@@ -2040,8 +2090,8 @@ function EnrolledSearchDialog({
     primaryStudentId: primary?.studentId ?? null,
   });
 
-  // 대표를 바꾸면 그 아래 선택(연락처·형제)은 근거가 사라진다 — 함께 비운다. 연락처가 하나뿐이면
-  // 고를 것이 없으니 미리 고른다(둘이면 모/부 중 어느 쪽이 대표인지 화면이 짐작하지 않는다).
+  // 대표를 바꾸면 그 아래 선택(연락처·형제)은 근거가 사라짐 — 함께 비움. 연락처가 하나뿐이면
+  // 고를 것이 없으니 미리 고름(둘이면 모/부 중 어느 쪽이 대표인지 화면이 짐작하지 않음)
   const choosePrimary = (candidate: EnrolledStudentCandidate) => {
     const choices = candidateContactChoices(candidate);
     setPrimary(candidate);
@@ -2068,7 +2118,7 @@ function EnrolledSearchDialog({
     setSiblingIds((previous) => {
       if (!checked) return previous.filter((id) => id !== studentId);
       if (previous.includes(studentId)) return previous;
-      // 대표 1명을 포함해 10명을 넘기지 않는다 — 서버 상한과 같다.
+      // 대표 1명을 포함해 10명을 넘기지 않음 — 서버 상한과 같음
       if (1 + previous.length >= ENROLLED_BOOKING_MAX_STUDENTS) return previous;
       return [...previous, studentId];
     });
@@ -2219,7 +2269,7 @@ function EnrolledSearchDialog({
           </>
         ) : (
           <>
-            {/* 고른 대표 학생 — 다시 고르면 아래 선택이 전부 초기화된다. */}
+            {/* 고른 대표 학생 — 다시 고르면 아래 선택이 전부 초기화됨 */}
             <div
               style={{
                 display: "flex",
@@ -2260,7 +2310,7 @@ function EnrolledSearchDialog({
                       selected={contact?.party === choice.party}
                       onClick={() => {
                         setContact(choice);
-                        // 연락처가 바뀌면 형제 후보 자체가 달라진다 — 고른 것을 들고 가지 않는다.
+                        // 연락처가 바뀌면 형제 후보 자체가 달라짐 — 고른 것을 들고 가지 않음
                         setSiblingIds([]);
                       }}
                       style={{ height: 34 }}
@@ -2292,7 +2342,7 @@ function EnrolledSearchDialog({
               </div>
             </Field>
 
-            {/* 같은 연락처 형제 — 선택. 한 회차·한 연락처에 예약은 하나뿐이라 함께 담아야 한다. */}
+            {/* 같은 연락처 형제 — 선택. 한 회차·한 연락처에 예약은 하나뿐이라 함께 담아야 함 */}
             {contact !== null && (
               <Field
                 label="함께 예약할 형제"

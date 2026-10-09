@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# 포스터 저장 디렉터리가 API 에만 주어지고 워커·web·마이그레이션에는 없는지 확인하는 정적 검사
+# 실행: 저장소 어디서든 bash 로 실행. 운영 서버에 접속하지 않고 저장소 파일만 읽음
+# 종료 코드: 0 통과, 0 이 아니면 어긋난 검사가 있음
 set -Eeuo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)
@@ -11,6 +14,7 @@ storage=/var/lib/npr-seminar/poster
 
 bash -n "${deploy}" "${installer}"
 
+# 배포 스크립트의 디렉터리 생성·권한·env 기록
 grep -Fq "readonly poster_storage_dir=${storage}" "${deploy}"
 grep -Fq 'install -d -o "${api_user}" -g "${api_user}" -m 0750 "${poster_storage_dir}"' "${deploy}"
 grep -Fq '"POSTER_STORAGE_DIR=${poster_storage_dir}"' "${deploy}"
@@ -18,12 +22,14 @@ grep -Fq 'SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY PUBLIC_BASE_URL POSTER_STOR
 grep -Fq 'must use persistent poster storage at ${poster_storage_dir}' "${deploy}"
 grep -Fq 'poster storage must be owned by ${api_user}:${api_user} with mode 0750' "${deploy}"
 
+# 설치 스크립트와 systemd 유닛
 grep -Fq "POSTER_STORAGE_DIR=${storage}" "${installer}"
 grep -Fq 'EnvironmentFile=/etc/npr-seminar/api.env' "${api_unit}"
 grep -Fq "ReadWritePaths=-${storage}" "${api_unit}"
 grep -Fq 'UnsetEnvironment=POSTER_STORAGE_DIR' "${worker_unit}"
 grep -Fq 'UnsetEnvironment=POSTER_STORAGE_DIR' "${web_unit}"
 
+# env 작성 구간을 잘라 API 에만 포스터 경로가 있는지 확인
 DEPLOY_FIXTURE=${deploy} node - <<'NODE'
 const fs = require("node:fs");
 const source = fs.readFileSync(process.env.DEPLOY_FIXTURE, "utf8");
@@ -51,6 +57,7 @@ const migration = source.slice(migrationStart, migrationEnd);
 if (!migration.includes("env -i") || migration.includes("POSTER_STORAGE_DIR")) process.exit(1);
 NODE
 
+# 복수형 옛 경로가 남아 있지 않아야 함
 plural_storage=/var/lib/npr-seminar/poster
 plural_storage+=s
 if rg -n -F "${plural_storage}" \

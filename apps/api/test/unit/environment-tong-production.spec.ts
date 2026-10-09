@@ -3,7 +3,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type AppEnvironment, environmentProvider } from "../../src/common/config/environment.js";
 
+// 운영 통통통 연동 계약 설정
 describe("production Tong environment contract", () => {
+  // 배포한 운영 계약 JSON을 연동 확인 설정과 함께 주면 그대로 해석됨
   it("parses the exact deployed production wire JSON when the one-shot toggle confirms it", () => {
     const wire = readFileSync(resolve(import.meta.dirname, "../../../../ops/pve-release/tong-wire-contract.production.json"), "utf8").trim();
     const updates = {

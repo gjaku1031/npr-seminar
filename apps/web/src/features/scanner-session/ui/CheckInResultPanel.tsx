@@ -1,12 +1,11 @@
 "use client";
 
 /**
- * 스캔 결과 패널 — qr-poc `ScanResultPanel` 의 자리/역할을 이식하되
- * 결과 분류는 계약 `CheckInResult` 를 그대로 따른다.
+ * 스캔 결과 패널. 결과 분류는 계약 `CheckInResult` 를 그대로 따름
  *
- * 핸드오프 요구: 입장 완료 / 이미 입장 / 다른 설명회 / 취소·폐기 QR / 유효하지 않은 QR /
- * 네트워크 실패를 색·아이콘·문구로 **함께** 구분한다 (색만으로 전달하지 않는다).
- * 화면에는 API·세션 구현 용어를 노출하지 않는다.
+ * 입장 완료 / 이미 입장 / 다른 설명회 / 취소·폐기 QR / 유효하지 않은 QR /
+ * 네트워크 실패를 색·아이콘·문구로 함께 구분함 (색만으로 전달하지 않음)
+ * 화면에는 API·세션 구현 용어를 노출하지 않음
  */
 
 import { AlertTriangle, CheckCircle2, CircleSlash, Clock, Ticket, WifiOff, XCircle } from "lucide-react";
@@ -15,8 +14,14 @@ import { fmtDateTime } from "@/shared/lib/format";
 import type { CheckInPanel } from "../model/useQrCheckIn";
 import { checkInTone, formatCheckInOutcome, type CheckInTone } from "../lib/check-in-copy";
 
+/**
+ * 결과 색조
+ */
 type Tone = "success" | "warning" | "danger" | "neutral";
 
+/**
+ * 색조별 테두리·배경·글자색
+ */
 const TONE_STYLES: Record<Tone, { border: string; background: string; color: string }> = {
   success: { border: "rgba(84,214,177,0.55)", background: "rgba(84,214,177,0.10)", color: "var(--status-success-on-dark)" },
   warning: { border: "rgba(249,192,89,0.55)", background: "rgba(249,192,89,0.10)", color: "var(--status-warning-on-dark)" },
@@ -24,7 +29,9 @@ const TONE_STYLES: Record<Tone, { border: string; background: string; color: str
   neutral: { border: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.62)" },
 };
 
-/** 결과 종류별 아이콘 — 색·문구와 함께 결과를 전달한다(색만으로 전달하지 않는다). */
+/**
+ * 결과 종류별 아이콘 — 색·문구와 함께 결과를 전달함(색만으로 전달하지 않음)
+ */
 function resultIcon(result: CheckInResult): React.ReactNode {
   switch (result) {
     case "CHECKED_IN":
@@ -42,6 +49,9 @@ function resultIcon(result: CheckInResult): React.ReactNode {
   }
 }
 
+/**
+ * 색조 테두리 상자
+ */
 function Frame({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   const style = TONE_STYLES[tone];
   return (
@@ -59,6 +69,9 @@ function Frame({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   );
 }
 
+/**
+ * 체크인 결과 패널
+ */
 export function CheckInResultPanel({ panel }: { panel: CheckInPanel }) {
   if (panel.kind === "processing") {
     return (
@@ -100,7 +113,7 @@ export function CheckInResultPanel({ panel }: { panel: CheckInPanel }) {
     );
   }
 
-  // 미확정 건이 가득 찬 상태 — 새 QR 은 보내지 않는다. 무엇을 해야 하는지 명시한다.
+  // 미확정 건이 가득 찬 상태 — 새 QR 은 보내지 않음. 무엇을 해야 하는지 명시함
   if (panel.kind === "backlog") {
     return (
       <Frame tone="warning">
@@ -132,15 +145,18 @@ export function CheckInResultPanel({ panel }: { panel: CheckInPanel }) {
   );
 }
 
+/**
+ * 체크인 결과 본문
+ */
 function OutcomeView({ outcome }: { outcome: CheckInOutcome }) {
-  // 대표학생·참석 학부모·인원은 순수 포맷터가 한 문장으로 만든다(QR·수동 결과 공용).
+  // 대표학생·참석 학부모·인원은 순수 포맷터가 한 문장으로 만듦(QR·수동 결과 공용)
   const copy = formatCheckInOutcome(outcome);
   const toneKey: CheckInTone = checkInTone(outcome.result);
   const tone = TONE_STYLES[toneKey];
 
   return (
     <Frame tone={toneKey}>
-      {/* 결과가 바뀔 때마다 낭독한다 */}
+      {/* 결과가 바뀔 때마다 낭독함 */}
       <div aria-live="assertive">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: tone.color, fontSize: 13, fontWeight: 800 }}>
           <span aria-hidden="true" style={{ display: "inline-flex" }}>
@@ -149,7 +165,7 @@ function OutcomeView({ outcome }: { outcome: CheckInOutcome }) {
           {copy.title}
         </div>
 
-        {/* 성공·중복은 `{대표학생명} 학생 학부모(모/부) N명 입장 완료` 를 한 줄로 확인한다 */}
+        {/* 성공·중복은 `{대표학생명} 학생 학부모(모/부) N명 입장 완료` 를 한 줄로 확인함 */}
         <p style={{ margin: "8px 0 0", fontSize: 13.5, fontWeight: 700, color: "var(--gray-1)", lineHeight: 1.6 }}>
           {copy.detail}
         </p>

@@ -1,10 +1,10 @@
--- Read-only audit for PrismaPg timestamptz values written while the effective
--- PostgreSQL TimeZone was Asia/Seoul. This file intentionally performs no repair.
--- A value exactly nine hours behind an independent DB-generated anchor is a
--- high-confidence candidate, but it is never by itself authorization to update.
+-- PostgreSQL 실효 TimeZone 이 Asia/Seoul 이던 동안 PrismaPg 가 쓴 timestamptz 값의 읽기 전용 감사. 수정은 하지 않음
+-- 실행: psql 로 이 파일 실행(읽기 전용 트랜잭션). 결과는 후보 목록일 뿐임
+-- DB 가 따로 만든 기준 시각보다 정확히 9시간 이른 값은 신뢰도 높은 후보지만, 그것만으로 수정 근거가 되지 않음
 
 BEGIN TRANSACTION READ ONLY;
 
+-- 접속 정보와 현재 세션 시간대
 SELECT current_database() AS database_name,
        current_user AS database_user,
        current_setting('TimeZone') AS effective_timezone,
@@ -12,7 +12,7 @@ SELECT current_database() AS database_name,
 
 SET LOCAL TIME ZONE 'UTC';
 
--- Persistent database/role settings. Empty output means no matching override.
+-- DB·역할 단위로 저장된 시간대 설정. 결과가 없으면 덮어쓴 설정 없음
 SELECT COALESCE(database_name.datname, '*') AS database_name,
        COALESCE(role_name.rolname, '*') AS role_name,
        setting
@@ -23,8 +23,7 @@ SELECT COALESCE(database_name.datname, '*') AS database_name,
  WHERE lower(setting) LIKE 'timezone=%'
  ORDER BY database_name, role_name;
 
--- Complete inventory: every application timestamptz column was potentially
--- exposed on Prisma Date writes or reads and must be classified by write path.
+-- 전체 목록. 앱의 모든 timestamptz 열이 Prisma Date 읽기·쓰기로 영향받을 수 있으므로 쓰기 경로별로 분류해야 함
 SELECT table_name,
        column_name,
        column_default,
@@ -34,8 +33,7 @@ SELECT table_name,
    AND data_type = 'timestamp with time zone'
  ORDER BY table_name, ordinal_position;
 
--- Family-booking fields have independent booking_events.occurred_at anchors
--- created by PostgreSQL defaults in the same transaction.
+-- 가족 예약 시각 필드는 같은 트랜잭션에서 PostgreSQL 기본값으로 생성된 booking_events.occurred_at 을 독립 기준으로 삼음
 WITH anchored AS (
   SELECT booking.public_id,
          'created_at'::text AS field_name,
@@ -81,8 +79,7 @@ SELECT public_id,
  WHERE abs(offset_seconds + 32400) <= 5
  ORDER BY anchor_at, public_id, field_name;
 
--- Every idempotency expiry is specified as creation + 24 hours. A 15-hour
--- stored lifetime is the characteristic nine-hour write shift.
+-- 멱등 기록 만료는 생성 + 24시간. 저장된 수명이 15시간이면 9시간 쓰기 밀림의 특징임
 SELECT id,
        scope,
        created_at,
@@ -93,7 +90,7 @@ SELECT id,
  WHERE abs(extract(epoch FROM (expires_at - created_at)) - 54000) <= 30
  ORDER BY id;
 
--- OTP challenge expiry is deterministically creation + five minutes.
+-- OTP 챌린지 만료는 항상 생성 + 5분
 SELECT public_id,
        purpose,
        created_at,
@@ -104,8 +101,7 @@ SELECT public_id,
  WHERE abs(extract(epoch FROM (expires_at - created_at)) + 32100) <= 30
  ORDER BY created_at, public_id;
 
--- Proof expiry is creation + ten minutes, except one-minute ADMIN_OVERRIDE
--- proofs. created_at is the independent DB-default anchor.
+-- 증명 만료는 생성 + 10분(ADMIN_OVERRIDE 만 1분). created_at 은 DB 기본값으로 만든 독립 기준
 WITH proof_lifetimes AS (
   SELECT public_id,
          purpose,
@@ -128,9 +124,8 @@ SELECT public_id,
  WHERE abs(lifetime_seconds - (expected_seconds - 32400)) <= 30
  ORDER BY created_at, public_id;
 
--- Sheet rows whose encrypted snapshot may contain a shifted bookingCreatedAt.
--- This only identifies deliveries related to high-confidence booking candidates;
--- it does not decrypt payloads or claim that every listed snapshot is wrong.
+-- 암호화 스냅숏에 밀린 bookingCreatedAt 이 들어 있을 수 있는 시트 발송 행
+-- 신뢰도 높은 예약 후보와 관련된 발송만 찾음. 내용을 복호화하지 않고, 목록의 모든 스냅숏이 틀렸다고 단정하지 않음
 WITH candidate_bookings AS (
   SELECT booking.public_id
     FROM family_bookings AS booking

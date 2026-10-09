@@ -1,2 +1,2 @@
-// views/scanner-connect 공개 API (barrel). (설계 §4.1)
+// views/scanner-connect 공개 API (barrel)
 export { ScannerConnectView } from "./ui/ScannerConnectView";

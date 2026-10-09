@@ -21,14 +21,30 @@ import {
   studentClassBaseName,
 } from "./student-classification.js";
 
+/**
+ * 스냅샷 파일 최대 크기(바이트). 64 MiB
+ */
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * 지점 처리 순서
+ */
 const BRANCHES: readonly BranchCode[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
+
+/**
+ * 지점별 스냅샷 파일 이름·통통통 지점 코드와 기대 건수
+ *
+ * 초기 이관에 쓴 특정 스냅샷(원천 행·학생·포함 등록 수)에 고정. 다른 파일이면 해석 단계에서 거부
+ */
 const SOURCE_FILES: Readonly<Record<BranchCode, { file: string; sourceCode: string; raw: number; students: number; assignments: number }>> = {
   CAMPUS_A: { file: "SE8A.json", sourceCode: "SE8A", raw: 4752, students: 1735, assignments: 1872 },
   CAMPUS_B: { file: "KG5M.json", sourceCode: "KG5M", raw: 2622, students: 793, assignments: 911 },
   CAMPUS_C: { file: "SE9P.json", sourceCode: "SE9P", raw: 2647, students: 849, assignments: 1016 },
 };
 
+/**
+ * 스냅샷 원천 행 스키마. 알 수 없는 필드 거부, 아버지 연락처는 없으면 빈 문자열
+ */
 const rowSchema = z.object({
   branch: z.string(),
   branchCode: z.string(),
@@ -47,10 +63,28 @@ const rowSchema = z.object({
   unitName: z.string(),
 }).strict();
 
+/**
+ * 초기 학생 스냅샷 디렉터리 해석
+ *
+ * SHA256SUMS 검증, 지점별 JSON 해석, 정규화·암호화, 대표 반 선택, 고정 기대 건수 검증
+ */
 @Injectable()
 export class OfflineSnapshotParser {
+  /**
+   * 연락처 암호화 주입
+   */
   public constructor(private readonly phoneProtector: PhoneProtector) {}
 
+  /**
+   * 스냅샷 디렉터리 해석
+   *
+   * 1. 심볼릭 링크가 아닌 디렉터리와 SHA256SUMS 확인
+   * 2. 지점별 파일 해시가 SHA256SUMS와 같고 행 수·지점 코드가 기대값과 같은지 확인
+   * 3. 정규화 후 요약 건수를 고정 기대값과 대조
+   *
+   * @param suppliedDirectory 스냅샷 디렉터리 경로
+   * @throws {DomainError} 422 경로·체크섬·내용·건수 불일치
+   */
   public async parse(suppliedDirectory: string): Promise<ParsedOfflineSnapshot> {
     const directory = await this.safeDirectory(suppliedDirectory);
     const checksums = await this.readChecksums(await this.safeFile(directory, "SHA256SUMS"));
@@ -73,6 +107,13 @@ export class OfflineSnapshotParser {
     return this.normalize(directory, rawByBranch, fileHashes);
   }
 
+  /**
+   * 원천 행 정규화와 학생별 대표 반 선택
+   *
+   * 대표 반 선택 규칙은 실시간 동기화(StudentNormalizerService)와 같음
+   *
+   * @throws {DomainError} 422 필수 값 누락·같은 학번의 신원 불일치·기대 건수 불일치
+   */
   private normalize(
     directory: string,
     rawByBranch: ReadonlyMap<BranchCode, readonly SnapshotSourceRow[]>,
@@ -89,6 +130,7 @@ export class OfflineSnapshotParser {
         const protectedPhone = !included || source.motherPhone.trim() === "" ? null : this.phoneProtector.protect(source.motherPhone);
         const fatherPhone = source.fatherPhone ?? "";
         const protectedFatherPhone = !included || fatherPhone.trim() === "" ? null : this.phoneProtector.protect(fatherPhone);
+        // 행 해시: 포함 행은 정규화 값 전체, 제외 행은 지점·순번·사유만
         const canonical = included
           ? [
               branch, studentNo, source.name, className, source.schoolName, source.gradeName,
@@ -125,6 +167,7 @@ export class OfflineSnapshotParser {
       }
     }
 
+    // 포함 행을 학번별로 묶어 대표 반 선택
     const groups = new Map<string, typeof mutable>();
     for (const row of mutable.filter((candidate) => candidate.included)) {
       const existing = groups.get(row.sourceStudentNo) ?? [];
@@ -160,7 +203,7 @@ export class OfflineSnapshotParser {
       } else if (regularCandidates.length > 1) {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "MULTIPLE_REGULAR" });
       } else if (assignments.some((assignment) => isFutureTermStudentClass(assignment.className))) {
-        // 라이브 동기화와 같은 구분 — 다음 학기 반만 가진 학생은 '반 없음'이 아니다.
+        // 실시간 동기화와 같은 구분. 다음 학기 반만 가진 학생은 반 없음이 아님
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "FUTURE_TERM_ONLY" });
       } else {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "NO_CLASS" });
@@ -182,6 +225,11 @@ export class OfflineSnapshotParser {
     return { rows, summary };
   }
 
+  /**
+   * 개인정보 없는 요약 계산
+   *
+   * 스냅샷 해시는 파일 이름:해시 목록 기준
+   */
   private summary(
     snapshotId: string,
     rows: readonly StagedSnapshotRow[],
@@ -228,6 +276,11 @@ export class OfflineSnapshotParser {
     };
   }
 
+  /**
+   * 요약 건수가 초기 이관 스냅샷의 고정 기대값과 같은지 확인
+   *
+   * @throws {DomainError} 422 전체·지점별 건수 불일치
+   */
   private verifyExpected(summary: SnapshotSafeSummary): void {
     if (summary.rawRows !== 10021 || summary.includedAssignments !== 3799 || summary.uniqueStudents !== 3377
       || summary.excludedRows !== 6222 || summary.ambiguousStudents !== 4 || summary.oneRegular !== 2986
@@ -247,6 +300,11 @@ export class OfflineSnapshotParser {
     }
   }
 
+  /**
+   * 같은 학번의 지점·이름·학교·학년·연락처가 모두 같은지 확인
+   *
+   * @throws {DomainError} 422 SNAPSHOT_STUDENT_FIELDS_CONFLICT
+   */
   private requireConsistentStudent(assignments: readonly Omit<StagedSnapshotRow, "primaryCandidate" | "primarySelected" | "classResolutionStatus" | "classResolutionReason">[]): void {
     const first = assignments[0]!;
     const key = (row: typeof first): string => [
@@ -256,6 +314,9 @@ export class OfflineSnapshotParser {
     if (assignments.some((row) => key(row) !== key(first))) this.fail("SNAPSHOT_STUDENT_FIELDS_CONFLICT");
   }
 
+  /**
+   * 수강 등록 정렬. 반 이름(한국어) → 원천 고유 번호 → 등록 번호 → 순번
+   */
   private readonly assignmentOrder = (
     left: Omit<StagedSnapshotRow, "primaryCandidate" | "primarySelected" | "classResolutionStatus" | "classResolutionReason">,
     right: Omit<StagedSnapshotRow, "primaryCandidate" | "primarySelected" | "classResolutionStatus" | "classResolutionReason">,
@@ -264,6 +325,11 @@ export class OfflineSnapshotParser {
     || left.classRegistrationNo.localeCompare(right.classRegistrationNo)
     || left.sourceOrdinal - right.sourceOrdinal;
 
+  /**
+   * 심볼릭 링크가 아닌 디렉터리의 실제 경로
+   *
+   * @throws {DomainError} 422 빈 경로·디렉터리 아님
+   */
   private async safeDirectory(supplied: string): Promise<string> {
     if (supplied.trim() === "") this.fail("SNAPSHOT_PATH_REQUIRED");
     const absolute = resolve(supplied);
@@ -272,6 +338,11 @@ export class OfflineSnapshotParser {
     return realpath(absolute);
   }
 
+  /**
+   * 디렉터리 바로 아래 일반 파일 경로. 심볼릭 링크·64 MiB 초과 거부
+   *
+   * @throws {DomainError} 422 SNAPSHOT_FILE_INVALID
+   */
   private async safeFile(directory: string, name: string): Promise<string> {
     const file = join(directory, name);
     if (dirname(file) !== directory) this.fail("SNAPSHOT_FILE_INVALID");
@@ -280,6 +351,12 @@ export class OfflineSnapshotParser {
     return file;
   }
 
+  /**
+   * SHA256SUMS 해석. `해시 [*]파일명` 형식만 사용
+   *
+   * @returns 파일명별 소문자 hex 해시
+   * @throws {DomainError} 422 지점 파일 체크섬 누락
+   */
   private async readChecksums(file: string): Promise<ReadonlyMap<string, string>> {
     const lines = (await readFile(file, "ascii")).split(/\r?\n/);
     const checksums = new Map<string, string>();
@@ -291,17 +368,30 @@ export class OfflineSnapshotParser {
     return checksums;
   }
 
+  /**
+   * 필수 값 정규화. NFKC·공백 제거
+   *
+   * @throws {DomainError} 422 빈 값
+   */
   private required(value: string, code: string): string {
     const normalized = value.normalize("NFKC").trim();
     if (normalized === "") this.fail(code);
     return normalized;
   }
 
+  /**
+   * 선택 값 정규화. 비어 있으면 null
+   */
   private optional(value: string): string | null {
     const normalized = value.normalize("NFKC").trim();
     return normalized === "" ? null : normalized;
   }
 
+  /**
+   * 스냅샷 검증 오류 발생
+   *
+   * @throws {DomainError} 422 지정 코드
+   */
   private fail(code: string): never {
     throw new DomainError(422, code, "The offline snapshot failed validation.");
   }

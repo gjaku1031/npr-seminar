@@ -21,6 +21,12 @@ import { QrTokenProtector } from "./qr-token-protector.service.js";
 import { FamilyBookingLookupService } from "./family-booking-lookup.service.js";
 import { BookingProofRequiredGuard } from "./booking-proof-required.guard.js";
 
+/**
+ * 가족 예약 모듈
+ *
+ * 공개 예약·OTP·예약 관리 링크·관리자 예약 관리·명단·통계를 제공
+ * OtpProofPort는 BookingProofService를 그대로 사용
+ */
 @Module({
   imports: [AdminAuthModule, SmsOutboxModule, GoogleSheetsOutboxModule],
   controllers: [FamilyBookingsController, OtpController, SessionRosterController, BookingAccessController],

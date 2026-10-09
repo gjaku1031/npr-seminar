@@ -1,9 +1,12 @@
 "use client";
 
-/** DS Toast — 핸드오프 components/feedback/Toast.jsx 이식. 화면 우하단 고정 배치는 사용처가 결정. */
+// 디자인 시스템 알림. 화면 고정 위치는 사용처가 결정
 
 import type { CSSProperties, ReactNode } from "react";
 
+/**
+ * 색조별 아이콘
+ */
 const ICONS: Record<string, ReactNode> = {
   success: (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
@@ -16,6 +19,9 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
+/**
+ * 짧은 결과 알림
+ */
 export function Toast({
   open = true,
   tone = "success",
@@ -24,11 +30,34 @@ export function Toast({
   onAction,
   style,
 }: {
+  /**
+   * 표시 여부
+   */
   open?: boolean;
+
+  /**
+   * 색조
+   */
   tone?: "success" | "danger" | "info";
+
+  /**
+   * 내용
+   */
   children?: ReactNode;
+
+  /**
+   * 동작 버튼 문구
+   */
   action?: ReactNode;
+
+  /**
+   * 동작 버튼 처리
+   */
   onAction?: () => void;
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }) {
   if (!open) return null;

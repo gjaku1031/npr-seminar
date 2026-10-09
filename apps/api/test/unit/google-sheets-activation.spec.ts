@@ -12,6 +12,9 @@ import {
   SheetMappingActivationService,
 } from "../../src/modules/google-sheets/sheet-mapping-activation.service.js";
 
+/**
+ * 테스트 시트 매핑 행
+ */
 const mapping = {
   id: 1n,
   publicId: "00000000-0000-4000-8000-000000000701",
@@ -23,6 +26,11 @@ const mapping = {
   reservationSheetId: 1777564107,
 };
 
+/**
+ * 워커 실행 환경
+ *
+ * @param enabled 시트 반영 사용 여부
+ */
 function environment(enabled: boolean): AppEnvironment {
   return {
     appEnv: "test",
@@ -42,6 +50,9 @@ function environment(enabled: boolean): AppEnvironment {
   };
 }
 
+/**
+ * 지정한 검증 결과를 돌려주는 게이트웨이와 매핑 갱신 기록을 가진 활성화 서비스
+ */
 function activationHarness(result: { kind: "SUCCEEDED" } | { kind: "BLOCKED"; errorCode: string; openCircuit: true }) {
   const update = vi.fn().mockResolvedValue(mapping);
   const prisma = {
@@ -57,7 +68,9 @@ function activationHarness(result: { kind: "SUCCEEDED" } | { kind: "BLOCKED"; er
   return { prisma, gateway, update };
 }
 
+// 시트 매핑 준비·활성화
 describe("SheetMappingActivationService", () => {
+  // prepare는 표식 열만 준비하고 실시간 반영은 비활성으로 유지
   it("prepares markers while leaving live delivery disabled", async () => {
     const harness = activationHarness({ kind: "SUCCEEDED" });
     const service = new SheetMappingActivationService(harness.prisma, harness.gateway, environment(false));
@@ -75,6 +88,7 @@ describe("SheetMappingActivationService", () => {
     }) }));
   });
 
+  // 검증 실패 시 안전한 사유 코드를 저장하고 활성화하지 않음
   it("persists a safe provider reason and never enables on validation failure", async () => {
     const harness = activationHarness({ kind: "BLOCKED", errorCode: "WORKBOOK_LINK_WRITER_ACCESS", openCircuit: true });
     const service = new SheetMappingActivationService(harness.prisma, harness.gateway, environment(false));
@@ -90,6 +104,7 @@ describe("SheetMappingActivationService", () => {
     }) }));
   });
 
+  // enable은 시트 사용이 켜진 워커에서 엄격한 재검증을 통과해야 활성화
   it("enables only after a strict revalidation with the worker switch on", async () => {
     const harness = activationHarness({ kind: "SUCCEEDED" });
     const service = new SheetMappingActivationService(harness.prisma, harness.gateway, environment(true));
@@ -108,7 +123,9 @@ describe("SheetMappingActivationService", () => {
   });
 });
 
+// 관리자 시트 준비 상태
 describe("SheetAdminService readiness", () => {
+  // 최근 워커 검증이 있으면 실시간 반영 가능으로 표시
   it("reports recent worker-backed validation as live readiness", async () => {
     const count = vi.fn()
       .mockResolvedValueOnce(1)
@@ -133,6 +150,7 @@ describe("SheetAdminService readiness", () => {
     });
   });
 
+  // 활성 매핑이라도 최근 워커 검증이 없으면 준비 안 됨
   it("fails readiness when an enabled mapping has no recent worker validation", async () => {
     const count = vi.fn()
       .mockResolvedValueOnce(1)

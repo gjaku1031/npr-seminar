@@ -1,28 +1,28 @@
 @import "tailwindcss";
 
 /*
- * 디자인 토큰 (설계 §8, 결정 S1) — 핸드오프 npr-seminar-handoff/tokens/*.css 이식.
- * 적용 범위: 색 · radius · shadow · motion · spacing(컨테이너·카드 여백).
+ * 전역 스타일과 디자인 토큰
+ * 적용 범위: 색 · radius · shadow · motion · spacing(컨테이너·카드 여백) · 타이포
  *
- * 두 층으로 구성한다:
- *   1) :root         — 원본 토큰(팔레트+시맨틱)을 CSS 변수로 그대로. var(--surface-page) 등 직접 사용 가능.
- *   2) @theme        — Tailwind v4 브리지. 시맨틱 토큰을 유틸리티(bg-page·rounded-md·shadow-card·animate-fade-up …)로 생성.
- * 유틸리티는 시맨틱 변수를 참조하므로, 훗날 스코프별 오버라이드(다크모드 등)가 자동 전파된다.
+ * 두 층으로 구성함
+ *   1) :root   원본 토큰(팔레트+시맨틱)을 CSS 변수로 그대로 둠. var(--surface-page) 등 직접 사용 가능
+ *   2) @theme  Tailwind v4 브리지. 시맨틱 토큰을 유틸리티(bg-page·rounded-md·shadow-card·animate-fade-up …)로 생성
+ * 유틸리티는 시맨틱 변수를 참조하므로 스코프별 오버라이드(다크 모드 등)가 자동으로 전파됨
  */
 
 /* ══════════════════════════════════════════════════════════
-   1. 원본 토큰 (핸드오프 verbatim) — CSS 변수 source of truth
+   1. 원본 토큰. CSS 변수가 기준값
    ══════════════════════════════════════════════════════════ */
 :root {
-  /* ── Base 팔레트: Gray (surfaces) ── (예시 리스킨: 따뜻한 뉴트럴로) */
+  /* ── Base 팔레트: Gray (surfaces). 따뜻한 뉴트럴 ── */
   --gray-0: #ffffff;
   --gray-1: #f7f9f2;
   --gray-2: #eef2e8;
   --gray-3: #dde3d6;
 
   /* ── Base 팔레트: Forest (primary) ──
-     ※ 토큰명 violet-N은 핸드오프 리네임 이력 잔재 — 실제 값은 예시 포레스트 그린.
-        레거시 호환을 위해 변수명은 유지하고 값만 브랜드 로고 팔레트로 매핑한다(Fable 선택안). */
+     토큰 이름은 violet-N 이지만 실제 값은 포레스트 그린
+     기존 참조 호환을 위해 변수명은 유지하고 값만 브랜드 로고 팔레트로 매핑함 */
   --violet-950: #183307;
   --violet-900: #264f09;
   --violet-800: #365f08;
@@ -33,7 +33,7 @@
   --violet-100: #eaf3d0;
   --violet-50: #f4f9e8;
 
-  /* ── Base 팔레트: Teal (accent/info) ── ※ mint-N은 리네임 잔재 — 실제 값은 예시 틸/블루. */
+  /* ── Base 팔레트: Teal (accent/info). 토큰 이름은 mint-N 이지만 실제 값은 틸/블루 ── */
   --mint-700: #006c8b;
   --mint-600: #007a9b;
   --mint-500: #008aaa;
@@ -76,7 +76,7 @@
   --border-brand: var(--violet-800);
   --border-accent: var(--mint-500);
 
-  /* ── 시맨틱: status ── (성공=틸, 정보=블루, 오류=레드, 경고=오렌지로 상호 구분) */
+  /* ── 시맨틱: status. 성공=틸, 정보=블루, 오류=레드, 경고=오렌지로 서로 구분 ── */
   --status-success: #006c54;
   --status-success-soft: #e7f6f1;
   --status-success-on-dark: #54d6b1;
@@ -91,26 +91,26 @@
   --status-info-soft: #e7f5f9;
   --status-info-on-dark: #bbe2e9;
 
-  /* ── 인터랙션 ── 기본=다크 포레스트+흰 글자. 포커스만 블루(#006c8b) 더블 링. */
+  /* ── 인터랙션. 기본=다크 포레스트+흰 글자, 포커스만 블루(#006c8b) 더블 링 ── */
   --interactive-primary: var(--violet-800); /* #365f08 */
   --interactive-primary-hover: #264f09; /* forest-900 */
   --interactive-primary-active: #183307; /* forest-950 */
   --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #006c8b;
   --selection-bg: var(--violet-100); /* #eaf3d0 */
 
-  /* ── motion: duration · stagger ── (Tailwind 네임스페이스 없음 → raw 변수로 노출) */
+  /* ── motion: duration · stagger. Tailwind 네임스페이스가 없어 raw 변수로 노출 ── */
   --dur-fast: 160ms;
   --dur-base: 280ms;
   --dur-slow: 480ms;
   --dur-hero: 800ms;
   --stagger: 70ms;
 
-  /* ── blur (backdrop용 합성 필터) ── raw 유지: backdrop-filter: var(--blur-veil) 로 사용 */
+  /* ── blur (backdrop용 합성 필터). backdrop-filter: var(--blur-veil) 로 사용 ── */
   --blur-veil: saturate(1.4) blur(14px);
 
-  /* ── spacing · layout (핸드오프 tokens/spacing.css verbatim) ──
-     셸·화면·카드가 참조하는 컨테이너 폭/여백 — 누락 시 padding 선언 전체가 무효화되어
-     전 화면이 가장자리에 붙는다 (2026-07-17 보완). */
+  /* ── spacing · layout ──
+     셸·화면·카드가 참조하는 컨테이너 폭·여백
+     하나라도 빠지면 그 변수를 쓰는 padding 선언 전체가 무효가 되어 모든 화면이 가장자리에 붙음 */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -135,8 +135,8 @@
    2. Tailwind v4 브리지 — 유틸리티 생성
    ══════════════════════════════════════════════════════════ */
 
-/* radius · shadow · easing · animation: 핸드오프 이름이 이미 Tailwind 네임스페이스와 일치.
-   @theme 에 직접 두면 유틸리티 생성 + :root 변수로 방출(var(--radius-md) 등 사용 가능). */
+/* radius · shadow · easing · animation: 토큰 이름이 Tailwind 네임스페이스와 같음
+   @theme 에 직접 두면 유틸리티 생성과 함께 :root 변수로도 나옴(var(--radius-md) 등 사용 가능) */
 @theme {
   /* radius → rounded-* (기본 스케일 브랜드로 재정의 + xs/pill 추가) */
   --radius-xs: 8px;
@@ -177,9 +177,9 @@
   --animate-blob: ds-blob 12s var(--ease-in-out) infinite;
 }
 
-/* 색: 시맨틱 토큰을 컬러 유틸리티로.
-   @theme inline → 유틸리티가 시맨틱 var()를 직접 참조(오버라이드 전파). 팔레트(raw)는 유틸리티로 노출하지 않는다(시맨틱만 API).
-   flat --color-* 네임스페이스는 leaf 이름이 유일해야 하므로, 역할이 겹치던 이름은 아래처럼 정리했다. */
+/* 색: 시맨틱 토큰을 컬러 유틸리티로
+   @theme inline 이라 유틸리티가 시맨틱 var()를 직접 참조함(오버라이드 전파). 팔레트(raw)는 유틸리티로 노출하지 않음(시맨틱만 API)
+   flat --color-* 네임스페이스는 마지막 이름이 유일해야 하므로 역할이 겹치는 이름은 아래처럼 나눔 */
 @theme inline {
   /* 표면 (bg-*) */
   --color-page: var(--surface-page);
@@ -219,7 +219,7 @@
 }
 
 /* ══════════════════════════════════════════════════════════
-   3. 공유 keyframes (핸드오프 motion.css) — animate-* 유틸리티가 참조
+   3. 공유 keyframes. animate-* 유틸리티가 참조
    ══════════════════════════════════════════════════════════ */
 @keyframes ds-fade-up {
   from {
@@ -363,7 +363,7 @@
 }
 
 /* ══════════════════════════════════════════════════════════
-   4. 베이스 배선 — 색·motion 토큰을 페이지 표면에 적용 (범위 내 토큰만 사용)
+   4. 베이스 배선. 색·motion 토큰을 페이지 표면에 적용(범위 내 토큰만 사용)
    ══════════════════════════════════════════════════════════ */
 @layer base {
   body {
@@ -384,7 +384,7 @@
   }
 }
 
-/* prefers-reduced-motion — 접근성 (핸드오프 motion.css) */
+/* prefers-reduced-motion. 움직임 줄이기 설정을 따름 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -396,8 +396,8 @@
 }
 
 /* ══════════════════════════════════════════════════════════
-   3. 타이포·폰트 (v4.0 UI 이식) — 핸드오프 tokens/typography.css·fonts.css
-   폰트 등록은 next/font/local(app/layout.tsx)이 --font-pretendard/--font-nanum 변수로 주입.
+   5. 타이포·폰트
+   폰트 등록은 next/font/local(app/layout.tsx)이 --font-pretendard/--font-nanum 변수로 주입함
    ══════════════════════════════════════════════════════════ */
 :root {
   --font-display: var(--font-nanum), var(--font-pretendard), sans-serif;
@@ -443,14 +443,14 @@ h1, h2, h3, h4 {
 button { font-family: var(--font-body); }
 ::selection { background: var(--selection-bg); color: var(--ink-900); }
 
-/* 키보드 포커스 — 전 인터랙티브 컨트롤 공통 블루 링(#006c8b). 마우스 클릭엔 뜨지 않는다.
-   0-specificity(:where)라 컴포넌트가 자체 outline 을 주면 그쪽이 이긴다. */
+/* 키보드 포커스. 모든 인터랙티브 컨트롤 공통 블루 링(#006c8b). 마우스 클릭에는 뜨지 않음
+   :where 로 우선순위가 0이라 컴포넌트가 자체 outline 을 주면 그쪽이 이김 */
 :where(a, button, input, select, textarea, summary, [role="button"], [role="tab"], [role="switch"], [tabindex]):focus-visible {
   outline: 2px solid var(--mint-700);
   outline-offset: 2px;
 }
 
-/* 포커스 가능한 툴팁 트리거 — 블루 더블 링. */
+/* 포커스 가능한 툴팁 트리거. 블루 더블 링 */
 .ds-tooltip-focusable:focus-visible {
   outline: 2px solid var(--mint-700);
   outline-offset: 2px;
@@ -458,12 +458,12 @@ button { font-family: var(--font-body); }
   box-shadow: var(--focus-ring);
 }
 
-/* DS Switch — 시각적으로 숨긴 체크박스가 포커스되면 트랙에 블루 더블 링을 낸다. */
+/* DS Switch. 시각적으로 숨긴 체크박스가 포커스되면 트랙에 블루 더블 링을 표시 */
 .ds-switch-input:focus-visible + span {
   box-shadow: var(--focus-ring);
 }
 
-/* 콘솔 전용 유틸 — 스캐너 스캔라인 (핸드오프 index.html <style> 이식) */
+/* 콘솔 전용 유틸. 스캐너 스캔라인 애니메이션 */
 .npr-scanline {
   position: absolute;
   left: 14px;

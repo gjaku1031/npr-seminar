@@ -9,32 +9,86 @@ import type { AttendanceParty } from "../family-bookings/attendance.js";
 import { SheetOutboxService } from "../google-sheets/sheet-outbox.service.js";
 import { currentOrHistoricMathHomeroomTeacher } from "../student-sync/student-homeroom-policy.js";
 
+/**
+ * 입장 경로. QR 스캔 또는 연락처로 찾은 수동 입장
+ */
 type CheckInSource = "QR" | "MANUAL";
+
+/**
+ * 입장 판정 결과
+ *
+ * - CHECKED_IN: 입장 처리됨
+ * - PARTY_SELECTION_REQUIRED: 실제 입장 인원 미입력. 예약은 변경하지 않고 되물음
+ * - ALREADY_CHECKED_IN: 이미 입장함
+ * - CANCELLED: 취소된 예약
+ * - SESSION_MISMATCH: 스캐너가 선택한 회차와 예약 회차가 다름
+ * - EXPIRED_QR·REVOKED_QR·INVALID_QR: QR 만료·폐기·형식 오류 또는 없음
+ * - RESERVATION_NOT_FOUND: 수동 입장 예약 없음
+ * - NOT_AUTHORIZED: 권한 없음
+ */
 type CheckInResult = "CHECKED_IN" | "PARTY_SELECTION_REQUIRED" | "ALREADY_CHECKED_IN" | "CANCELLED"
   | "SESSION_MISMATCH" | "EXPIRED_QR" | "REVOKED_QR" | "INVALID_QR" | "RESERVATION_NOT_FOUND" | "NOT_AUTHORIZED";
 
 /**
- * 게이트에서 확정한 실제 입장 인원. 이 제품에 좌석 개념은 없다 — 세는 단위는 사람뿐이다.
- * 예약 인원(seat_count)보다 작을 수도, 클 수도 있다: 2명 예약에 한 분만 오기도 하고
- * 1명 예약에 가족이 더 붙어 오기도 한다. 사실을 그대로 적는다.
+ * 게이트에서 확정한 실제 입장 인원. 이 제품에는 좌석 개념이 없고 세는 단위는 사람뿐
+ *
+ * 예약 인원(seat_count)보다 작거나 클 수 있음. 2명 예약에 한 명만 오거나 1명 예약에 가족이 더 오기도 하므로 사실 그대로 기록
  */
 export type AttendedCount = number;
 
-/** 숫자패드 오타(1 대신 111)만 막는 상한. 정책이 아니라 방어다. DB 제약과 같은 값이어야 한다. */
+/**
+ * 입장 인원 상한. 숫자패드 오타(1 대신 111) 방지용이며 정책이 아님. DB 제약과 같은 값이어야 함
+ */
 export const MAX_ATTENDED_COUNT = 20;
 
+/**
+ * 입장 처리 시점의 스캐너 정보
+ */
 interface ScannerContext {
+  /**
+   * 기기 ID
+   */
   readonly id: bigint;
+
+  /**
+   * 기기 공개 ID
+   */
   readonly publicId: string;
+
+  /**
+   * 기기 이름
+   */
   readonly name: string;
+
+  /**
+   * 설치 위치(입구 이름)
+   */
   readonly location: string | null;
+
+  /**
+   * 기기 캠퍼스
+   */
   readonly branchCode: string;
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 선택 회차 ID
+   */
   readonly sessionId: bigint;
+
+  /**
+   * 선택 회차 공개 ID
+   */
   readonly sessionPublicId: string;
 }
 
-/** 스캐너 이름·입구·게이트·캠퍼스의 사건 당시 값을 감사 메타데이터로 고정한다. */
+/**
+ * 입장 당시 스캐너 이름·입구·출입구·캠퍼스를 감사 메타데이터로 고정
+ */
 export function scannerCheckInMetadata(scanner: Pick<ScannerContext, "name" | "location" | "gateCode" | "branchCode">) {
   return {
     scannerDeviceName: scanner.name,
@@ -44,46 +98,173 @@ export function scannerCheckInMetadata(scanner: Pick<ScannerContext, "name" | "l
   } as const;
 }
 
-/** 스캐너 입장 결과. 업무 거절은 {@link CheckInsService}가 이 결과와 사건으로 기록한다. */
+/**
+ * 스캐너 입장 결과. 업무 거절도 이 결과와 이벤트로 기록
+ */
 export interface CheckInOutcome {
+  /**
+   * 입장 이벤트 ID
+   */
   readonly eventId: string;
+
+  /**
+   * 판정 결과
+   */
   readonly result: CheckInResult;
+
+  /**
+   * 같은 멱등 키 재요청으로 저장 결과를 재생했는지 여부
+   */
   readonly replayed: boolean;
+
+  /**
+   * 가족 예약 공개 ID. 예약을 찾지 못했으면 null
+   */
   readonly familyBookingId: string | null;
+
+  /**
+   * 예약 인원. 예약을 찾지 못했으면 null
+   */
   readonly familySeatCount: number | null;
-  /** 이 입장이 기록한 인원. CHECKED_IN·ALREADY_CHECKED_IN 에서만 값이 있다. */
+
+  /**
+   * 이 입장이 기록한 인원. CHECKED_IN·ALREADY_CHECKED_IN에서만 값이 있음
+   */
   readonly attendedCount: number | null;
+
+  /**
+   * 참석 보호자
+   */
   readonly attendanceParty: AttendanceParty | null;
+
+  /**
+   * 대표 학생 이름
+   */
   readonly representativeStudentName: string | null;
+
+  /**
+   * 스캐너 선택 회차 ID
+   */
   readonly seminarSessionId: string;
+
+  /**
+   * 스캐너 기기 ID
+   */
   readonly deviceId: string;
+
+  /**
+   * 스캐너 캠퍼스
+   */
   readonly branch: string;
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 입장 이벤트 시각
+   */
   readonly occurredAt: Date;
+
+  /**
+   * 대표 학생 스냅샷. 예약을 찾지 못했거나 활성 학생이 없으면 null
+   */
   readonly representativeStudent: {
+    /**
+     * 참여 유형
+     */
     readonly participantType: string;
+
+    /**
+     * 학번
+     */
     readonly sourceStudentNo: string;
+
+    /**
+     * 이름
+     */
     readonly studentName: string;
+
+    /**
+     * 예약 시점 캠퍼스
+     */
     readonly branch: string;
+
+    /**
+     * 반
+     */
     readonly className: string;
+
+    /**
+     * 학교
+     */
     readonly schoolName: string | null;
+
+    /**
+     * 학년
+     */
     readonly grade: string | null;
+
+    /**
+     * 단위
+     */
     readonly unitName: string | null;
   } | null;
 }
 
+/**
+ * 대표 학생 후보 스냅샷
+ */
 interface RepresentativeCandidate {
+  /**
+   * 참여 유형. 재원생·비재원생
+   */
   readonly participantType: string;
+
+  /**
+   * 원천 학번
+   */
   readonly sourceStudentNoSnapshot: string;
+
+  /**
+   * 학생 이름
+   */
   readonly studentNameSnapshot: string;
+
+  /**
+   * 예약 시점 캠퍼스
+   */
   readonly branchCodeAtBooking: string;
+
+  /**
+   * 반
+   */
   readonly classNameSnapshot: string;
+
+  /**
+   * 학교
+   */
   readonly schoolNameSnapshot: string | null;
+
+  /**
+   * 학년
+   */
   readonly gradeSnapshot: string | null;
+
+  /**
+   * 단위
+   */
   readonly unitNameSnapshot: string | null;
 }
 
-/** 현재 참가자 중 학년 내림차순, 캠퍼스·단위명·반·이름·원천 학생번호 오름차순으로 대표 한 명을 결정한다. 없으면 null이다. */
+/**
+ * 입장 화면에 표시할 대표 학생 1명 선택
+ *
+ * 학년 내림차순, 이후 캠퍼스·단위·반·이름·학번 오름차순
+ *
+ * @returns 대표 학생. 후보가 없으면 null
+ */
 export function selectCheckInRepresentativeStudent(students: readonly RepresentativeCandidate[]) {
   const representative = [...students].sort((left, right) => {
     const byGrade = checkInGradeRank(right.gradeSnapshot, right.unitNameSnapshot, right.schoolNameSnapshot)
@@ -111,6 +292,12 @@ export function selectCheckInRepresentativeStudent(students: readonly Representa
   };
 }
 
+/**
+ * 학년 정렬 순위
+ *
+ * 학년 문자열의 `초/중/고+숫자`를 우선, 없으면 `N학년`과 단위·학교 이름의 학교급으로 계산
+ * 초 100, 중 200, 고 300에 학년을 더함
+ */
 function checkInGradeRank(grade: string | null, unitName: string | null, schoolName: string | null): number {
   const normalizedGrade = grade?.normalize("NFKC").replaceAll(" ", "") ?? "";
   const explicit = normalizedGrade.match(/([초중고])([1-6])/u);
@@ -123,6 +310,9 @@ function checkInGradeRank(grade: string | null, unitName: string | null, schoolN
   return year;
 }
 
+/**
+ * 단위 이름의 학교급. 판정 불가면 null
+ */
 function checkInUnitSchoolLevel(unitName: string | null): "초" | "중" | "고" | null {
   const normalized = unitName?.normalize("NFKC").replaceAll(" ", "") ?? "";
   if (/^(?:고등|고[1-3]|예고|과고)/u.test(normalized)) return "고";
@@ -131,6 +321,9 @@ function checkInUnitSchoolLevel(unitName: string | null): "초" | "중" | "고" 
   return null;
 }
 
+/**
+ * 학교 이름 끝의 학교급. 판정 불가면 null
+ */
 function checkInSchoolNameLevel(schoolName: string | null): "초" | "중" | "고" | null {
   const normalized = schoolName?.normalize("NFKC").replaceAll(" ", "") ?? "";
   if (/(?:고등학교|고)$/u.test(normalized)) return "고";
@@ -139,25 +332,53 @@ function checkInSchoolNameLevel(schoolName: string | null): "초" | "중" | "고
   return null;
 }
 
+/**
+ * 학교급과 학년을 합친 순위
+ */
 function checkInSchoolLevelRank(level: string, year: number): number {
   const base = level === "고" ? 300 : level === "중" ? 200 : level === "초" ? 100 : 0;
   return base + year;
 }
 
+/**
+ * 캠퍼스 정렬 순위. A·B·C, 그 외 99
+ */
 function checkInBranchRank(branch: string): number {
   return ({ CAMPUS_A: 0, CAMPUS_B: 1, CAMPUS_C: 2 } as Record<string, number>)[branch] ?? 99;
 }
 
-/** 스캐너 컨텍스트, 입장 판정, 감사 사건과 시트 outbox를 한 입장 트랜잭션으로 묶는다. */
+/**
+ * 스캐너 입장 처리
+ *
+ * 스캐너 컨텍스트 확인, 입장 판정, 입장 이벤트와 시트 반영 대기열을 하나의 입장 트랜잭션으로 묶음
+ */
 @Injectable()
 export class CheckInsService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * QR·멱등 키 다이제스트
+     */
     private readonly crypto: BookingCryptoService,
+
+    /**
+     * 시트 반영 대기열
+     */
     private readonly sheetOutbox: SheetOutboxService,
   ) {}
 
-  /** 스캐너 캠퍼스에 맞는 OPEN 회차와 기기가 현재 잠근 회차를 반환한다. */
+  /**
+   * 스캐너 캠퍼스에 맞는 OPEN 회차와 기기가 현재 선택한 회차
+   *
+   * @throws {DomainError} 403 스캐너 아님, 401 기기 취소
+   */
   public async listEligibleSessions(actor: AuthenticatedActor) {
     const device = await this.device(actor);
     const sessions = await this.prisma.seminarSession.findMany({
@@ -186,7 +407,13 @@ export class CheckInsService {
     };
   }
 
-  /** 잠긴 회차의 예약 중 연락처 뒤 네 자리가 일치하는 최대 20건을 반환한다. 잘못된 네 자리는 400이다. */
+  /**
+   * 수동 입장 후보
+   *
+   * 선택 회차의 예약·입장 상태 예약 중 연락처 끝 4자리가 같은 최대 20건. 연락처는 마스킹
+   *
+   * @throws {DomainError} 400 4자리 숫자 아님, 409 회차 미선택
+   */
   public async manualCandidates(actor: AuthenticatedActor, phoneLast4: string) {
     if (!/^\d{4}$/.test(phoneLast4)) this.fail(400, "PHONE_LAST4_INVALID");
     const scanner = await this.context(actor);
@@ -223,7 +450,11 @@ export class CheckInsService {
     };
   }
 
-  /** QR 문자열을 검증·다이제스트화한 뒤 {@link CheckInsService.perform}의 감사 가능한 결과로 넘긴다. */
+  /**
+   * QR 입장
+   *
+   * 토큰 형식이 틀려도 HTTP 오류 대신 INVALID_QR 결과와 이벤트로 기록
+   */
   public async byQr(
     actor: AuthenticatedActor,
     qrToken: string,
@@ -236,7 +467,9 @@ export class CheckInsService {
     return this.perform(actor, "QR", this.crypto.digest(qrToken), null, idempotencyKey, attendedCount);
   }
 
-  /** 예약 ID로 같은 입장 판정을 수행한다. 실제 인원 생략도 결과 사건으로 남긴다. */
+  /**
+   * 예약 ID로 수동 입장. 실제 인원 생략도 결과 이벤트로 남김
+   */
   public byManual(
     actor: AuthenticatedActor,
     familyBookingId: string,
@@ -246,7 +479,13 @@ export class CheckInsService {
     return this.perform(actor, "MANUAL", null, familyBookingId, idempotencyKey, attendedCount);
   }
 
-  /** 관리자가 입장 사건을 sequence 오름차순으로 조회한다. 다음 커서가 없으면 더 볼 사건이 없다. */
+  /**
+   * 관리자 입장 이벤트 순번 오름차순 조회
+   *
+   * 스캐너 표시 정보는 입장 당시 메타데이터를 우선 사용
+   *
+   * @param filters limit은 1~200, 기본 50
+   */
   public async listEvents(filters: {
     familyBookingId?: string; sessionId?: string; deviceId?: string; result?: string;
     afterSequence?: string; limit?: number;
@@ -266,8 +505,8 @@ export class CheckInsService {
         actorSubject: true, safeMetadata: true, occurredAt: true,
         familyBooking: { select: {
           publicId: true,
-          // 실시간 로그가 "누가 들어왔는지"를 말할 수 있어야 한다. 대표 참가자 한 명의
-          // 스냅샷 이름이면 충분하다 — 형제가 있어도 로그 한 줄에는 한 이름이 낫다.
+          // 실시간 로그가 누가 들어왔는지 보여야 하므로 대표 참가자 한 명의 스냅샷 이름을 포함
+          // 형제가 있어도 로그 한 줄에는 이름 하나로 충분
           students: { where: { active: true }, orderBy: { id: "asc" }, take: 1, select: { studentNameSnapshot: true } },
         } },
         session: { select: { publicId: true } },
@@ -296,11 +535,16 @@ export class CheckInsService {
   }
 
   /**
-   * 멱등 키 잠금 뒤 스캐너, 회차 ID 오름차순, 예약, QR 자격 순으로 행을 잠근다.
-   * 입장 성공은 예약 변경·예약 사건·시트 outbox·입장 사건·멱등 응답을 함께 커밋한다.
-   * PARTY_SELECTION_REQUIRED 등 업무 실패는 예약을 바꾸지 않아도 입장 사건과 결과를 남긴다.
-   * 같은 키의 동일 요청은 저장된 결과에 replayed=true를 붙이고, 다른 요청은 HTTP 409다.
-   * @throws {DomainError} 멱등 키 오류, 기기 취소·회차 미선택, 키 재사용 충돌 시.
+   * 입장 판정과 기록
+   *
+   * 잠금 순서: 멱등 키 advisory lock → 스캐너 → 회차(ID 오름차순) → 예약 → QR 자격
+   * 입장 성공은 예약 변경·예약 이벤트·시트 반영 대기열·입장 이벤트·멱등 응답을 함께 커밋
+   * PARTY_SELECTION_REQUIRED 등 업무 실패는 예약을 바꾸지 않고 입장 이벤트와 결과만 남김
+   * 같은 키의 같은 요청은 저장 결과에 replayed=true를 붙여 반환, 다른 요청이면 409
+   * READ COMMITTED 격리, 제한 시간 10초
+   *
+   * @param forcedResult 사전 검사에서 정한 결과. 지정하면 판정을 건너뜀
+   * @throws {DomainError} 400 멱등 키 형식, 401 기기 취소, 409 회차 미선택·키 재사용
    */
   private async perform(
     actor: AuthenticatedActor,
@@ -320,8 +564,7 @@ export class CheckInsService {
         source,
         tokenDigest: tokenDigest?.toString("base64url") ?? null,
         familyBookingId,
-        // 인원이 다이제스트에 들어가야 한다. 같은 키로 인원만 바꿔 다시 부르면 그건 재시도가
-        // 아니라 다른 요청이므로, 조용히 리플레이하지 않고 키 재사용으로 거절해야 한다.
+        // 인원도 다이제스트에 포함. 같은 키로 인원만 바꾼 요청은 재시도가 아니라 다른 요청이므로 키 재사용으로 거부
         attendedCount: attendedCount ?? null,
         scannerSessionId: scanner.sessionPublicId,
         scannerDeviceId: scanner.publicId,
@@ -334,6 +577,7 @@ export class CheckInsService {
         return { ...(existing.responseBody as unknown as CheckInOutcome), replayed: true };
       }
 
+      // QR 다이제스트 또는 예약 ID로 대상 예약과 회차 위치 확인(잠금 전 조회)
       let booking: {
         id: bigint; public_id: string; session_id: bigint; status: string; seat_count: number;
         attendance_party: AttendanceParty; checked_in_at: Date | null; attended_count: number | null;
@@ -354,9 +598,9 @@ export class CheckInsService {
         if (match !== undefined) located = { bookingId: match.id, sessionId: match.session_id, credentialId: null };
       }
       if (located !== undefined) {
-        // 전체 잠금 순서: 스캐너 → 회차 → 예약 → QR 자격. 조회 당시 회차와 스캐너가 선택한
-        // 회차를 ID 순으로 함께 잠근 뒤 예약의 실제 회차를 다시 판정한다. 동시 예약 이동이
-        // 먼저 끝나더라도 다른 회차의 예약을 잘못 입장 처리하지 않기 위해서다.
+        // 전체 잠금 순서: 스캐너 → 회차 → 예약 → QR 자격
+        // 조회 당시 회차와 스캐너 선택 회차를 ID 순으로 함께 잠근 뒤 예약의 실제 회차를 다시 판정
+        // 동시에 예약 회차가 바뀌어도 다른 회차 예약을 잘못 입장 처리하지 않기 위함
         const sessionIds = [...new Set([located.sessionId, scanner.sessionId])]
           .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
         const lockedSessions = await transaction.$queryRaw<Array<{ id: bigint }>>`
@@ -371,6 +615,7 @@ export class CheckInsService {
               from family_bookings
              where id=${located.bookingId} for update`;
         booking = bookings[0];
+        // 잠근 뒤 QR 자격이 여전히 같은 예약·토큰인지 확인. 아니면 예약을 찾지 못한 것으로 처리
         if (booking !== undefined && located.credentialId !== null && tokenDigest !== null) {
           const credentials = await transaction.$queryRaw<Array<{ id: bigint; status: string; expires_at: Date }>>`
             select id,status,expires_at from qr_credentials
@@ -383,26 +628,18 @@ export class CheckInsService {
 
       let result = forcedResult ?? this.resultFor(source, scanner, booking, credential);
 
-      /**
-       * 실제 입장 인원 확정.
-       *
-       * **예약 인원과 무관하게 언제나 되묻는다.** 처음에는 1명 예약이면 물을 것이 없다고
-       * 보았는데 현장이 그렇지 않다: 1명으로 예약하고 두 분이 오거나 가족이 더 붙어 온다.
-       * 예약 인원을 실제 입장으로 단정하면 그만큼 조용히 틀린 숫자가 쌓인다.
-       *
-       * 인원을 받지 못했으면 예약 상태·입장 인원은 바꾸지 않고 결과 사건만 남겨
-       * 스캐너에 되묻는다. 잘못된 숫자를 예약에 남기지 않기 위해서다.
-       *
-       * 예약보다 많은 인원도 그대로 받는다 — 실제로 온 사람 수가 사실이고, 게이트가 사실을
-       * 적지 못하면 운영자는 숫자를 포기하거나 거짓으로 적게 된다. 상한은 DB 제약(1~20)이
-       * 숫자패드 오타만 막는다.
-       */
+      // 실제 입장 인원 확정
+      // 예약 인원과 무관하게 항상 되물음. 1명 예약에 두 명이 오거나 가족이 더 오는 경우가 있어,
+      // 예약 인원을 실제 입장으로 단정하면 틀린 숫자가 조용히 쌓임
+      // 인원을 받지 못하면 예약 상태·입장 인원은 바꾸지 않고 결과 이벤트만 남겨 스캐너에 되물음
+      // 예약보다 많은 인원도 그대로 받음. 실제로 온 사람 수가 사실이며, 상한은 DB 제약(1~20)이 오타만 막음
       let recordedCount: number | null = null;
       if (result === "CHECKED_IN" && booking !== undefined) {
         if (attendedCount === undefined) result = "PARTY_SELECTION_REQUIRED";
         else recordedCount = attendedCount;
       }
 
+      // 입장 확정: 예약 상태 변경, 예약 이벤트, 시트 반영 대기열 적재
       if (result === "CHECKED_IN" && booking !== undefined && recordedCount !== null) {
         const updated = await transaction.familyBooking.updateMany({
           where: { id: booking.id, status: "RESERVED", checkedInAt: null },
@@ -415,7 +652,7 @@ export class CheckInsService {
           },
         });
         if (updated.count !== 1) {
-          // 경합에서 밀렸다 — 이 호출은 아무것도 기록하지 않았다.
+          // 경합에서 밀림. 이 호출은 아무것도 기록하지 않음
           result = "ALREADY_CHECKED_IN";
           recordedCount = null;
         } else {
@@ -467,6 +704,7 @@ export class CheckInsService {
           });
         }
       }
+      // 판정 결과와 관계없이 입장 이벤트 기록
       const event = await transaction.checkInEvent.create({
         data: {
           familyBookingId: booking?.id ?? null,
@@ -474,8 +712,8 @@ export class CheckInsService {
           sessionId: scanner.sessionId,
           source,
           result,
-          // seatCount 는 **예약 인원**이다(기존 의미 유지). 실제 입장 인원은 별도로 남긴다 —
-          // 감사 로그에서 "2명 예약, 1명 입장"을 구분할 수 있어야 한다.
+          // seatCount는 예약 인원(기존 의미 유지). 실제 입장 인원은 메타데이터에 따로 남겨
+          // 감사 로그에서 2명 예약·1명 입장을 구분할 수 있게 함
           seatCount: booking?.seat_count ?? 0,
           scannerDeviceId: scanner.id,
           gateCode: scanner.gateCode,
@@ -493,7 +731,7 @@ export class CheckInsService {
         replayed: false,
         familyBookingId: booking?.public_id ?? null,
         familySeatCount: booking?.seat_count ?? null,
-        // 방금 기록한 인원, 아니면 이미 입장한 건의 기존 인원. 그 외에는 기록이 없으므로 null.
+        // 방금 기록한 인원, 또는 이미 입장한 예약의 기존 인원. 그 외에는 기록이 없어 null
         attendedCount: recordedCount ?? (result === "ALREADY_CHECKED_IN" ? booking?.attended_count ?? null : null),
         attendanceParty: booking?.attendance_party ?? null,
         representativeStudentName: representativeStudent?.studentName ?? null,
@@ -504,6 +742,7 @@ export class CheckInsService {
         occurredAt: event.occurredAt,
         representativeStudent,
       };
+      // 멱등 응답 24시간 보관
       await transaction.idempotencyRecord.create({
         data: {
           scope: "SCANNER_CHECK_IN", keyDigest: this.bytes(keyDigest), requestDigest: this.bytes(requestDigest),
@@ -516,7 +755,11 @@ export class CheckInsService {
     }, { isolationLevel: "ReadCommitted", timeout: 10_000, maxWait: 5_000 });
   }
 
-  /** 잠긴 예약·QR 자격의 현재 상태를 결과코드로 좁힌다. 업무 실패는 HTTP 예외가 아니다. */
+  /**
+   * 잠긴 예약·QR 자격의 현재 상태로 결과 판정. 업무 실패는 HTTP 오류가 아님
+   *
+   * 판정 순서: 예약 없음 → 회차 불일치 → 취소 → QR 폐기 → QR 만료 → 이미 입장 → 입장
+   */
   private resultFor(
     source: CheckInSource,
     scanner: ScannerContext,
@@ -532,7 +775,11 @@ export class CheckInsService {
     return "CHECKED_IN";
   }
 
-  /** 활성 학생 스냅샷에서 입장 사건에 보여 줄 대표 한 명을 반환한다. 없으면 null이다. */
+  /**
+   * 활성 학생 스냅샷 중 입장 결과에 표시할 대표 1명
+   *
+   * @returns 대표 학생. 없으면 null
+   */
   private async representativeStudent(transaction: Prisma.TransactionClient, familyBookingId: bigint) {
     const students = await transaction.familyBookingStudent.findMany({
       where: { familyBookingId, active: true },
@@ -550,7 +797,11 @@ export class CheckInsService {
     return selectCheckInRepresentativeStudent(students);
   }
 
-  /** 읽기 경로에서 활성 기기와 잠긴 회차를 확인한다. 회차가 없으면 HTTP 409다. */
+  /**
+   * 읽기 경로의 스캐너 컨텍스트
+   *
+   * @throws {DomainError} 403 스캐너 아님, 401 기기 취소, 409 회차 미선택
+   */
   private async context(actor: AuthenticatedActor): Promise<ScannerContext> {
     const device = await this.device(actor);
     if (device.selectedSession === null) this.fail(409, "SCANNER_SHIFT_REQUIRED");
@@ -566,7 +817,11 @@ export class CheckInsService {
     };
   }
 
-  /** 변경 경로의 첫 도메인 행 잠금. 취소 기기는 401, 회차 미선택은 409로 거절한다. */
+  /**
+   * 변경 경로의 스캐너 컨텍스트. 트랜잭션의 첫 도메인 행 잠금(기기 행 FOR UPDATE)
+   *
+   * @throws {DomainError} 403 스캐너 아님, 401 기기 취소, 409 회차 미선택
+   */
   private async contextForUpdate(transaction: Prisma.TransactionClient, actor: AuthenticatedActor): Promise<ScannerContext> {
     if (actor.role !== "SCANNER" || actor.scannerDeviceId === undefined) this.fail(403, "SCANNER_ROLE_REQUIRED");
     const rows = await transaction.$queryRaw<Array<{
@@ -594,7 +849,11 @@ export class CheckInsService {
     };
   }
 
-  /** 세션의 스캐너 ID로 활성 기기를 조회한다. 취소된 기기는 HTTP 401이다. */
+  /**
+   * 세션 스캐너 ID의 활성 기기 조회
+   *
+   * @throws {DomainError} 403 스캐너 아님, 401 기기 취소
+   */
   private async device(actor: AuthenticatedActor) {
     if (actor.role !== "SCANNER" || actor.scannerDeviceId === undefined) this.fail(403, "SCANNER_ROLE_REQUIRED");
     const device = await this.prisma.scannerDevice.findFirst({
@@ -609,30 +868,42 @@ export class CheckInsService {
     return device;
   }
 
-  /** 멱등 요청 다이제스트를 길이 확인 후 상수 시간 비교한다. */
+  /**
+   * 다이제스트 상수 시간 비교
+   */
   private equal(left: Uint8Array, right: Uint8Array): boolean {
     const a = Buffer.from(left); const b = Buffer.from(right);
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
-  /** Prisma 바이트 필드에 넘길 독립 Uint8Array 복사본을 만든다. */
+  /**
+   * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+   */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
     const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
   }
 
-  /** JSON 메타데이터 객체만 읽고 다른 값은 빈 객체로 취급한다. */
+  /**
+   * JSON 객체 메타데이터. 객체가 아니면 빈 객체
+   */
   private safeMetadata(value: Prisma.JsonValue): Readonly<Record<string, Prisma.JsonValue | undefined>> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value as Readonly<Record<string, Prisma.JsonValue | undefined>>;
   }
 
-  /** 스캐너 사건 메타데이터의 문자열 값을 읽고 없으면 null을 반환한다. */
+  /**
+   * 메타데이터 문자열 값. 없거나 빈 문자열이면 null
+   */
   private metadataText(metadata: Readonly<Record<string, Prisma.JsonValue | undefined>>, key: string): string | null {
     const value = metadata[key];
     return typeof value === "string" && value.length > 0 ? value : null;
   }
 
-  /** 요청 자체가 실패했음을 HTTP 도메인 오류로 알린다. 업무 결과코드와 구분한다. */
+  /**
+   * 요청 자체의 실패 발생. 업무 판정 결과 코드와 구분
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The check-in operation could not be completed.");
   }

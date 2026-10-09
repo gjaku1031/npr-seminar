@@ -1,4 +1,4 @@
-// features/manage-family-booking 공개 API (barrel).
+// features/manage-family-booking 공개 API (barrel)
 export { useBookableSessions } from "./model/useBookableSessions";
 export type { SessionOptionsState } from "./model/useBookableSessions";
 

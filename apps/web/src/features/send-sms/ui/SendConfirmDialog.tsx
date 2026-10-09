@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * 발송 확인 (요구: 버튼 한 번으로 발송 금지).
+ * 발송 확인 (요구: 버튼 한 번으로 발송 금지)
  *
- * 여기 뜨는 값은 **전부 서버 프리뷰**가 준 것이다 — 대상 수, 마스킹 표본, 수신자별로 치환된
- * 최종 본문(`samples[0]`), 바이트/타입(`maximum*`). 클라이언트 추정 바이트는 오르지 않는다.
- * 사용자가 "발송"을 누르기 전까지 아무 문자도 나가지 않으며, 취소는 조용히 닫는다.
+ * 여기 뜨는 값은 전부 서버 프리뷰가 준 것임 — 대상 수, 마스킹 표본, 수신자별로 치환된
+ * 최종 본문(`samples[0]`), 바이트/타입(`maximum*`). 클라이언트 추정 바이트는 오르지 않음
+ * 사용자가 "발송"을 누르기 전까지 아무 문자도 나가지 않으며, 취소는 조용히 닫음
  *
- * ConfirmDialog 가 role="alertdialog" · 포커스 트랩 · 기본 포커스=취소 · Esc 취소를 준다.
+ * ConfirmDialog 가 role="alertdialog" · 포커스 트랩 · 기본 포커스=취소 · Esc 취소를 줌
  */
 
 import { useState } from "react";
@@ -15,28 +15,54 @@ import { BRANCH_LABELS, primarySample, SMS_AUDIENCE_LABELS } from "@/shared/api"
 import type { SmsTargetPreview } from "@/shared/api";
 import { ConfirmDialog } from "@/shared/ui";
 
+/**
+ * 발송 확인 창 속성
+ */
 export interface SendConfirmDialogProps {
+  /**
+   * 열림 여부
+   */
   open: boolean;
+
+  /**
+   * 서버 미리보기 결과. 없으면 null
+   */
   preview: SmsTargetPreview | null;
+
+  /**
+   * 처리 중 여부
+   */
   busy: boolean;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
   /**
-   * 남은 실패가 **같은 내용 재시도로 풀릴 수 있는가** (결과 미상일 때만 true).
-   * 확정 실패는 흐름이 이 창을 닫으므로 여기 오지 않는다 — 반드시 실패할 재시도를 권하지 않는다.
+   * 남은 실패가 같은 내용 재시도로 풀릴 수 있는가 (결과 미상일 때만 true)
+   * 확정 실패는 흐름이 이 창을 닫으므로 여기 오지 않음 — 반드시 실패할 재시도를 권하지 않음
    */
   retryable: boolean;
-  /** 대상 수가 0 이거나 게이트웨이가 꺼져 있으면 확인 버튼 자체를 막는다. */
+  /**
+   * 대상 수가 0 이거나 게이트웨이가 꺼져 있으면 확인 버튼 자체를 막음
+   */
   sendDisabled: boolean;
-  /** @param scheduledAt 예약 발송 시각(ISO). 비우면 즉시 발송. */
+  /**
+   * @param scheduledAt 예약 발송 시각(ISO). 비우면 즉시 발송
+   */
   onConfirm: (scheduledAt?: string) => void;
+
+  /**
+   * 취소 처리
+   */
   onCancel: () => void;
 }
 
 /**
- * `datetime-local` 값(로컬 시각, 타임존 없음) → ISO 순간.
+ * `datetime-local` 값(로컬 시각, 타임존 없음) → ISO 순간
  *
- * 입력은 운영자가 보는 시계 그대로이고, 서버는 순간(timestamptz)을 받는다. `new Date(...)` 가
- * 브라우저 로컬 타임존으로 해석하므로 운영자가 친 시각이 곧 그 시각이다.
+ * 입력은 운영자가 보는 시계 그대로이고, 서버는 순간(timestamptz)을 받음. `new Date(...)` 가
+ * 브라우저 로컬 타임존으로 해석하므로 운영자가 친 시각이 곧 그 시각임
  */
 function toInstant(localValue: string): string | null {
   if (localValue.trim() === "") return null;
@@ -44,6 +70,9 @@ function toInstant(localValue: string): string | null {
   return Number.isNaN(at.getTime()) ? null : at.toISOString();
 }
 
+/**
+ * 항목 한 줄 스타일
+ */
 const rowStyle: React.CSSProperties = {
   display: "flex",
   gap: 10,
@@ -52,6 +81,9 @@ const rowStyle: React.CSSProperties = {
   fontSize: 13.5,
 };
 
+/**
+ * 키·항목 이름 스타일
+ */
 const keyStyle: React.CSSProperties = {
   width: 92,
   flexShrink: 0,
@@ -59,12 +91,18 @@ const keyStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
+/**
+ * 항목 값 스타일
+ */
 const valueStyle: React.CSSProperties = {
   color: "var(--text-strong)",
   fontWeight: 700,
   fontFeatureSettings: '"tnum"',
 };
 
+/**
+ * 본문 미리보기 스타일
+ */
 const bodyStyle: React.CSSProperties = {
   margin: 0,
   padding: "11px 13px",
@@ -79,6 +117,9 @@ const bodyStyle: React.CSSProperties = {
   wordBreak: "break-word",
 };
 
+/**
+ * 단체 문자 발송 확인 창. 서버 미리보기 값만 보여 줌
+ */
 export function SendConfirmDialog({
   open,
   preview,
@@ -89,14 +130,14 @@ export function SendConfirmDialog({
   onConfirm,
   onCancel,
 }: SendConfirmDialogProps) {
-  // 예약 발송 시각. 비어 있으면 즉시 발송이다 — 기본값을 채워 두면 운영자가 의도하지 않은
-  // 예약이 기본이 된다. 훅은 이른 return 보다 위에 있어야 한다(호출 순서 고정).
+  // 예약 발송 시각. 비어 있으면 즉시 발송임 — 기본값을 채워 두면 운영자가 의도하지 않은
+  // 예약이 기본이 됨. 훅은 이른 return 보다 위에 있어야 함(호출 순서 고정)
   const [scheduleInput, setScheduleInput] = useState("");
 
   if (!open || preview === null) return null;
 
   const empty = preview.recipientCount === 0;
-  // 수신자가 0 명이면 서버가 표본을 만들 수 없다 — 그때는 치환 전 원문만 있다.
+  // 수신자가 0 명이면 서버가 표본을 만들 수 없음 — 그때는 치환 전 원문만 있음
   const sample = primarySample(preview);
   const blocked = empty || sendDisabled;
   const scheduled = toInstant(scheduleInput);
@@ -127,8 +168,8 @@ export function SendConfirmDialog({
       </p>
 
       {/*
-        예약 발송 — 비워 두면 지금 나간다. 대상은 이미 프리뷰에서 얼렸으므로 시각을 나중에
-        정해도 수신자가 달라지지 않는다.
+        예약 발송 — 비워 두면 지금 나감. 대상은 이미 프리뷰에서 얼렸으므로 시각을 나중에
+        정해도 수신자가 달라지지 않음
       */}
       <label style={{ display: "block", marginTop: 14 }}>
         <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
@@ -180,7 +221,7 @@ export function SendConfirmDialog({
         <div style={rowStyle}>
           <span style={keyStyle}>메시지</span>
           <span style={valueStyle}>
-            {/* 수신자마다 길이가 달라 서버가 최댓값을 준다. 0 명이면 null 이라 숫자를 지어내지 않는다. */}
+            {/* 수신자마다 길이가 달라 서버가 최댓값을 줌. 0 명이면 null 이라 숫자를 지어내지 않음 */}
             {preview.maximumMessageBytes === null || preview.maximumMessageType === null ? (
               <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>수신자가 없어 계산되지 않았어요</span>
             ) : (

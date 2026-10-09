@@ -5,6 +5,9 @@ import { CheckInsController } from "./check-ins.controller.js";
 import { CheckInsService } from "./check-ins.service.js";
 import { GoogleSheetsOutboxModule } from "../google-sheets/google-sheets-outbox.module.js";
 
+/**
+ * 체크인 모듈
+ */
 @Module({
   imports: [AdminAuthModule, FamilyBookingsModule, GoogleSheetsOutboxModule],
   controllers: [CheckInsController],

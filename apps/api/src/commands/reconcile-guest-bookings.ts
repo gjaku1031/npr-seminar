@@ -8,14 +8,13 @@ import { PrismaModule } from "../common/prisma/prisma.module.js";
 import { GuestBookingReconcilerService } from "../modules/student-sync/guest-booking-reconciler.service.js";
 
 /**
- * 비재원 예약을 재원생 예약으로 잇는 작업만 한 번 돌린다.
+ * 비재원생 예약을 재원생 예약으로 연결하는 작업만 1회 실행하는 명령 모듈
  *
- * 왜 따로 두는가: 이 작업은 매일 학생 동기화 끝에 자동으로 돈다. 그런데 지금 당장
- * 반영하고 싶을 때 동기화를 통째로 부르면 **통통통 로그인이 따라온다**. 그 계정은 실패
- * 재시도가 0회라 한 번 어긋나면 동기화 전체가 멈추고 사람이 직접 로그인해 풀어야 한다.
+ * 이 작업은 학생 동기화 끝에 자동으로 실행됨. 즉시 반영하려고 동기화 전체를 실행하면 통통통 로그인이 함께 일어나고,
+ * 그 계정은 실패 재시도가 0회라 한 번 어긋나면 동기화 전체가 멈춰 사람이 직접 풀어야 함
+ * 이 명령은 통통통에 접속하지 않고 DB의 학생 원장과 예약만 대조하므로 급할 때 안전하게 실행 가능
  *
- * 이 명령은 통통통에 닿지 않는다 — 이미 DB 에 있는 학생 원장과 예약만 대조한다.
- * 그래서 급할 때 안전하게 부를 수 있다.
+ * 사용: node dist/commands/reconcile-guest-bookings.js. 결과 JSON 출력, 실패 시 종료 코드 1
  */
 @Module({
   imports: [
@@ -27,6 +26,9 @@ import { GuestBookingReconcilerService } from "../modules/student-sync/guest-boo
 })
 class ReconcileGuestBookingsModule {}
 
+/**
+ * 연결 작업 실행 후 결과 JSON 출력
+ */
 async function main(): Promise<void> {
   const context = await NestFactory.createApplicationContext(ReconcileGuestBookingsModule, { logger: false });
   try {
@@ -37,6 +39,7 @@ async function main(): Promise<void> {
   }
 }
 
+// 직접 실행할 때만 main 호출
 const entrypoint = process.argv[1];
 if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
   void main().catch((error: unknown) => {

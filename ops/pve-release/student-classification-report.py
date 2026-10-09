@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""PII-preserving local report helper; never performs network access."""
+# 실행: generate-ambiguous-class-report.sh 가 호출
+#   student-classification-report.py ROWS SUMMARY SOURCE SOURCE SOURCE  판정 불가 행 TSV 와 요약 JSON 작성
+#   student-classification-report.py --self-test                       분류 규칙 고정 사례 검사
+# 종료 코드: 0 성공, 1 인자 오류·검사 실패(SystemExit·AssertionError)
+"""통통통 스냅숏으로 대표 반 판정 불가 학생 보고서를 만드는 로컬 도우미. 네트워크에 접근하지 않고 개인정보를 밖으로 보내지 않음"""
 
 from __future__ import annotations
 
@@ -12,17 +16,24 @@ from pathlib import Path
 from typing import Any
 
 
+# 끝의 [요일·번호] 접미사 하나
 TERMINAL_SUFFIX = re.compile(r"^([^\[\]]+)\[([^\[\]]+)\]$")
+# 요일(중복 없는 1~3자) + 선택 번호
 WEEKDAY_SUFFIX = re.compile(r"^([월화수목금토일]{1,3})([1-9]\d?)?$")
+# E + 번호 접미사
 LATIN_SUFFIX = re.compile(r"^[Ee][1-9]\d?$")
+# 대표 반에서 빼는 특강·패키지류
 SPECIAL_CLASS = re.compile(r"특강|패키지|입시대비|TEST", re.IGNORECASE)
+# 과학 과목 이름
 SCIENCE_CLASS = re.compile(r"물리|화학|생명과학|생물|지구과학")
 
 
+# NFKC 정규화 후 앞뒤 공백 제거
 def normalize(value: object) -> str:
     return unicodedata.normalize("NFKC", str(value)).strip()
 
 
+# 허용된 시간표 접미사([요일·번호] 또는 [E번호])를 뗀 반 이름. 형식이 아니면 None
 def schedule_base(class_name: str) -> str | None:
     normalized = normalize(class_name)
     if "*" in normalized:
@@ -38,6 +49,7 @@ def schedule_base(class_name: str) -> str | None:
     return base_class.strip()
 
 
+# 대괄호가 없거나 허용된 접미사만 있는 반 이름인지. * 가 들어가면 제외
 def allowed_class_name(class_name: str) -> bool:
     class_name = normalize(class_name)
     if not class_name or "*" in class_name:
@@ -45,15 +57,18 @@ def allowed_class_name(class_name: str) -> bool:
     return not ("[" in class_name or "]" in class_name) or schedule_base(class_name) is not None
 
 
+# 재원생이고 허용된 반 이름인 수강 행인지
 def allowed(row: dict[str, Any]) -> bool:
     return normalize(row.get("enrollmentStatus", "")) == "재원생" and allowed_class_name(row.get("className", ""))
 
 
+# 접미사를 뗀 기준 반 이름
 def base_class(class_name: str) -> str:
     normalized = normalize(class_name)
     return schedule_base(normalized) or normalized
 
 
+# 대표 반 후보인지. 특강류와 접미사 붙은 기하 반은 제외
 def representative(class_name: str) -> bool:
     normalized = normalize(class_name)
     if not allowed_class_name(normalized):
@@ -62,19 +77,24 @@ def representative(class_name: str) -> bool:
     return SPECIAL_CLASS.search(base) is None and not (base == "기하" and base != normalized)
 
 
+# 과학 반인지. '과'로 시작하거나 과학 과목 이름 포함
 def science(class_name: str) -> bool:
     base = base_class(class_name)
     return base.startswith("과") or SCIENCE_CLASS.search(base) is not None
 
 
+# TSV 칸에 들어갈 수 있게 탭·줄바꿈을 공백으로
 def clean_tsv(value: object) -> str:
     return re.sub(r"[\t\r\n]", " ", str(value))
 
 
+# 중복 제거 후 정렬
 def unique_sorted(values: list[str]) -> list[str]:
     return sorted(set(values))
 
 
+# 학번별로 수강 행을 묶어 대표 반을 판정하고 판정 불가 행·요약 작성
+# 정규 반이 하나면 해결, 여럿이면 MULTIPLE_REGULAR_CLASSES, 정규 반 없이 과학 반만 있으면 과학으로 해결, 둘 다 없으면 NO_REGULAR_OR_SCIENCE_CLASS
 def build_report(source_files: list[Path], rows_path: Path, summary_path: Path) -> None:
     rows: list[dict[str, Any]] = []
     for source_file in source_files:
@@ -146,6 +166,7 @@ def build_report(source_files: list[Path], rows_path: Path, summary_path: Path) 
     }, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
+# 분류 규칙 고정 사례 검사
 def self_test() -> None:
     accepted = ["3T3A", "과1특A[토3]", "과고1가람[일4]", "고1수학[월수]", "고1수학[월수금1]", "고1영재[E3]", "고1영재[e3]", " 과학 ［토3］ "]
     rejected = ["[26특-과]과1A", "과학[연장]", "과학[월월]", "과학[일00]", "과학[일01]", "과학[Z99]", "과학*[토3]", "과학[토3][일4]"]
@@ -158,6 +179,7 @@ def self_test() -> None:
     assert not representative("기하[일1]")
 
 
+# 진입점
 def main() -> None:
     if sys.argv[1:] == ["--self-test"]:
         self_test()

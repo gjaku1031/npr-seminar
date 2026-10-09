@@ -2,19 +2,19 @@
 
 /**
  * 학생 현황 — 원천에서 동기화된 재원생 명부와 그 동기화 상태 (계약 tags: Admin students /
- * Admin student sync). 예약 명단(`/students`)과 겹치지 않는다: 여기는 "명부가 최신인가",
- * 저기는 "이 설명회에 누가 예약했나"다.
+ * Admin student sync). 예약 명단(`/students`)과 겹치지 않음: 여기는 "명부가 최신인가",
+ * 저기는 "이 설명회에 누가 예약했나"임
  *
- * 데이터 규율 — 이 화면이 말할 수 있는 것만 말한다:
- * - 이 화면은 재원(active) 명부다 — 목록 요청은 사용자 필터와 무관하게 늘 sourceActive:true 다.
- * - 요약 카드 4개는 서버가 센 분류 집계(summary)를 그대로 그린다. 재원생·수학 정규반·과학
- *   정규반 셋은 **분원(branch)+단위(unitGroup)+sourceActive:true** 범위라 **단위 탭을 바꾸면
- *   함께 바뀐다**. 확인 필요 하나만 **분원 범위만**이라 단위를 바꿔도 그대로다. 검색어(q)·담임·
- *   페이지 등 나머지 필터는 넷 다 의도적으로 무시한다(브라우징 중 헤더 안정). 반면 페이지 하단의
- *   "총 N명"(page.totalItems)과 items 는 그 모든 필터가 걸린 결과다. 클라이언트는 요약을 다시
- *   세거나 별도 요청을 더 쏘지 않고 서버 값을 그대로 그린다.
- * - 계약에 **다음 동기화 예정 시각이 없다**. 그래서 주기(6시간)만 말하고 시각은 짓지 않는다.
- * - 분원별 상태는 마지막 실행 기록 안에만 있다. 기록이 없으면 없다고 말한다.
+ * 데이터 규율 — 이 화면이 말할 수 있는 것만 말함:
+ * - 이 화면은 재원(active) 명부다 — 목록 요청은 사용자 필터와 무관하게 늘 sourceActive:true 임
+ * - 요약 카드 4개는 서버가 센 분류 집계(summary)를 그대로 그림. 재원생·수학 정규반·과학
+ *   정규반 셋은 분원(branch)+단위(unitGroup)+sourceActive:true 범위라 단위 탭을 바꾸면
+ *   함께 바뀜. 확인 필요 하나만 분원 범위만이라 단위를 바꿔도 그대로임. 검색어(q)·담임·
+ *   페이지 등 나머지 필터는 넷 다 의도적으로 무시함(브라우징 중 헤더 안정). 반면 페이지 하단의
+ *   "총 N명"(page.totalItems)과 items 는 그 모든 필터가 걸린 결과임. 클라이언트는 요약을 다시
+ *   세거나 별도 요청을 더 쏘지 않고 서버 값을 그대로 그림
+ * - 계약에 다음 동기화 예정 시각이 없음. 그래서 주기(6시간)만 말하고 시각은 짓지 않음
+ * - 분원별 상태는 마지막 실행 기록 안에만 있음. 기록이 없으면 없다고 말함
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -59,6 +59,9 @@ import {
   type SciencePopupPosition,
 } from "../lib/science-popup-position";
 
+/**
+ * 캠퍼스 탭
+ */
 const BRANCH_TABS: ReadonlyArray<{ value: Branch | "ALL"; label: string }> = [
   { value: "ALL", label: "전체" },
   { value: "CAMPUS_A", label: BRANCH_LABELS.CAMPUS_A },
@@ -67,8 +70,8 @@ const BRANCH_TABS: ReadonlyArray<{ value: Branch | "ALL"; label: string }> = [
 ];
 
 /**
- * 단위 그룹 칩 — 라벨은 화면 문구, 값은 계약 RosterUnitGroup 이다. `단위` 판정 규칙(특목 =
- * 특목·예중1·예고1 등)은 전적으로 서버에 있다. 명부에는 비재원생(GUEST) 칩이 없다.
+ * 단위 그룹 칩 — 라벨은 화면 문구, 값은 계약 RosterUnitGroup 임. `단위` 판정 규칙(특목 =
+ * 특목·예중1·예고1 등)은 전적으로 서버에 있음. 명부에는 비재원생(GUEST) 칩이 없음
  */
 const UNIT_GROUP_CHIPS: ReadonlyArray<{ value: RosterUnitGroup; label: string }> = [
   { value: "ALL", label: "전체" },
@@ -81,10 +84,19 @@ const UNIT_GROUP_CHIPS: ReadonlyArray<{ value: RosterUnitGroup; label: string }>
   { value: "SCIENCE", label: "과학" },
 ];
 
+/**
+ * 숫자를 천 단위 구분 문자열로
+ */
 const num = (value: number) => value.toLocaleString("ko-KR");
+
+/**
+ * ISO 시각을 짧은 날짜·시간으로
+ */
 const at = (iso: string) => fmtDateTimeShort(new Date(iso));
 
-/** 예약 회차 선택지 라벨 — 예약 명단과 같은 문구 규칙(설명회 · 날짜 · 캠퍼스 범위). */
+/**
+ * 예약 회차 선택지 라벨 — 예약 명단과 같은 문구 규칙(설명회 · 날짜 · 캠퍼스 범위)
+ */
 function sessionLabel(option: SeminarSessionOption): string {
   const { session, seminarTitle } = option;
   const scope = session.branch === null ? "전체" : BRANCH_LABELS[session.branch];
@@ -93,19 +105,31 @@ function sessionLabel(option: SeminarSessionOption): string {
 
 /**
  * 필터 Tag 전용 치수 — 공용 Tag 보다 촘촘하게 죄어 두 줄 필터가 각 줄 안에서 자연스럽게
- * 흐르게 한다. 이 화면 안에서만 쓰고 공용 Tag 는 건드리지 않는다.
+ * 흐르게 함. 이 화면 안에서만 쓰고 공용 Tag 는 건드리지 않음
  */
 const FILTER_TAG_STYLE = { height: 30, padding: "0 9px", fontSize: 12 } as const;
 
 /* 두 줄 필터의 열 맞춤 상수 — 1행 검색폭 = 2행 왼쪽 여백이라야 `캠퍼스`·`단위` 라벨이
-   같은 x 에서 시작하고, 라벨 폭이 같아야 그 뒤 버튼들도 같은 x 에서 시작한다. 라벨은
-   flexShrink:0 + 고정폭이라 아무리 좁아져도 잘리지 않는다(각 줄은 스스로 가로 스크롤한다). */
+   같은 x 에서 시작하고, 라벨 폭이 같아야 그 뒤 버튼들도 같은 x 에서 시작함. 라벨은
+   flexShrink:0 + 고정폭이라 아무리 좁아져도 잘리지 않음(각 줄은 스스로 가로 스크롤함)*/
+
+/**
+ * 검색 칸 너비(px)
+ */
 const FILTER_SEARCH_WIDTH = 280;
+
+/**
+ * 필터 라벨 너비(px)
+ */
 const FILTER_LABEL_WIDTH = 46;
+
+/**
+ * 필터 줄 간격(px)
+ */
 const FILTER_ROW_GAP = 12;
 
-/** 한 줄 필터 컨테이너 — nowrap + 가로 스크롤. 페이지가 아니라 이 줄만 스크롤한다.
-    세로 padding 은 선택 칩의 부드러운 글로우가 가로 스크롤 클리핑에 잘리지 않게 하는 여유다. */
+/** 한 줄 필터 컨테이너 — nowrap + 가로 스크롤. 페이지가 아니라 이 줄만 스크롤함
+    세로 padding 은 선택 칩의 부드러운 글로우가 가로 스크롤 클리핑에 잘리지 않게 하는 여유임*/
 const FILTER_ROW_STYLE = {
   display: "flex",
   alignItems: "center",
@@ -117,7 +141,9 @@ const FILTER_ROW_STYLE = {
   maxWidth: "100%",
 } as const;
 
-/** 필터 라벨(캠퍼스·단위) — 고정폭·비축소·줄바꿈 금지라 어떤 폭에서도 클리핑되지 않는다. */
+/**
+ * 필터 라벨(캠퍼스·단위) — 고정폭·비축소·줄바꿈 금지라 어떤 폭에서도 클리핑되지 않음
+ */
 const FILTER_LABEL_STYLE = {
   width: FILTER_LABEL_WIDTH,
   flexShrink: 0,
@@ -129,6 +155,9 @@ const FILTER_LABEL_STYLE = {
 
 /* ── 동기화 밴드 ────────────────────────────────────────────────────────── */
 
+/**
+ * 지점별 동기화 상태 칩
+ */
 function BranchSyncChip({ run }: { run: BranchSyncRun }) {
   const settled = isBranchSyncSettled(run.status);
   const failed = isBranchSyncFailed(run.status);
@@ -159,15 +188,22 @@ function BranchSyncChip({ run }: { run: BranchSyncRun }) {
   );
 }
 
+/**
+ * 동기화 상태·수동 실행 띠
+ */
 function SyncBand({
   sync,
   totalStudentCount,
   lastSuccessfulSyncAt,
 }: {
   sync: ReturnType<typeof useStudentSync>;
-  /** 재원생 수(요약 eligibleUniqueStudentCount, 분원+단위 범위) — 재원생 카드와 같은 값. 아직 못 읽었으면 null. */
+  /**
+   * 재원생 수(요약 eligibleUniqueStudentCount, 분원+단위 범위) — 재원생 카드와 같은 값. 아직 못 읽었으면 null
+   */
   totalStudentCount: number | null;
-  /** 마지막 **성공** 시각은 학생 목록 응답이 들고 온다 — 상태 응답에는 이 필드가 없다. */
+  /**
+   * 마지막 성공 시각은 학생 목록 응답이 들고 옴 — 상태 응답에는 이 필드가 없음
+   */
   lastSuccessfulSyncAt: string | null;
 }) {
   const { status } = sync;
@@ -205,13 +241,11 @@ function SyncBand({
 
   const circuitOpen = status.circuit.status === "OPEN";
   const latestRun = status.latestRun;
-  /**
-   * 회로가 CLOSED 인데도 실시간 원천 연동이 꺼져 시작할 수 없는 경우 — 회로 배너와
-   * 겹치지 않는 별개의 사유다. 훅이 판정한 `blockedReason` 을 그대로 노출한다
-   * (여기서 문구를 다시 짓지 않는다). 진행 중일 때는 사유를 띄우지 않는다.
-   */
+  // 회로가 CLOSED 인데도 실시간 원천 연동이 꺼져 시작할 수 없는 경우 — 회로 배너와
+  // 겹치지 않는 별개의 사유임. 훅이 판정한 `blockedReason` 을 그대로 노출함
+  // (여기서 문구를 다시 짓지 않음). 진행 중일 때는 사유를 띄우지 않음
   const showBlockedReason = !circuitOpen && !sync.runActive && sync.blockedReason !== null;
-  // 분원 실행은 CAMPUS_A→CAMPUS_B→CAMPUS_C 순차다. 서버가 준 sequence 로만 정렬한다.
+  // 분원 실행은 CAMPUS_A→CAMPUS_B→CAMPUS_C 순차임. 서버가 준 sequence 로만 정렬함
   const branches = latestRun === null ? [] : [...latestRun.branches].sort((a, b) => a.sequence - b.sequence);
 
   return (
@@ -267,7 +301,7 @@ function SyncBand({
         </BandField>
 
         <BandDivider />
-        {/* 계약에 다음 실행 예정 시각이 없다 — 주기만 말하고 시각은 짓지 않는다. */}
+        {/* 계약에 다음 실행 예정 시각이 없음 — 주기만 말하고 시각은 짓지 않음 */}
         <span style={{ fontSize: 13 }}>{status.scheduleIntervalHours}시간마다 자동 최신화</span>
 
         <span style={{ flex: 1, minWidth: 8 }} />
@@ -313,7 +347,7 @@ function SyncBand({
         </span>
       </div>
 
-      {/* 진행 · 거절 · 중지 사유는 상태 변화로만 말한다 (스크린리더에 즉시 전달) */}
+      {/* 진행 · 거절 · 중지 사유는 상태 변화로만 말함 (스크린리더에 즉시 전달) */}
       <div aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
         {sync.runActive && latestRun !== null ? `동기화 ${SYNC_RUN_STATUS_LABELS[latestRun.status]}` : ""}
         {sync.notice ?? ""}
@@ -353,6 +387,9 @@ function SyncBand({
   );
 }
 
+/**
+ * 띠 안의 라벨·값 한 칸
+ */
 function BandField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
@@ -362,16 +399,22 @@ function BandField({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
+/**
+ * 띠 칸 구분선
+ */
 function BandDivider() {
   return <span aria-hidden style={{ width: 1, height: 14, background: "rgba(255,255,255,0.28)" }} />;
 }
 
 /* ── 화면 ──────────────────────────────────────────────────────────────── */
 
+/**
+ * 학생 현황 화면. 재원 명부와 동기화 상태
+ */
 export function StudentStatusView() {
   const sync = useStudentSync();
-  // 예약 회차 선택지는 예약 명단과 같은 원천(설명회→회차)이다. 첫 회차를 fallback 으로 넘겨
-  // "예약 여부" 열이 늘 어떤 회차 기준인지 갖게 한다(URL 이 회차를 지목하면 그쪽이 이긴다).
+  // 예약 회차 선택지는 예약 명단과 같은 원천(설명회→회차)임. 첫 회차를 fallback 으로 넘겨
+  // "예약 여부" 열이 늘 어떤 회차 기준인지 갖게 함(URL 이 회차를 지목하면 그쪽이 이김)
   const sessions = useSeminarSessions();
   const fallbackSessionId = sessions.options[0]?.session.seminarSessionId;
   const students = useAdminStudents(fallbackSessionId);
@@ -380,16 +423,14 @@ export function StudentStatusView() {
   const { reload: reloadStudents } = students;
   const { settledToken } = sync;
 
-  // 동기화가 끝나면 명부가 바뀌었을 수 있다 — 그때 한 번만 다시 읽는다.
+  // 동기화가 끝나면 명부가 바뀌었을 수 있음 — 그때 한 번만 다시 읽음
   useEffect(() => {
     if (settledToken > 0) reloadStudents();
   }, [settledToken, reloadStudents]);
 
-  /**
-   * URL 이 바깥에서 바뀌면(뒤로가기·링크 진입) 입력창도 따라가야 한다. effect 로 맞추면
-   * 낡은 값이 한 프레임 그려지므로, 렌더 중에 바뀐 것을 감지해 곧바로 맞춘다
-   * (React 가 권장하는 "prop 이 바뀔 때 state 조정" 패턴이다).
-   */
+  // URL 이 바깥에서 바뀌면(뒤로가기·링크 진입) 입력창도 따라가야 함. effect 로 맞추면
+  // 낡은 값이 한 프레임 그려지므로, 렌더 중에 바뀐 것을 감지해 곧바로 맞춤
+  // (React 가 권장하는 "prop 이 바뀔 때 state 조정" 패턴임)
   const [syncedQuery, setSyncedQuery] = useState(students.filters.query);
   if (syncedQuery !== students.filters.query) {
     setSyncedQuery(students.filters.query);
@@ -398,14 +439,12 @@ export function StudentStatusView() {
 
   const page = students.page;
   const summary = page?.summary ?? null;
-  // 카드가 그릴 최종 4수 — 신규 계약 필드 우선, 없을 때만 각각 대응하는 레거시 필드로 폴백(더하지 않는다).
+  // 카드가 그릴 최종 4수 — 신규 계약 필드 우선, 없을 때만 각각 대응하는 레거시 필드로 폴백(더하지 않음)
   const summaryCounts = summary === null ? null : resolveStudentSummaryCounts(summary);
 
-  /**
-   * 담임 선택지는 서버 facet(page.facets.teachers)만으로 만든다 — teacherName 을 뺀 나머지
-   * 필터에 걸리는 전체 결과의 대표 담임 목록이라 페이지네이션과 무관하다. 현재 페이지 items 를
-   * 다시 훑지 않는다. 방어적 보존은 헬퍼가 맡는다(선택 담임이 facet 에 없을 때 한 번만 유지).
-   */
+  // 담임 선택지는 서버 facet(page.facets.teachers)만으로 만듦 — teacherName 을 뺀 나머지
+  // 필터에 걸리는 전체 결과의 대표 담임 목록이라 페이지네이션과 무관함. 현재 페이지 items 를
+  // 다시 훑지 않음. 방어적 보존은 헬퍼가 맡음(선택 담임이 facet 에 없을 때 한 번만 유지)
   const teacherOptions = useMemo(
     () => buildTeacherOptions(page?.facets.teachers ?? [], students.filters.teacherName),
     [page, students.filters.teacherName],
@@ -413,14 +452,12 @@ export function StudentStatusView() {
 
   const submitSearch = () => students.setFilters({ query: searchDraft });
 
-  // 캠퍼스가 선택되면 요약 라벨 앞에 캠퍼스명을 붙인다 — 전체(ALL)면 접두사 없이 그대로(순수 헬퍼).
+  // 캠퍼스가 선택되면 요약 라벨 앞에 캠퍼스명을 붙임 — 전체(ALL)면 접두사 없이 그대로(순수 헬퍼)
   const branch = students.filters.branch;
   const statLabel = (label: string) => campusScopedLabel(branch, label);
 
-  /**
-   * 확인 필요 상세는 팝오버를 처음 열 때만 부른다 — 카드 수는 요약값으로 이미 온전하므로
-   * 열어 보지 않으면 요청도 없다. 캠퍼스가 바뀌면 훅이 그 범위로 다시 읽는다.
-   */
+  // 확인 필요 상세는 팝오버를 처음 열 때만 부름 — 카드 수는 요약값으로 이미 온전하므로
+  // 열어 보지 않으면 요청도 없음. 캠퍼스가 바뀌면 훅이 그 범위로 다시 읽음
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const enableReview = useCallback(() => setReviewEnabled(true), []);
   const review = useReviewRequiredStudents(branch, reviewEnabled);
@@ -466,8 +503,8 @@ export function StudentStatusView() {
         lastSuccessfulSyncAt={page?.latestSuccessfulSyncAt ?? null}
       />
 
-      {/* 요약 4종 — 서버 집계를 그대로 그린다. 재원생·수학·과학은 캠퍼스+단위 범위(단위 탭에 반응),
-          확인 필요는 캠퍼스 범위만. 검색·담임·페이지는 넷 다 무시. 캠퍼스 선택 시 라벨에 캠퍼스명. */}
+      {/* 요약 4종 — 서버 집계를 그대로 그림. 재원생·수학·과학은 캠퍼스+단위 범위(단위 탭에 반응),
+          확인 필요는 캠퍼스 범위만. 검색·담임·페이지는 넷 다 무시. 캠퍼스 선택 시 라벨에 캠퍼스명*/}
       <div
         style={{
           display: "grid",
@@ -506,8 +543,8 @@ export function StudentStatusView() {
 /* ── 예약 회차 선택 ────────────────────────────────────────────────────────── */
 
 /**
- * 예약 회차 드랍다운 — 예약 명단과 같은 원천(설명회→회차)을 쓴다. 고른 회차는 목록 요청에
- * 실려 "예약 여부" 열의 기준이 된다(명단 범위는 그대로). 회차가 없거나 로딩 중이면 비활성.
+ * 예약 회차 드랍다운 — 예약 명단과 같은 원천(설명회→회차)을 씀. 고른 회차는 목록 요청에
+ * 실려 "예약 여부" 열의 기준이 됨(명단 범위는 그대로). 회차가 없거나 로딩 중이면 비활성
  */
 function SessionPicker({
   sessions,
@@ -550,9 +587,9 @@ function SessionPicker({
 /* ── 필터 (정확히 두 줄) ───────────────────────────────────────────────────── */
 
 /**
- * 두 줄 필터 — 각 줄은 nowrap + 가로 스크롤이라 좁아져도 줄을 늘리지 않고 스스로 스크롤한다.
+ * 두 줄 필터 — 각 줄은 nowrap + 가로 스크롤이라 좁아져도 줄을 늘리지 않고 스스로 스크롤함
  * 1행 검색폭과 2행 왼쪽 여백이 같고 두 라벨 폭이 같아, `캠퍼스`·`단위` 와 그 뒤 버튼들이
- * 각각 같은 x 에서 시작한다. 라벨은 고정폭·비축소·줄바꿈 금지라 어떤 폭에서도 잘리지 않는다.
+ * 각각 같은 x 에서 시작함. 라벨은 고정폭·비축소·줄바꿈 금지라 어떤 폭에서도 잘리지 않음
  */
 function FilterBar({
   filters,
@@ -631,16 +668,16 @@ function FilterBar({
 
         <span style={{ flex: 1, minWidth: 16 }} />
 
-        {/* 담임 선택지는 서버 facet 만으로 만든다 — 현재 페이지 items 를 다시 훑지 않는다. */}
+        {/* 담임 선택지는 서버 facet 만으로 만듦 — 현재 페이지 items 를 다시 훑지 않음 */}
         {/* 포털 모드 — 필터 카드(overflow:hidden)와 이 줄(overflowX:auto)이 절대배치 메뉴를
-            잘라 '담임 전체'를 눌러도 목록이 안 보이던 버그를 막는다. body 로 fixed 포털한다. */}
+            잘라 '담임 전체'를 눌러도 목록이 안 보이던 버그를 막음. body 로 fixed 포털함*/}
         <Select
           portal
           options={[{ value: "", label: "담임 전체" }, ...teacherOptions.map((teacher) => ({ value: teacher, label: teacher }))]}
           value={filters.teacherName}
           onChange={(teacherName) => onChange({ teacherName })}
-          // 넓어진 검색폭(280)으로 2행이 넓어져도 담임은 줄어들지 않는다 — 고정 최소폭 + 비축소.
-          // 잘림 대신 줄이 스스로 가로 스크롤하고(FILTER_ROW_STYLE), 메뉴는 portal 로 카드 밖에 뜬다.
+          // 넓어진 검색폭(280)으로 2행이 넓어져도 담임은 줄어들지 않음 — 고정 최소폭 + 비축소
+          // 잘림 대신 줄이 스스로 가로 스크롤하고(FILTER_ROW_STYLE), 메뉴는 portal 로 카드 밖에 뜸
           style={{ width: 132, minWidth: 132, flexShrink: 0 }}
         />
       </div>
@@ -650,15 +687,18 @@ function FilterBar({
 
 /* ── 확인 필요 팝오버 ──────────────────────────────────────────────────────── */
 
+/**
+ * 팝오버 안내 문구 스타일
+ */
 const POPOVER_NOTE_STYLE = { margin: 0, fontSize: 12.5, color: "var(--text-muted)", lineHeight: 1.6 } as const;
 
 /**
- * 확인 필요 카드 — 수는 요약값 그대로(캠퍼스 범위), 위에 접근 가능한 팝오버를 얹는다.
+ * 확인 필요 카드 — 수는 요약값 그대로(캠퍼스 범위), 위에 접근 가능한 팝오버를 얹음
  *
- * 포인터 hover·키보드 focus 로 열리고, 클릭/탭으로 고정(pin)한다. Escape·바깥 클릭으로 닫히되,
- * 포커스가 카드/팝오버 안에 남아 있으면 닫지 않는다 — 포커스 콘텐츠를 숨기지 않기 위해서다.
- * 투명 버튼을 카드 위에 겹쳐 키보드 포커스·클릭을 모두 받게 한다(StatCard 는 div 라 그대로는
- * 포커스를 못 받는다).
+ * 포인터 hover·키보드 focus 로 열리고, 클릭/탭으로 고정(pin)함. Escape·바깥 클릭으로 닫히되,
+ * 포커스가 카드/팝오버 안에 남아 있으면 닫지 않음 — 포커스 콘텐츠를 숨기지 않기 위해서임
+ * 투명 버튼을 카드 위에 겹쳐 키보드 포커스·클릭을 모두 받게 함(StatCard 는 div 라 그대로는
+ * 포커스를 못 받음)
  */
 function ReviewRequiredCard({
   label,
@@ -667,7 +707,9 @@ function ReviewRequiredCard({
   onOpen,
 }: {
   label: string;
-  /** 요약 reviewRequiredStudentCount(분원 범위) — 아직 못 읽었으면 null. 화면은 이 수를 다시 세지 않는다. */
+  /**
+   * 요약 reviewRequiredStudentCount(분원 범위) — 아직 못 읽었으면 null. 화면은 이 수를 다시 세지 않음
+   */
   count: number | null;
   review: ReviewRequiredState;
   onOpen: () => void;
@@ -681,7 +723,7 @@ function ReviewRequiredCard({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogId = useId();
 
-  // 고정된 동안 바깥 클릭이면 닫는다 (Select 와 같은 패턴).
+  // 고정된 동안 바깥 클릭이면 닫음 (Select 와 같은 패턴)
   useEffect(() => {
     if (!pinned) return;
     const onDown = (event: MouseEvent) => {
@@ -730,8 +772,8 @@ function ReviewRequiredCard({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? dialogId : undefined}
-        // 클릭/탭은 **고정**한다(닫기가 아니다) — 닫기는 Escape·바깥 클릭이다. 트리거가 계속
-        // 포커스를 쥔 채 토글하면 focus-within 때문에 닫히지 않으므로, 여기서는 열기만 맡는다.
+        // 클릭/탭은 고정함(닫기가 아님) — 닫기는 Escape·바깥 클릭임. 트리거가 계속
+        // 포커스를 쥔 채 토글하면 focus-within 때문에 닫히지 않으므로, 여기서는 열기만 맡음
         aria-label={`확인 필요 학생 ${ariaCount}상세 목록 보기`}
         onClick={() => {
           setPinned(true);
@@ -751,7 +793,7 @@ function ReviewRequiredCard({
       {open && (
         <>
           {/* 카드와 팝오버 사이 8px 틈을 잇는 투명 다리 — 포인터가 틈을 건너는 동안
-              컨테이너를 벗어나 mouseleave 가 팝오버를 먼저 닫아 버리는 것을 막는다. */}
+              컨테이너를 벗어나 mouseleave 가 팝오버를 먼저 닫아 버리는 것을 막음*/}
           <span
             aria-hidden
             style={{ position: "absolute", top: "100%", right: 0, height: 10, width: 380, maxWidth: "calc(100vw - 32px)" }}
@@ -763,14 +805,17 @@ function ReviewRequiredCard({
   );
 }
 
+/**
+ * 확인 필요 학생 팝오버
+ */
 function ReviewPopover({ id, review, count }: { id: string; review: ReviewRequiredState; count: number | null }) {
   return (
     <div
       id={id}
       role="dialog"
       aria-label="확인 필요 학생 상세"
-      // 키보드만 쓰는 사용자가 목록으로 들어와 스크롤할 수 있게 포커스 대상으로 둔다.
-      // 포커스가 여기 들어오면 상위 컨테이너의 focus-within 이 유지돼 팝오버가 닫히지 않는다.
+      // 키보드만 쓰는 사용자가 목록으로 들어와 스크롤할 수 있게 포커스 대상으로 둠
+      // 포커스가 여기 들어오면 상위 컨테이너의 focus-within 이 유지돼 팝오버가 닫히지 않음
       tabIndex={0}
       style={{
         position: "absolute",
@@ -797,6 +842,9 @@ function ReviewPopover({ id, review, count }: { id: string; review: ReviewRequir
   );
 }
 
+/**
+ * 확인 필요 학생 팝오버 내용
+ */
 function ReviewPopoverBody({ review, total }: { review: ReviewRequiredState; total: number }) {
   if (review.loading) {
     return <p style={POPOVER_NOTE_STYLE}>확인 필요 목록을 불러오는 중…</p>;
@@ -814,7 +862,7 @@ function ReviewPopoverBody({ review, total }: { review: ReviewRequiredState; tot
   }
 
   if (review.items.length === 0) {
-    // 상세가 비었는데 요약 수가 있으면 = 엔드포인트 미배포. 인원 수는 위 카드에 그대로 있다.
+    // 상세가 비었는데 요약 수가 있으면 = 엔드포인트 미배포. 인원 수는 위 카드에 그대로 있음
     return (
       <p style={POPOVER_NOTE_STYLE}>
         {total > 0
@@ -836,16 +884,18 @@ function ReviewPopoverBody({ review, total }: { review: ReviewRequiredState; tot
   );
 }
 
-/** 반명 목록 — 원천 접미사를 그대로 이어 붙인다(가공하지 않는다). 없으면 —. */
+/**
+ * 반명 목록 — 원천 접미사를 그대로 이어 붙임(가공하지 않음). 없으면 —.
+ */
 function joinClasses(names: string[]): string {
   return names.length > 0 ? names.join(", ") : "—";
 }
 
 /**
- * 확인 필요 한 명 — 사유(코드→고정 라벨)·캠퍼스·이름과 원천 반명·수학반·과학반 전부를 편다.
+ * 확인 필요 한 명 — 사유(코드→고정 라벨)·캠퍼스·이름과 원천 반명·수학반·과학반 전부를 폄
  * 사유는 여러 개일 수 있어 라벨을 모두 나열하고(각 span 의 title 에 원본 코드), 알 수 없는
- * 미래 코드는 reviewReasonLabel 이 안전 라벨로 떨어뜨린다 — 절대 undefined 를 보이지 않는다.
- * 과학반은 팝오버라 자리가 넉넉하므로 +N 로 접지 않고 전부 나열한다.
+ * 미래 코드는 reviewReasonLabel 이 안전 라벨로 떨어뜨림 — 절대 undefined 를 보이지 않음
+ * 과학반은 팝오버라 자리가 넉넉하므로 +N 로 접지 않고 전부 나열함
  */
 function ReviewRequiredItem({ student }: { student: ReviewRequiredStudent }) {
   return (
@@ -870,6 +920,9 @@ function ReviewRequiredItem({ student }: { student: ReviewRequiredStudent }) {
   );
 }
 
+/**
+ * 팝오버 항목 한 줄
+ */
 function ReviewField({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <>
@@ -881,9 +934,19 @@ function ReviewField({ term, children }: { term: string; children: React.ReactNo
 
 /* ── 표 ────────────────────────────────────────────────────────────────── */
 
+/**
+ * 학생 표 열 너비
+ */
 const GRID_COLS = "40px 88px 56px 1fr 0.9fr 0.9fr 1fr 52px 78px 116px 84px";
+
+/**
+ * 학생 표 머리글
+ */
 const HEADERS = ["No", "학번", "캠퍼스", "학생이름", "수학반", "과학반", "학교", "단위", "담임명", "학부모연락처", "예약 여부"];
 
+/**
+ * 학생 표 머리 행
+ */
 function HeadCell() {
   return (
     <div
@@ -910,6 +973,9 @@ function HeadCell() {
   );
 }
 
+/**
+ * 학생 표
+ */
 function StudentTable({ students }: { students: ReturnType<typeof useAdminStudents> }) {
   const { page, loading, refreshing, error, filtered } = students;
 
@@ -1003,6 +1069,9 @@ function StudentTable({ students }: { students: ReturnType<typeof useAdminStuden
   );
 }
 
+/**
+ * 학생 표 한 행
+ */
 function StudentRow({
   student,
   no,
@@ -1040,7 +1109,7 @@ function StudentRow({
       </span>
       <ScienceClasses names={student.scienceClassNames} />
       <span>{student.schoolName ?? <Muted />}</span>
-      {/* 단위는 raw 학년(student.grade)이 아니라 서버 unitName 을 그룹 라벨로 접어 찍는다. */}
+      {/* 단위는 raw 학년(student.grade)이 아니라 서버 unitName 을 그룹 라벨로 접어 찍음 */}
       <span>{rosterUnitGroupLabel(student.unitName)}</span>
       <span>{teacher ?? <Muted />}</span>
       <ParentContacts student={student} />
@@ -1050,8 +1119,8 @@ function StudentRow({
 }
 
 /**
- * 예약 여부 칸 — 선택 회차의 정식 hasReservation 을 예약/미예약 두 값으로 표시한다.
- * 레거시 값은 어댑터가 롤링 배포 fallback 으로만 읽는다.
+ * 예약 여부 칸 — 선택 회차의 정식 hasReservation 을 예약/미예약 두 값으로 표시함
+ * 레거시 값은 어댑터가 롤링 배포 fallback 으로만 읽음
  */
 function ReservationCell({ student }: { student: AdminStudentReservation }) {
   const label = studentReservationLabel(student);
@@ -1076,18 +1145,33 @@ function ReservationCell({ student }: { student: AdminStudentReservation }) {
   );
 }
 
+/**
+ * 값 없음 표시
+ */
 function Muted() {
   return <span style={{ color: "var(--text-faint)" }}>—</span>;
 }
 
-/* 과학반 팝오버 높이 추정 — 위/아래 뒤집기 판단과 최대 높이 계산용(정확할 필요는 없다). */
+/* 과학반 팝오버 높이 추정 — 위/아래 뒤집기 판단과 최대 높이 계산용(정확할 필요는 없음) */
+
+/**
+ * 과학 반 팝업 한 줄 높이(px)
+ */
 const SCIENCE_POPUP_LINE_H = 21;
+
+/**
+ * 과학 반 팝업 머리 높이(px)
+ */
 const SCIENCE_POPUP_HEADER_H = 22;
+
+/**
+ * 과학 반 팝업 위아래 여백(px)
+ */
 const SCIENCE_POPUP_PAD_Y = 22;
 
 /**
- * 과학반 칸 — 0개면 —, 1개면 그 이름, 2개 이상이면 `첫이름 +N`(N=나머지 수)으로 압축한다.
- * 2개 이상일 때는 ScienceClassesPopover 로 전체 목록을 연다.
+ * 과학반 칸 — 0개면 —, 1개면 그 이름, 2개 이상이면 `첫이름 +N`(N=나머지 수)으로 압축함
+ * 2개 이상일 때는 ScienceClassesPopover 로 전체 목록을 엶
  */
 function ScienceClasses({ names }: { names: string[] }) {
   if (names.length === 0) return <Muted />;
@@ -1098,16 +1182,16 @@ function ScienceClasses({ names }: { names: string[] }) {
 }
 
 /**
- * 과학반 `+N` 팝오버 — 전체 반명을 hover·키보드 focus·클릭(고정) 어디서든 읽을 수 있게 연다.
+ * 과학반 `+N` 팝오버 — 전체 반명을 hover·키보드 focus·클릭(고정) 어디서든 읽을 수 있게 엶
  *
  * 왜 포털 + fixed 인가: 표는 `overflow-x:auto`, 감싼 Card 는 `overflow:hidden` 이라, 행 안에
  * 절대배치로 얹으면 팝오버가 잘리거나(세로) 좁은 칸의 shrink-to-fit 에 눌려 한 글자 폭으로
- * 무너져 세로 글자 기둥이 됐다. body 로 포털해 fixed 로 띄우면 어떤 조상 overflow 도 자르지
- * 못하고, 폭은 트리거 칸과 무관한 고정 가독 폭이라 무너지지 않는다. 좌표·상하 뒤집기·화면
- * 가장자리 clamp 는 computeSciencePopupPosition 이 순수하게 계산한다(테스트 대상).
+ * 무너져 세로 글자 기둥이 됐음. body 로 포털해 fixed 로 띄우면 어떤 조상 overflow 도 자르지
+ * 못하고, 폭은 트리거 칸과 무관한 고정 가독 폭이라 무너지지 않음. 좌표·상하 뒤집기·화면
+ * 가장자리 clamp 는 computeSciencePopupPosition 이 순수하게 계산함(테스트 대상)
  *
  * 상호작용은 같은 화면의 ReviewRequiredCard 와 같은 규칙: hover·focus 로 열고 클릭/탭으로
- * 고정(pin)한다. 닫기는 Escape(트리거로 포커스 복귀)·바깥 클릭이다.
+ * 고정(pin)함. 닫기는 Escape(트리거로 포커스 복귀)·바깥 클릭임
  */
 function ScienceClassesPopover({ names }: { names: string[] }) {
   const [hovering, setHovering] = useState(false);
@@ -1124,9 +1208,9 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
   const rest = names.length - 1;
   const contentHeight = SCIENCE_POPUP_HEADER_H + names.length * SCIENCE_POPUP_LINE_H + SCIENCE_POPUP_PAD_Y;
 
-  // 트리거 rect 로 좌표를 낸다. 여는 순간(핸들러)에 한 번, 그리고 열려 있는 동안 스크롤·
-  // 리사이즈마다 다시 계산해 fixed 팝오버가 트리거를 따라가게 한다. 여는 시점 계산을
-  // 핸들러에서 하므로 effect 는 구독(리스너)만 맡는다 — effect 내 동기 setState 를 피한다.
+  // 트리거 rect 로 좌표를 냄. 여는 순간(핸들러)에 한 번, 그리고 열려 있는 동안 스크롤·
+  // 리사이즈마다 다시 계산해 fixed 팝오버가 트리거를 따라가게 함. 여는 시점 계산을
+  // 핸들러에서 하므로 effect 는 구독(리스너)만 맡음 — effect 내 동기 setState 를 피함
   const measure = useCallback(() => {
     const el = triggerRef.current;
     if (el === null) return;
@@ -1136,7 +1220,7 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
     );
   }, [contentHeight]);
 
-  // 열려 있는 동안만 스크롤·리사이즈를 구독한다(표 안쪽 스크롤까지 capture 로 잡는다).
+  // 열려 있는 동안만 스크롤·리사이즈를 구독함(표 안쪽 스크롤까지 capture 로 잡음)
   useEffect(() => {
     if (!open) return;
     window.addEventListener("resize", measure);
@@ -1147,7 +1231,7 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
     };
   }, [open, measure]);
 
-  // 고정된 동안 바깥(트리거·팝오버 밖) 클릭이면 닫는다 (ReviewRequiredCard 와 같은 패턴).
+  // 고정된 동안 바깥(트리거·팝오버 밖) 클릭이면 닫음 (ReviewRequiredCard 와 같은 패턴)
   useEffect(() => {
     if (!pinned) return;
     const onDown = (event: MouseEvent) => {
@@ -1176,7 +1260,7 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
         setFocusWithin(true);
       }}
       onBlur={(event) => {
-        // 팝오버는 body 로 포털돼 트리거의 DOM 자손이 아니다 — 트리거·팝오버 양쪽을 모두 본다.
+        // 팝오버는 body 로 포털돼 트리거의 DOM 자손이 아님 — 트리거·팝오버 양쪽을 모두 봄
         const next = event.relatedTarget as Node | null;
         if (containerRef.current?.contains(next) || popupRef.current?.contains(next)) return;
         setFocusWithin(false);
@@ -1198,10 +1282,10 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
         aria-expanded={open}
         aria-controls={showPopup ? dialogId : undefined}
         aria-describedby={showPopup ? dialogId : undefined}
-        // 접근성 폴백 — 스크린리더는 이 라벨로 전체 목록을 그대로 읽는다(시각 팝오버와 무관하게).
+        // 접근성 폴백 — 스크린리더는 이 라벨로 전체 목록을 그대로 읽음(시각 팝오버와 무관하게)
         aria-label={`과학반 ${names.length}개: ${names.join(", ")}`}
-        // 클릭/탭은 **고정**만 맡는다(닫기가 아니다) — 닫기는 Escape·바깥 클릭. 트리거가 계속
-        // 포커스를 쥔 채 토글하면 focus-within 때문에 어차피 닫히지 않는다(ReviewRequiredCard 와 동일).
+        // 클릭/탭은 고정만 맡음(닫기가 아님) — 닫기는 Escape·바깥 클릭. 트리거가 계속
+        // 포커스를 쥔 채 토글하면 focus-within 때문에 어차피 닫히지 않음(ReviewRequiredCard 와 동일)
         onClick={() => {
           measure();
           setPinned(true);
@@ -1260,7 +1344,7 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
             <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
               {names.map((name) => (
                 // keep-all 로 한글 반명이 음절 사이에서 쪼개지지 않고, anywhere 로 아주 긴 토큰만
-                // 마지막 수단으로 접어 팝오버 밖으로 넘치는 것을 막는다.
+                // 마지막 수단으로 접어 팝오버 밖으로 넘치는 것을 막음
                 <li key={name} style={{ fontSize: 12.5, lineHeight: 1.45, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
                   {name}
                 </li>
@@ -1274,8 +1358,8 @@ function ScienceClassesPopover({ names }: { names: string[] }) {
 }
 
 /**
- * 학부모연락처 칸 — 저장된 모/부 번호를 있는 대로 각각 한 줄씩 보여 준다.
- * 어느 쪽 번호인지 라벨이 없으면 두 줄이 그냥 숫자 더미가 된다.
+ * 학부모연락처 칸 — 저장된 모/부 번호를 있는 대로 각각 한 줄씩 보여 줌
+ * 어느 쪽 번호인지 라벨이 없으면 두 줄이 그냥 숫자 더미가 됨
  */
 function ParentContacts({ student }: { student: AdminStudent }) {
   const contacts = [
@@ -1299,13 +1383,18 @@ function ParentContacts({ student }: { student: AdminStudent }) {
   );
 }
 
-/** 페이지 번호 창 — 현재 페이지 주변 최대 5개. */
+/**
+ * 페이지 번호 창 — 현재 페이지 주변 최대 5개
+ */
 function pageWindow(current: number, total: number): number[] {
   const size = Math.min(5, total);
   const start = Math.max(1, Math.min(current - 2, total - size + 1));
   return Array.from({ length: size }, (_, index) => start + index);
 }
 
+/**
+ * 학생 목록 페이지 이동
+ */
 function Pagination({ students }: { students: ReturnType<typeof useAdminStudents> }) {
   const page = students.page;
   if (page === null || page.page.totalPages <= 0) return null;
@@ -1359,7 +1448,7 @@ function Pagination({ students }: { students: ReturnType<typeof useAdminStudents
         다음
       </Button>
 
-      {/* 필터가 걸린 결과 수다 — 위 카드의 전체 집계와 다른 수다. */}
+      {/* 필터가 걸린 결과 수임 — 위 카드의 전체 집계와 다른 수임 */}
       <span style={{ marginLeft: 8, fontSize: 12.5, color: "var(--text-muted)", fontFeatureSettings: '"tnum"' }}>
         총 {num(totalItems)}명
       </span>

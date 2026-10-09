@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * 예약 유형 선택 — 공개 루트(`/`)의 새 첫 화면 (STEP 1 · TYPE).
- * 선택된 시각안 1을 충실히 구현한다: 재원생 예약 / 비재원생 예약 카드 세로 스택 + 하단 예약 관리 링크.
+ * 예약 유형 선택 — 공개 루트(`/`)의 새 첫 화면 (STEP 1 · TYPE)
+ * 선택된 시각안 1을 충실히 구현함: 재원생 예약 / 비재원생 예약 카드 세로 스택 + 하단 예약 관리 링크
  *
- * 시각 언어·치수·토큰은 기존 캠퍼스 카드(ReserveFlow)와 FlowHeader 를 그대로 계승한다.
+ * 시각 언어·치수·토큰은 기존 캠퍼스 카드(ReserveFlow)와 FlowHeader 를 그대로 계승함
  *
- * ★ 비재원(guest) 카드 상태는 boolean 하나로 오류를 숨기지 않는다: loading·error·disabled·enabled 를
- *   정직하게 보여 준다. `disabled` 는 활성 가능한 공개 회차가 하나도 없을 때이고, 이때만 고정 문구
- *   `7/23(목)부터 예약 가능` 을 쓴다. loading·error 에서는 카드를 열지 않는다(실패 시 임의 활성화 금지).
+ * 비재원(guest) 카드 상태는 boolean 하나로 오류를 숨기지 않음: loading·error·disabled·enabled 를
+ *   정직하게 보여 줌. `disabled` 는 활성 가능한 공개 회차가 하나도 없을 때이고, 이때만 고정 문구
+ *   `7/23(목)부터 예약 가능` 을 씀. loading·error 에서는 카드를 열지 않음(실패 시 임의 활성화 금지)
  */
 
 import { ArrowRight, GraduationCap, UserPlus } from "lucide-react";
@@ -16,19 +16,48 @@ import { Badge, brandSeminarTitle, BRAND_NAME } from "@/shared/ui";
 import type { GuestEntryState } from "@/features/public-booking";
 import { FlowHeader, FlowToast } from "./MobileChrome";
 
-/** 활성 가능한 회차가 하나도 없을 때만 쓰는 운영 확정 문구(변경 금지). */
+/**
+ * 활성 가능한 회차가 하나도 없을 때만 쓰는 운영 확정 문구(변경 금지)
+ */
 const GUEST_DISABLED_BADGE = "7/23(목)부터 예약 가능";
 
+/**
+ * 예약 유형 선택 단계 속성
+ */
 export interface ReservationTypeStepProps {
+  /**
+   * 비재원생 진입 가능 상태
+   */
   guestState: GuestEntryState;
+
+  /**
+   * 재원생 예약 선택
+   */
   onSelectEnrolled: () => void;
+
+  /**
+   * 비재원생 예약 선택
+   */
   onSelectGuest: () => void;
+
+  /**
+   * 예약 관리로 이동
+   */
   onManage: () => void;
-  /** 공개 회차 목록을 다시 불러온다(로딩·오류 상태의 재시도 동선). */
+  /**
+   * 공개 회차 목록을 다시 불러옴(로딩·오류 상태의 재시도 동선)
+   */
   onRetry: () => void;
+
+  /**
+   * 짧은 안내 문구. 없으면 null
+   */
   toast: string | null;
 }
 
+/**
+ * 예약 유형 선택 첫 화면
+ */
 export function ReservationTypeStep({
   guestState,
   onSelectEnrolled,
@@ -61,7 +90,7 @@ export function ReservationTypeStep({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* 재원생 예약 — 항상 진입 가능(캠퍼스 화면이 로딩·오류를 처리한다) */}
+          {/* 재원생 예약 — 항상 진입 가능(캠퍼스 화면이 로딩·오류를 처리함) */}
           <button
             type="button"
             onClick={onSelectEnrolled}
@@ -107,7 +136,7 @@ export function ReservationTypeStep({
             <ArrowRight size={16} aria-hidden="true" style={{ color: "var(--violet-800)", flexShrink: 0 }} />
           </button>
 
-          {/* 비재원생 예약 — guestState 로 활성/비활성이 갈린다 */}
+          {/* 비재원생 예약 — guestState 로 활성/비활성이 갈림 */}
           <button
             type="button"
             disabled={!guestEnabled}
@@ -140,15 +169,15 @@ export function ReservationTypeStep({
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
-                // 아이콘 타일은 흐리지 않되 비활성 본문만 낮춘다
+                // 아이콘 타일은 흐리지 않되 비활성 본문만 낮춤
                 opacity: guestEnabled ? 1 : 0.9,
               }}
             >
               <UserPlus size={20} aria-hidden="true" />
             </span>
             {/*
-              부모 span 을 흐리지 않는다. 비활성 시 낮추는 것은 제목·설명뿐이고
-              배지는 형제 위치에서 opacity 1 을 유지한다(선택 원본 1안 규칙).
+              부모 span 을 흐리지 않음. 비활성 시 낮추는 것은 제목·설명뿐이고
+              배지는 형제 위치에서 opacity 1 을 유지함(선택 원본 1안 규칙)
             */}
             <span style={{ flex: 1 }}>
               <span style={{ display: "block", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--text-strong)", opacity: guestEnabled ? 1 : 0.6 }}>
@@ -157,13 +186,13 @@ export function ReservationTypeStep({
               <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, opacity: guestEnabled ? 1 : 0.6 }}>
                 자녀가 아직 {BRAND_NAME}에 다니지 않습니다
               </span>
-              {/* 상태 안내 — 배지(disabled) 또는 진행 문구(loading/error). 배지는 흐리지 않는다. */}
+              {/* 상태 안내 — 배지(disabled) 또는 진행 문구(loading/error). 배지는 흐리지 않음 */}
               {guestState === "disabled" && (
                 <span style={{ display: "inline-flex", marginTop: 8, opacity: 1 }}>
                   {/*
                     선택안 1 원본대로: 하늘색 fill 이 아니라 거의 흰색/투명 배경 + 얇은 회색 outline +
                     중립 회색 텍스트. Badge 공용 tone 은 건드리지 않고 이 사용처에서만 neutral 위에
-                    배경·테두리·글자색을 override 한다.
+                    배경·테두리·글자색을 override 함
                   */}
                   <Badge
                     tone="neutral"

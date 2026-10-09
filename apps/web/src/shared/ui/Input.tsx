@@ -1,9 +1,12 @@
 "use client";
 
-/** DS Input — 핸드오프 components/forms/Input.jsx 이식. */
+// 디자인 시스템 입력 필드
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 
+/**
+ * 라벨·아이콘·힌트·오류 문구가 있는 입력 필드
+ */
 export function Input({
   label,
   placeholder,
@@ -17,16 +20,59 @@ export function Input({
   size = "md",
   style,
 }: {
+  /**
+   * 라벨
+   */
   label?: ReactNode;
+
+  /**
+   * 자리 표시 문구
+   */
   placeholder?: string;
+
+  /**
+   * 값
+   */
   value?: string;
+
+  /**
+   * 값 변경 처리
+   */
   onChange?: (value: string) => void;
+
+  /**
+   * input type. 기본 text
+   */
   type?: string;
+
+  /**
+   * 도움말. 오류가 없을 때 표시
+   */
   hint?: ReactNode;
+
+  /**
+   * 오류 문구. 테두리·라벨이 오류 색으로 바뀜
+   */
   error?: ReactNode;
+
+  /**
+   * 앞쪽 아이콘
+   */
   icon?: ReactNode;
+
+  /**
+   * 비활성 여부
+   */
   disabled?: boolean;
+
+  /**
+   * 크기. md 46px, lg 54px 높이
+   */
   size?: "md" | "lg";
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }) {
   const [focus, setFocus] = useState(false);

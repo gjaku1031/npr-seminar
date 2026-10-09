@@ -1,5 +1,5 @@
 /**
- * 연락처 정규화·검증 순수 테스트 (node:test + tsx). 루트 조회·개인 링크 교환·OTP 가 공유하는 규칙.
+ * 연락처 정규화·검증 순수 테스트 (node:test + tsx). 루트 조회·개인 링크 교환·OTP 가 공유하는 규칙
  *
  * 실행: node --import tsx --test src/features/public-booking/model/contact.test.ts
  */
@@ -68,9 +68,9 @@ describe("formatContactInput — 표시용 하이픈 표기(숫자만 입력)", 
   });
 
   it("지우면(숫자 삭제) 남은 숫자에 맞춰 다시 표기한다", () => {
-    // 끝 한 글자 삭제 → 마지막 그룹이 줄어든다.
+    // 끝 한 글자 삭제 → 마지막 그룹이 줄어듦
     assert.equal(formatContactInput("010-7769-762"), "010-7769-762");
-    // 그룹 경계를 넘어 지우면 하이픈도 사라진다.
+    // 그룹 경계를 넘어 지우면 하이픈도 사라짐
     assert.equal(formatContactInput("010-7769"), "010-7769");
     assert.equal(formatContactInput("010-776"), "010-776");
     assert.equal(formatContactInput(""), "");
@@ -97,7 +97,7 @@ describe("formatContactInput — 표시용 하이픈 표기(숫자만 입력)", 
   it("계약 15자리를 넘으면 하이픈 없이 숫자만 돌려준다", () => {
     assert.equal(formatContactInput("1234567890123456"), "1234567890123456");
     assert.equal(formatContactInput("123-4567-8901-2345-6"), "1234567890123456");
-    // 15자리 이하는 여전히 표기한다.
+    // 15자리 이하는 여전히 표기함
     assert.equal(formatContactInput("123456789012345"), "123-4567-89012345");
   });
 

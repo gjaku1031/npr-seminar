@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
+# 개발 환경 전용 예약 초기화. 가족 예약과 그에 딸린 체크인·QR·이력·시트 발송·예약 문자·멱등 기록을 지움
+# 학생·설명회·회차·스캐너 기기·관리자 계정·시트 매핑 설정은 유지. 실행 전에 PostgreSQL 백업을 만듦
+# 실행: pve-release 에서 root 로 실행
+#   reset-development-bookings.sh preflight                       지울 대상 건수만 출력
+#   reset-development-bookings.sh execute '<확인 문구>' [--leave-services-stopped]
+#   --leave-services-stopped 는 web 까지 멈추고, 검증된 초기화 뒤에도 세 서비스를 멈춘 채 지연 배포에 넘김
+# 종료 코드: 0 성공, 1 사전 조건·확인 문구·백업·검증 실패 또는 서비스 복구 실패
 set -Eeuo pipefail
 
+# 허용 호스트·DB·배포 잠금·확인 문구·관리 대상 서비스
 readonly expected_host=pve-release
 readonly database_name=npr_seminar
 readonly deploy_lock=/run/lock/npr-seminar-deploy.lock
@@ -11,17 +19,20 @@ readonly -a writer_services=(
   npr-seminar-worker.service
 )
 
+# 인자와 진행 상태 표식
 mode=${1:-preflight}
 provided_confirmation=${2:-}
 leave_services_stopped=false
 reset_completed=false
 database_mutation_committed=false
 
+# 오류를 출력하고 종료 코드 1로 끝냄
 die() {
   printf '[npr-development-reset] ERROR: %s\n' "$*" >&2
   exit 1
 }
 
+# 사용법 출력
 usage() {
   cat <<'USAGE'
 Usage:
@@ -40,10 +51,12 @@ on reset failure, but deliberately remain stopped after a verified reset.
 USAGE
 }
 
+# 명령이 없으면 중단
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
 }
 
+# 실행 위치·필요 명령·백업 유닛 확인
 require_environment() {
   [[ ${EUID} -eq 0 ]] || die 'run as root'
   [[ $(hostname -s) == "${expected_host}" ]] || die "refusing to run outside ${expected_host}"
@@ -55,6 +68,7 @@ require_environment() {
     || die 'npr-postgres-backup.service is not installed'
 }
 
+# 초기화 대상 건수를 JSON 한 줄로 뽑는 SQL
 inventory_sql() {
   cat <<'SQL'
 select json_build_object(
@@ -87,11 +101,13 @@ select json_build_object(
 SQL
 }
 
+# 초기화 대상 건수 출력
 preflight() {
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
     "${database_name}" < <(inventory_sql)
 }
 
+# 초기화 뒤 대상 테이블·예약 문자·멱등 기록이 모두 비었는지 확인. ok 또는 failed
 post_verify() {
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
     "${database_name}" <<'SQL'
@@ -120,9 +136,14 @@ then 'ok' else 'failed' end;
 SQL
 }
 
+# 서비스별 초기 상태와 이번 실행이 관리하는 서비스 목록
 declare -A service_initial_state=()
 declare -a managed_services=()
 
+# 종료 시 서비스 상태 정리
+# - DB 변경이 커밋됐는데 검증 전이면 서비스를 멈춘 채 실패로 끝냄
+# - 지연 배포 넘김 모드에서 검증까지 끝났으면 멈춘 채 둠
+# - 그 밖에는 원래 실행 중이던 서비스만 다시 시작
 restore_services() {
   local result=$?
   trap - EXIT
@@ -164,6 +185,7 @@ restore_services() {
   exit "${result}"
 }
 
+# 쓰기 서비스(API·워커, 넘김 모드면 web 포함) 정지. 일시 상태면 중단
 stop_writers() {
   local service state
   managed_services=("${writer_services[@]}")
@@ -189,6 +211,7 @@ stop_writers() {
   return 0
 }
 
+# 초기화 전 백업 유닛 실행
 backup_database() {
   printf '[npr-development-reset] creating a recoverable pre-reset PostgreSQL backup\n'
   systemctl start npr-postgres-backup.service
@@ -196,6 +219,7 @@ backup_database() {
     || die 'pre-reset PostgreSQL backup failed'
 }
 
+# 쓰기 서비스 정지 → 백업 → 한 트랜잭션으로 초기화 → 결과 검증
 execute_reset() {
   stop_writers
   backup_database
@@ -322,6 +346,7 @@ SQL
   printf '[npr-development-reset] completed: %s\n' "${after}"
 }
 
+# 환경 확인 → 배포 잠금 → 모드·확인 문구 확인 → 실행
 main() {
   require_environment
   exec 9>"${deploy_lock}"

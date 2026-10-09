@@ -4,6 +4,9 @@ import { PosterController } from "./poster.controller.js";
 import { PosterMultipartCsrfGuard } from "./poster-multipart-csrf.guard.js";
 import { PosterService } from "./poster.service.js";
 
+/**
+ * 포스터 모듈
+ */
 @Module({
   imports: [AdminAuthModule],
   controllers: [PosterController],

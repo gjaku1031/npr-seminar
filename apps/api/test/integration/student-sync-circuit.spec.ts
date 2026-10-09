@@ -14,29 +14,82 @@ import { StudentSyncAdminService } from "../../src/modules/student-sync/student-
 import { StudentSyncOrchestratorService } from "../../src/modules/student-sync/student-sync-orchestrator.service.js";
 import { TongTongTongGateway, type TongBranchDescriptor, type TongBranchSnapshot, type TongSession } from "../../src/modules/student-sync/tongtontong.gateway.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 const bytes = (value: Uint8Array): Uint8Array<ArrayBuffer> => {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
 };
 
+/**
+ * 로그인·조회 실패와 응답 형태를 조절하는 통통통 게이트웨이 대역
+ */
 class FailingLoginGateway extends TongTongTongGateway {
+  /**
+   * 설정 준비 여부
+   */
   public ready = true;
+
+  /**
+   * 로그인 실패 여부
+   */
   public failLogin = true;
+
+  /**
+   * 지점 조회 실패 여부
+   */
   public failFetch = false;
+
+  /**
+   * 로그인을 지연시키는 대기 Promise
+   */
   public loginBarrier: Promise<void> | undefined;
+
+  /**
+   * 아버지 연락처 열 값. undefined면 열 없음
+   */
   public fatherPhone: string | undefined;
+
+  /**
+   * A 등록을 중복으로 만들지 여부
+   */
   public duplicateCampusAAssignment = false;
+
+  /**
+   * 로그인 호출 횟수
+   */
   public loginCalls = 0;
+
+  /**
+   * 지점 조회 호출 횟수
+   */
   public branchCalls = 0;
+
+  /**
+   * 설정 확인
+   */
   public assertReady(): void {
     if (!this.ready) throw new DomainError(503, "TONG_SYNC_DISABLED", "Live sync is disabled.");
   }
+
+  /**
+   * 로그인. 실패 설정이면 결과 불명 오류
+   */
   public async login(): Promise<TongSession> {
     this.loginCalls += 1;
     if (this.loginBarrier !== undefined) await this.loginBarrier;
     if (this.failLogin) throw new DomainError(502, "TONG_AUTH_RESULT_INDETERMINATE", "Indeterminate login result.");
     return { opaque: {} };
   }
+
+  /**
+   * 지점별 수강 등록 1건 반환
+   */
   public async fetchBranch(_session: TongSession, branch: TongBranchDescriptor): Promise<TongBranchSnapshot> {
     this.branchCalls += 1;
     if (this.failFetch) throw new DomainError(502, "TONG_BRANCH_RESULT_INDETERMINATE", "Indeterminate branch result.");
@@ -54,14 +107,30 @@ class FailingLoginGateway extends TongTongTongGateway {
   }
 }
 
+// 통통통 로그인 회로 통합 테스트. PostgreSQL 컨테이너 사용
 describe("durable TongTongTong authentication circuit", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // 게이트웨이 대역
   let gateway: FailingLoginGateway;
+
+  // 동기화 실행기
   let orchestrator: StudentSyncOrchestratorService;
+
+  // 동기화 관리 서비스
   let admin: StudentSyncAdminService;
+
+  // 연락처 보호
   let protector: PhoneProtector;
 
+  /**
+   * 실행이 종료 상태가 될 때까지 25밀리초 간격으로 최대 200회 조회
+   * @throws {Error} 종료 상태에 도달하지 않음
+   */
   async function terminalRun(runId: string) {
     for (let attempt = 0; attempt < 200; attempt += 1) {
       const run = await prisma.syncRun.findUniqueOrThrow({ where: { publicId: runId }, include: {
@@ -73,6 +142,7 @@ describe("durable TongTongTong authentication circuit", () => {
     throw new Error(`sync run ${runId} did not reach a terminal state`);
   }
 
+  // 컨테이너 기동, 마이그레이션, 지점·회로·lease와 서비스 구성
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_sync" })
@@ -104,8 +174,10 @@ describe("durable TongTongTong authentication circuit", () => {
     admin = new StudentSyncAdminService(prisma, idempotency, orchestrator);
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => { await prisma?.$disconnect(); await postgres?.stop(); });
 
+  // 연동 준비 여부는 원천 로그인 없이 보고
   it("reports local live-source readiness without making an upstream login call", async () => {
     gateway.ready = false;
     expect(await admin.status()).toMatchObject({ liveSourceReady: false });
@@ -115,6 +187,7 @@ describe("durable TongTongTong authentication circuit", () => {
     expect(gateway.loginCalls).toBe(0);
   });
 
+  // 1회 시도 후 회로를 열고 모든 지점을 취소하며 이후 실행은 외부 호출 없이 차단
   it("opens the circuit after exactly one attempt, cancels all branches, and blocks later runs without external calls", async () => {
     const runId = await orchestrator.runManual("operator requested sync", "admin:test", "sync-login-failure-1");
     const run = await terminalRun(runId);
@@ -129,6 +202,7 @@ describe("durable TongTongTong authentication circuit", () => {
     expect(await prisma.tongAuthCircuitAudit.count({ where: { eventType: "OPENED" } })).toBe(1);
   });
 
+  // 실패 실행을 멱등 재생하고 원천 확인 없이 회로 초기화
   it("idempotently replays the failed run and resets the circuit without probing upstream", async () => {
     const replayed = await orchestrator.runManual("operator requested sync", "admin:test", "sync-login-failure-1");
     expect(replayed).toBe((await prisma.syncRun.findFirstOrThrow({ orderBy: { startedAt: "asc" } })).publicId);
@@ -142,6 +216,7 @@ describe("durable TongTongTong authentication circuit", () => {
     expect(await prisma.tongAuthCircuitAudit.count({ where: { eventType: "RESET" } })).toBe(1);
   });
 
+  // 초기화 후 모든 지점을 순서대로 조회하고 검증된 스냅샷 하나를 전부 반영
   it("runs all branches sequentially and promotes one validated all-or-nothing snapshot after reset", async () => {
     gateway.failLogin = false;
     let releaseLogin!: () => void;
@@ -171,6 +246,7 @@ describe("durable TongTongTong authentication circuit", () => {
     expect(response.branches).toHaveLength(3);
   });
 
+  // 충돌 감사 이벤트를 건수와 함께 기록하고 충돌 스냅샷은 반영 대기로 표시하지 않음
   it("records a counted conflict audit event and never marks a conflicting snapshot ready to publish", async () => {
     gateway.duplicateCampusAAssignment = true;
     const runId = await orchestrator.runManual("duplicate assignment conflict", "admin:test", "sync-conflict-audit-1");
@@ -190,6 +266,7 @@ describe("durable TongTongTong authentication circuit", () => {
     expect(await prisma.syncConflict.count({ where: { syncRunId: run.id } })).toBe(1);
   });
 
+  // 아버지 연락처 열이 없으면 기존 값 유지, 빈 값이 관찰되면 지움
   it("preserves an existing father contact when the optional column is absent and clears it only when an empty value is observed", async () => {
     const protectedFather = protector.protect("01099998888");
     await prisma.student.update({ where: { sourceStudentNo: "student-1" }, data: {
@@ -213,6 +290,7 @@ describe("durable TongTongTong authentication circuit", () => {
     gateway.fatherPhone = undefined;
   });
 
+  // 로그인·조회 후 OPEN 기록이 롤백되면 lease를 유지하고 이후 로그인 시도는 0회
   it("retains the lease when OPEN persistence rolls back after login or fetch and permits zero later login attempts", async () => {
     const execution = orchestrator as unknown as { execute(publicRunId: string): Promise<void> };
     const branches = await prisma.branch.findMany({ orderBy: { code: "asc" } });
@@ -285,6 +363,7 @@ describe("durable TongTongTong authentication circuit", () => {
     gateway.failFetch = false;
   });
 
+  // 로그인 시도 표식 후 lease가 만료되면 결과 불명으로 보고 자동 재로그인하지 않음
   it("treats an expired lease after a durable login-attempt marker as indeterminate and never relogs automatically", async () => {
     const branches = await prisma.branch.findMany({ orderBy: { code: "asc" } });
     const abandoned = await prisma.syncRun.create({ data: {

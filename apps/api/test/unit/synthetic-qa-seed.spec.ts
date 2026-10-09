@@ -11,6 +11,11 @@ import {
   assertSyntheticQaSafety,
 } from "../../src/commands/synthetic-qa-safety.js";
 
+/**
+ * 안전 조건을 모두 만족하는 환경 변수
+ *
+ * @param confirmation 확인 문구. 기본 적재 문구
+ */
 const safeEnvironment = (confirmation = QA_SEED_CONFIRMATION): NodeJS.ProcessEnv => ({
   APP_ENV: "staging",
   DATABASE_URL: "postgresql://npr_migrator:secret@127.0.0.1:55432/npr_seminar_qa",
@@ -20,7 +25,9 @@ const safeEnvironment = (confirmation = QA_SEED_CONFIRMATION): NodeJS.ProcessEnv
   TONG_SYNC_ENABLED: "false",
 });
 
+// 합성 QA 안전 조건
 describe("synthetic QA safety", () => {
+  // 격리된 루프백 staging DB만 허용
   it("accepts only the isolated loopback staging database", () => {
     expect(assertSyntheticQaSafety(safeEnvironment(), "seed")).toMatchObject({
       databaseName: "npr_seminar_qa", action: "seed",
@@ -28,6 +35,7 @@ describe("synthetic QA safety", () => {
     expect(assertSyntheticQaSafety(safeEnvironment(QA_RESET_CONFIRMATION), "reset")).toMatchObject({ action: "reset" });
   });
 
+  // 운영 환경, 원격·기본 포트·다른 DB·다른 역할, 연동 활성, 확인 문구 오류는 거부
   it.each([
     ["production environment", { APP_ENV: "production" }],
     ["remote host", { DATABASE_URL: "postgresql://npr_migrator:secret@pve-release/npr_seminar_qa" }],
@@ -44,9 +52,12 @@ describe("synthetic QA safety", () => {
   });
 });
 
+// 합성 QA 고정 계획
 describe("synthetic QA fixed plan", () => {
+  // 생성한 계획
   const plan = buildSyntheticQaPlan();
 
+  // RFC 4122 v4 형식의 결정적 공개 ID
   it("creates deterministic RFC 4122 v4-shaped public identifiers", () => {
     const first = stableQaUuid("session", "POC");
     expect(first).toBe(stableQaUuid("session", "POC"));
@@ -54,6 +65,7 @@ describe("synthetic QA fixed plan", () => {
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
   });
 
+  // 운영 규모의 학생·수강 등록 수와 일치
   it("matches the production-shaped student and assignment counts", () => {
     expect(plan.students).toHaveLength(EXPECTED_QA_COUNTS.students);
     expect(plan.students.reduce((sum, student) => sum + student.assignments.length, 0)).toBe(EXPECTED_QA_COUNTS.assignments);
@@ -63,6 +75,7 @@ describe("synthetic QA fixed plan", () => {
     }
   });
 
+  // 대표 반 판정과 회귀 확인용 고정 사례 포함
   it("contains the exact representative classification and regression fixtures", () => {
     expect(plan.students.filter((student) => student.classResolutionStatus === "ONE_REGULAR")).toHaveLength(2_991);
     expect(plan.students.filter((student) => student.classResolutionStatus === "SCIENCE_ONLY")).toHaveLength(387);
@@ -72,6 +85,7 @@ describe("synthetic QA fixed plan", () => {
     expect(classes).toEqual(expect.arrayContaining(["5ZMA", "과고3생2[화2]", "과2내신[토10]", "기하[일1]", "수학특강"]));
   });
 
+  // POC·부하 예약을 만들고 외부 발송 대기열 계획은 없음
   it("builds the POC/load reservations without any external outbox plan", () => {
     expect(plan.seminars).toHaveLength(4);
     expect(plan.sessions).toHaveLength(6);

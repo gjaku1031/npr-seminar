@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * 문자 발송 (명세 §5, flows ADMIN-F3) — 와이어프레임 SmsScreen 레이아웃 유지, 데이터는 전부
- * same-origin Nest API (계약 tag: Admin SMS).
+ * 문자 발송 화면. 와이어프레임 레이아웃을 따르고 데이터는 전부
+ * same-origin Nest API (계약 tag: Admin SMS)
  *
- * 이전 구현과 달라진 핵심:
- * - 대상 수·바이트·타입은 **서버 프리뷰**가 정한다. 화면이 예약을 긁어 세지 않는다.
- * - 기본 버튼은 프리뷰만 부른다. 실제 발송은 확인 대화상자의 명시적 확인에서만 나간다.
- * - 로그는 실제 배송 상태다 — 성공률도 확정된 건만 센다.
- * - 연락처는 어떤 경로로도 평문으로 보이지 않는다 (서버가 마스킹해서만 준다).
+ * 원칙:
+ * - 대상 수·바이트·타입은 서버 프리뷰가 정함. 화면이 예약을 긁어 세지 않음
+ * - 기본 버튼은 프리뷰만 부름. 실제 발송은 확인 대화상자의 명시적 확인에서만 나감
+ * - 로그는 실제 배송 상태임 — 성공률도 확정된 건만 셈
+ * - 연락처는 어떤 경로로도 평문으로 보이지 않음 (서버가 마스킹해서만 줌)
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -41,8 +41,8 @@ import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 import { Badge, BRAND_SMS_TAG, BrandMark, brandSeminarTitle, Button, Card, Icons, Select, Tag, Toast } from "@/shared/ui";
 
 /**
- * 데스크톱 230 / 유동 / 300 은 스크린샷 그대로 두고, 좁아지면 계단식으로 접는다.
- * 어드민을 1280 보다 좁게 여는 경우가 있어 가로 스크롤이 생기면 안 된다 (minmax(0,…) 필수).
+ * 데스크톱 230 / 유동 / 300 은 스크린샷 그대로 두고, 좁아지면 계단식으로 접음
+ * 어드민을 1280 보다 좁게 여는 경우가 있어 가로 스크롤이 생기면 안 됨 (minmax(0,…) 필수)
  */
 const GRID_STYLES = `
   .npr-sms-grid {
@@ -69,21 +69,33 @@ const GRID_STYLES = `
   }
 `;
 
+/**
+ * 캠퍼스 코드별 화면 캠퍼스 값
+ */
 const BRANCH_CAMPUS: Record<Branch, Campus> = {
   CAMPUS_A: "A캠퍼스",
   CAMPUS_B: "B캠퍼스",
   CAMPUS_C: "C캠퍼스",
 };
 
+/**
+ * 캠퍼스 목록
+ */
 const BRANCHES: Branch[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
 
-/** 관리자 그룹 발송 용도만 실제로 발송된다 — 나머지 용도는 이 화면에서 편집만 한다. */
+/**
+ * 관리자 그룹 발송 용도만 실제로 발송됨 — 나머지 용도는 이 화면에서 편집만 함
+ */
 const GROUP_PURPOSE: SmsEditablePurpose = "ADMIN_GROUP";
 
-/** 발송 큐에 들어간 상태 — 로그에서 "성공/실패"로 세지 않는 중간 상태다. */
+/**
+ * 발송 큐에 들어간 상태 — 로그에서 "성공/실패"로 세지 않는 중간 상태임
+ */
 const PENDING_LABEL = "대기";
 
-/** 계약 SmsBatchStatus — 서버가 판정한 배치 상태를 그대로 옮긴다. */
+/**
+ * 계약 SmsBatchStatus — 서버가 판정한 배치 상태를 그대로 옮김
+ */
 const BATCH_STATUS_LABELS: Record<SmsBatchStatus, string> = {
   QUEUED: "대기 중",
   PROCESSING: "발송 중",
@@ -92,6 +104,9 @@ const BATCH_STATUS_LABELS: Record<SmsBatchStatus, string> = {
   FAILED: "실패",
 };
 
+/**
+ * 발송 배치 상태 배지 색조
+ */
 const BATCH_STATUS_TONE: Record<SmsBatchStatus, "info" | "warning" | "danger" | "success"> = {
   QUEUED: "info",
   PROCESSING: "info",
@@ -100,7 +115,9 @@ const BATCH_STATUS_TONE: Record<SmsBatchStatus, "info" | "warning" | "danger" | 
   FAILED: "danger",
 };
 
-/** 서버 정책으로 편집 선택을 구성하고, 그룹 용도에서만 발송 프리뷰를 연다. */
+/**
+ * 서버 정책으로 편집 선택을 구성하고, 그룹 용도에서만 발송 프리뷰를 엶
+ */
 export function SmsView() {
   const gateway = useSmsGateway();
   const sessions = useSeminarSessions();
@@ -109,17 +126,14 @@ export function SmsView() {
   const policyReady = policy !== null && !templatePolicy.loading && templatePolicy.error === null;
   const templates = useSmsTemplates(policy);
 
-  /**
-   * 편집 중인 초안. null 이면 "아직 아무것도 고치지 않았다"는 뜻이고, 그때 화면은 선택한 용도의 첫
-   * 템플릿을 그대로 보여 준다 — effect 로 첫 항목을 밀어 넣지 않고 파생시킨다.
-   *
-   * `purpose` 는 이 초안이 (저장되면) 갖게 될 용도다. 에디터의 용도 Select 로 바뀌며, 저장된
-   * 용도와 달라지면 dirty 가 된다.
-   */
+  // 편집 중인 초안. null 이면 "아직 아무것도 고치지 않았다"는 뜻이고, 그때 화면은 선택한 용도의 첫
+  // 템플릿을 그대로 보여 줌 — effect 로 첫 항목을 밀어 넣지 않고 파생시킴
+  // `purpose` 는 이 초안이 (저장되면) 갖게 될 용도임. 에디터의 용도 Select 로 바뀌며, 저장된
+  // 용도와 달라지면 dirty 가 됨
   const [draft, setDraft] = useState<
     { templateId: string | null; name: string; body: string; purpose: SmsEditablePurpose } | null
   >(null);
-  /** 사용자가 고른 필터. 처음에는 서버의 defaultPurpose를 따른다. */
+  // 사용자가 고른 필터. 처음에는 서버의 defaultPurpose를 따름
   const [purposeChoice, setPurposeChoice] = useState<SmsEditablePurpose | null>(null);
   const [sessionChoice, setSessionChoice] = useState<string | null>(null);
   const [audience, setAudience] = useState<SmsAudience>("BOOKED_FAMILIES");
@@ -128,7 +142,7 @@ export function SmsView() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
-  /** 성공 문구를 잠시 보여 주고, 연속 작업 시 이전 타이머를 취소한다. */
+  // 성공 문구를 잠시 보여 주고, 연속 작업 시 이전 타이머를 취소함
   const flash = (message: string) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -140,13 +154,13 @@ export function SmsView() {
     ? purposeChoice : policy?.defaultPurpose ?? null;
   const viewPolicy = purposeView === null ? null : policyForPurpose(policy, purposeView);
   const purposeOptions = policy?.purposes.map((entry) => ({ value: entry.purpose, label: entry.label })) ?? [];
-  // 편집 정책이 노출한 용도만 다룬다 — 자동 체크인 템플릿은 서버에 남아도 이 화면에서 제외한다.
+  // 편집 정책이 노출한 용도만 다룸 — 자동 체크인 템플릿은 서버에 남아도 이 화면에서 제외함
   const editableTemplates = templates.active.filter((template) =>
     policyForPurpose(policy, template.purpose as SmsEditablePurpose) !== null,
   );
-  // 왼쪽 목록에는 선택한 용도의 활성 템플릿만 보인다.
+  // 왼쪽 목록에는 선택한 용도의 활성 템플릿만 보임
   const viewTemplates = editableTemplates.filter((template) => template.purpose === purposeView);
-  // 첫 템플릿·첫 회차는 파생 기본값이다. 사용자가 한 번 고르면 그 선택이 목록보다 우선한다.
+  // 첫 템플릿·첫 회차는 파생 기본값임. 사용자가 한 번 고르면 그 선택이 목록보다 우선함
   const fallbackTemplate = viewTemplates[0] ?? null;
   const current = draft ?? {
     templateId: fallbackTemplate?.templateId ?? null,
@@ -159,39 +173,36 @@ export function SmsView() {
   const editorLocked = !policyReady || !draftPurposeValid;
 
   const sessionId = sessionChoice ?? sessions.options[0]?.session.seminarSessionId ?? "";
-  // 대상 탭에 붙일 실제 수신 인원 — 캠퍼스·회차가 바뀌면 다시 센다.
+  // 대상 탭에 붙일 실제 수신 인원 — 캠퍼스·회차가 바뀌면 다시 셈
   const audienceCounts = useSmsAudienceCounts(branch, sessionId === "" ? null : sessionId);
   const session = sessions.options.find((option) => option.session.seminarSessionId === sessionId);
   const campus = BRANCH_CAMPUS[branch];
   const campusInfo = CAMPUS_INFO[campus];
 
-  // 선택 대상은 전체 목록에서 찾는다 — 초안이 용도를 바꿔 두면 그 행은 아직 옛 용도 뷰에 남아 있다.
+  // 선택 대상은 전체 목록에서 찾음 — 초안이 용도를 바꿔 두면 그 행은 아직 옛 용도 뷰에 남아 있음
   const selected = editableTemplates.find((template) => template.templateId === templateId) ?? null;
   const dirty =
     selected !== null && (selected.body !== body || selected.name !== name || selected.purpose !== purpose);
-  /** 이 초안은 실제 그룹 발송 대상인가 — 그룹 용도가 아니면 프리뷰·발송을 만들지 않는다. */
+  // 이 초안은 실제 그룹 발송 대상인가 — 그룹 용도가 아니면 프리뷰·발송을 만들지 않음
   const isGroup = purpose === GROUP_PURPOSE;
-  /** 화면 변수 칩은 서버 정책에서 초안의 현재 용도가 허용한 목록이다. */
+  // 화면 변수 칩은 서버 정책에서 초안의 현재 용도가 허용한 목록임
   const variables = purpose === null ? [] : policyForPurpose(policy, purpose)?.variables ?? [];
 
-  /**
-   * 발송 요청 (계약 oneOf: templateId **또는** message — 둘 다 보내면 400).
-   *
-   * 저장된 템플릿을 그대로 쓰는 중이면 `templateId` 를 보낸다. 그래야 서버가 템플릿 이름·버전을
-   * 배치에 기록해 로그가 "직접 입력" 대신 실제 이름을 보여 주고, 템플릿의 제목(LMS)도 함께 나간다.
-   * 본문이나 이름을 고친 뒤에는 편집 중인 내용이 곧 발송 내용이므로 `message` 로 보낸다 —
-   * 저장하지 않은 수정이 조용히 빠지면 안 된다.
-   */
-  // 발송 요청은 값싼 동기 계산이라 메모이제이션이 필요 없다 — 매 렌더에서 바로 만든다.
+  // 발송 요청 (계약 oneOf: templateId 또는 message — 둘 다 보내면 400)
+  // 저장된 템플릿을 그대로 쓰는 중이면 `templateId` 를 보냄. 그래야 서버가 템플릿 이름·버전을
+  // 배치에 기록해 로그가 "직접 입력" 대신 실제 이름을 보여 주고, 템플릿의 제목(LMS)도 함께 나감
+  // 본문이나 이름을 고친 뒤에는 편집 중인 내용이 곧 발송 내용이므로 `message` 로 보냄 —
+  // 저장하지 않은 수정이 조용히 빠지면 안 됨
+  // 발송 요청은 값싼 동기 계산이라 메모이제이션이 필요 없음 — 매 렌더에서 바로 만듦
   const selectedTemplateId = selected?.templateId ?? null;
   const selectedIsGroup = selected !== null && selected.purpose === GROUP_PURPOSE;
-  // 그룹 발송 용도만 실제로 나간다. 자동 발송 용도(OTP·예약)는 여기서 편집만 하고
-  // templateId·message 어느 쪽으로도 발송 요청을 만들지 않는다. 초안이 용도를 그룹에서
-  // 다른 값으로 바꿔 둔 경우도 isGroup 이 false 라 여기서 걸린다.
+  // 그룹 발송 용도만 실제로 나감. 자동 발송 용도(OTP·예약)는 여기서 편집만 하고
+  // templateId·message 어느 쪽으로도 발송 요청을 만들지 않음. 초안이 용도를 그룹에서
+  // 다른 값으로 바꿔 둔 경우도 isGroup 이 false 라 여기서 걸림
   let request: SmsTargetRequest | null = null;
   if (policyReady && isGroup && sessionId !== "" && body.trim() !== "") {
     const target = { branch, seminarSessionId: sessionId, audience };
-    // 저장된 그룹 템플릿을 그대로 쓰는 중이면 templateId 를, 고쳤으면 편집 본문을 message 로.
+    // 저장된 그룹 템플릿을 그대로 쓰는 중이면 templateId 를, 고쳤으면 편집 본문을 message 로
     request =
       selectedTemplateId !== null && selectedIsGroup && !dirty
         ? { ...target, templateId: selectedTemplateId }
@@ -199,8 +210,8 @@ export function SmsView() {
   }
 
   const logs = useSmsLogs({ branch, seminarSessionId: sessionId === "" ? undefined : sessionId });
-  // 발송이 접수되면 로그를 다시 읽는다 — 화면이 지어낸 행이 아니라 서버가 준 행을 보여 준다.
-  // 성공 문구도 202 응답의 수치만 쓴다.
+  // 발송이 접수되면 로그를 다시 읽음 — 화면이 지어낸 행이 아니라 서버가 준 행을 보여 줌
+  // 성공 문구도 202 응답의 수치만 씀
   const flow = useSmsSendFlow(request, {
     onSent: (accepted) => {
       logs.reload();
@@ -208,12 +219,12 @@ export function SmsView() {
     },
   });
 
-  /** 본문 변경을 선택한 초안에 반영한다. 정책 조회 전에는 초안을 만들지 않는다. */
+  // 본문 변경을 선택한 초안에 반영함. 정책 조회 전에는 초안을 만들지 않음
   const setBody = (next: string) => {
     if (purpose !== null) setDraft({ ...current, purpose, body: next });
   };
 
-  /** 정책에 노출된 템플릿을 선택하고 서버 본문을 새 초안으로 연다. */
+  // 정책에 노출된 템플릿을 선택하고 서버 본문을 새 초안으로 엶
   const pickTemplate = (id: string) => {
     const template = editableTemplates.find((item) => item.templateId === id);
     if (template === undefined) return;
@@ -228,7 +239,7 @@ export function SmsView() {
     templates.clearMutationError();
   };
 
-  /** 용도 필터를 바꾸면 그 용도의 첫 템플릿을 파생 기본값으로 연다. */
+  // 용도 필터를 바꾸면 그 용도의 첫 템플릿을 파생 기본값으로 엶
   const changePurposeView = (next: SmsEditablePurpose) => {
     if (policyForPurpose(policy, next) === null) return;
     setPurposeChoice(next);
@@ -236,16 +247,16 @@ export function SmsView() {
     templates.clearMutationError();
   };
 
-  /** 편집 용도 변경을 저장 전 초안에만 반영한다. */
+  // 편집 용도 변경을 저장 전 초안에만 반영함
   const changeDraftPurpose = (next: SmsEditablePurpose) => {
     if (policyForPurpose(policy, next) === null) return;
     setDraft({ ...current, purpose: next });
   };
 
-  /** 변수 칩을 본문의 현재 커서 또는 선택 영역에 삽입한다. */
+  // 변수 칩을 본문의 현재 커서 또는 선택 영역에 삽입함
   const insertVariable = (variable: string) => {
     const textarea = bodyRef.current;
-    // 커서 위치에 넣는다 — 항상 끝에 붙이면 문장 중간에 변수를 넣을 수 없다.
+    // 커서 위치에 넣음 — 항상 끝에 붙이면 문장 중간에 변수를 넣을 수 없음
     if (textarea === null) {
       setBody(body + variable);
       return;
@@ -259,7 +270,7 @@ export function SmsView() {
     });
   };
 
-  /** 생성·재시도 응답의 실제 용도를 열어, 필터가 바뀌었어도 생성된 행을 선택한다. */
+  // 생성·재시도 응답의 실제 용도를 열어, 필터가 바뀌었어도 생성된 행을 선택함
   const showCreatedTemplate = (created: SmsTemplate) => {
     const createdPurpose = policyForPurpose(policy, created.purpose as SmsEditablePurpose)?.purpose;
     if (createdPurpose === undefined) return;
@@ -273,12 +284,12 @@ export function SmsView() {
     flash("새 템플릿을 만들었어요.");
   };
 
-  /** 서버 정책의 라벨·접두어로 현재 용도의 새 템플릿을 만든다. */
+  // 서버 정책의 라벨·접두어로 현재 용도의 새 템플릿을 만듦
   const doCreate = async () => {
     if (!policyReady || purposeView === null) return;
     const entry = policyForPurpose(policy, purposeView);
     if (entry === null) return;
-    // 지금 보고 있는 용도로 만든다. 본문 기본값은 변수가 없어 어떤 용도에서도 유효하다.
+    // 지금 보고 있는 용도로 만듦. 본문 기본값은 변수가 없어 어떤 용도에서도 유효함
     const created = await templates.create({
       name: `새 ${entry.label} 템플릿 ${viewTemplates.length + 1}`,
       body: `${BRAND_SMS_TAG} `,
@@ -287,41 +298,41 @@ export function SmsView() {
     if (created !== null) showCreatedTemplate(created);
   };
 
-  /** 결과가 불명확했던 생성의 원래 본문을 다시 보내고 확인된 행을 연다. */
+  // 결과가 불명확했던 생성의 원래 본문을 다시 보내고 확인된 행을 엶
   const doRetryCreate = async () => {
     if (!policyReady) return;
     const created = await templates.retryCreate();
     if (created !== null) showCreatedTemplate(created);
   };
 
-  /** 현재 초안을 저장하고 서버가 반환한 용도·본문·버전으로 선택을 갱신한다. */
+  // 현재 초안을 저장하고 서버가 반환한 용도·본문·버전으로 선택을 갱신함
   const doSave = async () => {
     if (!policyReady || templateId === null || purpose === null) return;
     const saved = await templates.save(templateId, { name, body, purpose });
     if (saved === null) return;
     flash("템플릿을 저장했어요.");
-    // 저장된 용도로 카테고리 뷰를 옮기되 선택은 유지한다 — 서버가 준 행이 진실이다.
+    // 저장된 용도로 카테고리 뷰를 옮기되 선택은 유지함 — 서버가 준 행이 진실임
     const savedPurpose = policyForPurpose(policy, saved.purpose as SmsEditablePurpose)?.purpose;
     if (savedPurpose === undefined) return;
     setPurposeChoice(savedPurpose);
     setDraft({ templateId: saved.templateId, name: saved.name, body: saved.body, purpose: savedPurpose });
   };
 
-  /** 서버가 같은 용도의 기본 템플릿을 옮긴 결과를 목록에 반영한다. */
+  // 서버가 같은 용도의 기본 템플릿을 옮긴 결과를 목록에 반영함
   const doSetDefault = async (id: string) => {
     if (!policyReady) return;
     const ok = await templates.setDefault(id);
     if (ok) flash("기본 템플릿으로 지정했어요.");
   };
 
-  /** 보관·삭제 결과를 반영하고 현재 선택이 사라졌을 때 같은 용도의 다른 템플릿을 연다. */
+  // 보관·삭제 결과를 반영하고 현재 선택이 사라졌을 때 같은 용도의 다른 템플릿을 엶
   const doArchive = async (id: string) => {
     if (!policyReady || purposeView === null) return;
     const ok = await templates.archive(id);
     if (!ok) return;
     flash("템플릿을 삭제했어요.");
     if (templateId !== id) return;
-    // 지운 템플릿이 열려 있었으면 같은 용도에 남은 것 중 하나로 옮긴다.
+    // 지운 템플릿이 열려 있었으면 같은 용도에 남은 것 중 하나로 옮김
     const next = viewTemplates.find((template) => template.templateId !== id) ?? null;
     setDraft(
       next === null
@@ -330,16 +341,14 @@ export function SmsView() {
     );
   };
 
-  /** 클라이언트 추정 — 확인 화면은 서버 값만 쓴다 (여기 숫자는 작성 중 참고용). */
+  // 클라이언트 추정 — 확인 화면은 서버 값만 씀 (여기 숫자는 작성 중 참고용)
   const estimatedBytes = smsByteLength(body);
   const estimatedLms = estimatedBytes > 90;
 
-  /**
-   * 폰 미리보기 — 프리뷰를 받은 뒤에는 서버 본문을, 그 전에는 예시 치환을 보여 준다.
-   * 어느 쪽인지 캡션이 분명히 말한다.
-   */
+  // 폰 미리보기 — 프리뷰를 받은 뒤에는 서버 본문을, 그 전에는 예시 치환을 보여 줌
+  // 어느 쪽인지 캡션이 분명히 말함
   const serverSample = flow.preview === null ? null : primarySample(flow.preview);
-  // 로컬 예시 치환 — 지금 용도가 허용하는 변수를 모두 덮되 실제 데이터는 새지 않게 임의 예시값만 쓴다.
+  // 로컬 예시 치환 — 지금 용도가 허용하는 변수를 모두 덮되 실제 데이터는 새지 않게 임의 예시값만 씀
   const exampleRendered = body
     .replaceAll("{인증번호}", "123456")
     .replaceAll("{학생명}", "김수민")
@@ -360,10 +369,10 @@ export function SmsView() {
   const canPreview =
     request !== null && !flow.busy && !gateway.sendDisabled && !templates.busy;
 
-  /** 확인 대화상자가 떠 있는 구간 — 실패 문구는 그 안에서만 보여 준다 (두 번 말하지 않게). */
+  // 확인 대화상자가 떠 있는 구간 — 실패 문구는 그 안에서만 보여 줌 (두 번 말하지 않게)
   const confirmOpen = flow.phase === "confirming" || flow.phase === "sending";
 
-  /** 로그의 회차 식별자를 현재 조회한 설명회 제목으로 바꾼다. */
+  // 로그의 회차 식별자를 현재 조회한 설명회 제목으로 바꿈
   const sessionTitleOf = (id: string | null) =>
     sessions.options.find((option) => option.session.seminarSessionId === id)?.seminarTitle ?? null;
 
@@ -404,7 +413,7 @@ export function SmsView() {
       )}
 
       <div className="npr-sms-grid">
-        {/* 템플릿 목록 (명세 §5.1) */}
+        {/* 템플릿 목록 */}
         <Card padding="14px" style={{ animation: "ds-fade-up var(--dur-slow) var(--ease-out) 60ms both" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 6px 10px" }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-strong)", fontFamily: "var(--font-display)" }}>템플릿</span>
@@ -418,7 +427,7 @@ export function SmsView() {
             </button>
           </div>
 
-          {/* 용도 필터 — 선택한 용도의 템플릿만 아래에 보인다. 생성도 이 용도로 만든다. */}
+          {/* 용도 필터 — 선택한 용도의 템플릿만 아래에 보임. 생성도 이 용도로 만듦 */}
           <div style={{ padding: "0 4px 10px" }}>
             <Select
               portal
@@ -495,7 +504,7 @@ export function SmsView() {
                   </button>
                   <button
                     type="button"
-                    // 현재 기본은 다른 템플릿을 기본으로 지정하기 전엔 보관할 수 없다 (서버도 거절한다).
+                    // 현재 기본은 다른 템플릿을 기본으로 지정하기 전엔 보관할 수 없음 (서버도 거절함)
                     title={template.isDefault ? `${template.name} 은 기본 템플릿이라 다른 템플릿을 기본으로 지정한 뒤에 삭제할 수 있어요` : `${template.name} 템플릿 삭제`}
                     aria-label={template.isDefault ? `${template.name} 템플릿 삭제 — 기본 템플릿이라 먼저 다른 템플릿을 기본으로 지정해야 해요` : `${template.name} 템플릿 삭제`}
                     onClick={() => void doArchive(template.templateId)}
@@ -551,7 +560,7 @@ export function SmsView() {
           </Button>
         </Card>
 
-        {/* 작성 영역 (명세 §5.1~5.3) */}
+        {/* 작성 영역. 템플릿 편집·발송 대상·미리보기 요청 */}
         <Card padding="20px" style={{ animation: "ds-fade-up var(--dur-slow) var(--ease-out) 120ms both" }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Select
@@ -566,9 +575,9 @@ export function SmsView() {
               style={{ flex: 1, minWidth: 220 }}
             />
             {/*
-              대상 탭에 실제 수신 인원을 함께 붙인다 — 발송이 쓰는 것과 같은 선택 로직으로
-              서버가 센 값이다. 인원을 모르는 동안에는 **0 을 그리지 않는다**: 0명과
-              "아직 모름"은 다른 사실이고, 발송 화면에서 그 둘을 섞으면 위험하다.
+              대상 탭에 실제 수신 인원을 함께 붙임 — 발송이 쓰는 것과 같은 선택 로직으로
+              서버가 센 값임. 인원을 모르는 동안에는 0 을 그리지 않음: 0명과
+              "아직 모름"은 다른 사실이고, 발송 화면에서 그 둘을 섞으면 위험함
             */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {SMS_AUDIENCE_OPTIONS.map((option) => {
@@ -618,7 +627,7 @@ export function SmsView() {
             </span>
           </div>
 
-          {/* 이름은 여기서 고친다 — 저장하면 본문과 함께 한 번의 PATCH 로 나간다. */}
+          {/* 이름은 여기서 고침 — 저장하면 본문과 함께 한 번의 PATCH 로 나감 */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
             <label htmlFor="npr-sms-template-name" style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>
               템플릿 이름
@@ -650,7 +659,7 @@ export function SmsView() {
             />
           </div>
 
-          {/* 이 초안의 용도 — 저장하면 이 용도로 나간다(그룹만 실제 발송). 바꾸면 dirty 가 된다. */}
+          {/* 이 초안의 용도 — 저장하면 이 용도로 나감(그룹만 실제 발송). 바꾸면 dirty 가 됨 */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>용도</span>
             <Select
@@ -732,7 +741,7 @@ export function SmsView() {
             </Button>
           </div>
 
-          {/* 확정 실패는 흐름이 대화상자를 닫으므로 여기서 이어 말한다. */}
+          {/* 확정 실패는 흐름이 대화상자를 닫으므로 여기서 이어 말함 */}
           {flow.error !== null && !confirmOpen && (
             <p role="alert" style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--status-danger)" }}>
               {flow.error}
@@ -740,7 +749,7 @@ export function SmsView() {
           )}
         </Card>
 
-        {/* 모바일 프리뷰 (명세 §5.5) */}
+        {/* 휴대폰 모양 미리보기 */}
         <div className="npr-sms-preview" style={{ animation: "ds-fade-up var(--dur-slow) var(--ease-out) 180ms both" }}>
           <div style={{ width: 280, margin: "0 auto", borderRadius: 38, background: "var(--violet-950)", padding: 10, boxShadow: "var(--shadow-float)" }}>
             <div style={{ borderRadius: 30, background: "var(--surface-sunken)", overflow: "hidden" }}>
@@ -769,7 +778,7 @@ export function SmsView() {
         </div>
       </div>
 
-      {/* 발송 로그 (명세 §5.4) */}
+      {/* 발송 로그 */}
       <Card padding="0" style={{ marginTop: 14, overflow: "hidden", animation: "ds-fade-up var(--dur-slow) var(--ease-out) 240ms both" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 20px", borderBottom: "1px solid var(--border-hairline)", flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-strong)" }}>발송 로그</span>
@@ -821,7 +830,7 @@ export function SmsView() {
               <span>{fmtDateTimeShort(new Date(row.createdAt))}</span>
               <span style={{ fontWeight: 600, color: "var(--text-strong)", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {/* 배치는 서버가 이름을 주고, 배치 밖 단건은 이름이 없을 수 있다 — 지어내지 않는다. */}
+                  {/* 배치는 서버가 이름을 주고, 배치 밖 단건은 이름이 없을 수 있음 — 지어내지 않음 */}
                   {row.templateName ?? (row.maskedRecipient !== null ? `수신 ${row.maskedRecipient}` : "—")}
                 </span>
                 {row.audience !== null && <Badge tone="info" size="sm">{SMS_AUDIENCE_LABELS[row.audience]}</Badge>}

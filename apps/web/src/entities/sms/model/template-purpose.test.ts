@@ -1,11 +1,11 @@
 /**
- * 용도별 변수 설정의 순수 테스트 (node:test + tsx).
+ * 용도별 변수 설정의 순수 테스트 (node:test + tsx)
  *
- * 지키려는 것은 두 가지다:
- *  1) 편집 가능한 용도 집합은 FIRST_CHECK_IN 을 절대 포함하지 않는다.
- *  2) 용도별 변수는 백엔드 PURPOSE_VARIABLES(sms-template-renderer.service.ts)와 **정확히** 같다.
+ * 지키려는 것은 두 가지임:
+ *  1) 편집 가능한 용도 집합은 FIRST_CHECK_IN 을 절대 포함하지 않음
+ *  2) 용도별 변수는 백엔드 PURPOSE_VARIABLES(sms-template-renderer.service.ts)와 정확히 같음
  *
- * 아래 EXPECTED 는 서버 소스에서 손으로 옮긴 기대값이다 — 이 파일이 그 계약의 프론트 쪽 잠금이다.
+ * 아래 EXPECTED 는 서버 소스에서 손으로 옮긴 기대값임 — 이 파일이 그 계약의 프론트 쪽 잠금임
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -25,7 +25,9 @@ import {
   type EditableSmsPurpose,
 } from "./template-purpose";
 
-/** 백엔드 PURPOSE_VARIABLES 를 그대로 옮긴 기대값 (FIRST_CHECK_IN 제외 — 여기서 다루지 않는다). */
+/**
+ * 백엔드 PURPOSE_VARIABLES 를 그대로 옮긴 기대값 (FIRST_CHECK_IN 제외 — 여기서 다루지 않음)
+ */
 const EXPECTED: Record<EditableSmsPurpose, string[]> = {
   OTP: ["{인증번호}"],
   BOOKING_CONFIRMED: ["{학생명}", "{설명회명}", "{일시}", "{장소}", "{예약확인링크}", "{QR링크}", "{문의전화}"],
@@ -81,7 +83,7 @@ describe("EDITABLE_SMS_PURPOSES", () => {
 describe("SMS_PURPOSE_VARIABLES — 백엔드 PURPOSE_VARIABLES 와 정확히 일치", () => {
   for (const purpose of EDITABLE_SMS_PURPOSES) {
     it(`${purpose} 는 기대한 변수 집합과 정확히 같다`, () => {
-      // 집합으로 비교한다(순서 무관, 중복·누락·초과를 모두 잡는다).
+      // 집합으로 비교함(순서 무관, 중복·누락·초과를 모두 잡음)
       assert.deepEqual(
         [...SMS_PURPOSE_VARIABLES[purpose]].sort(),
         [...EXPECTED[purpose]].sort(),

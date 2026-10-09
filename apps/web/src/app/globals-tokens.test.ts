@@ -3,16 +3,20 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-// 리스킨 토큰 불변식 — globals.css 가 레거시 변수명을 유지하되 값은 예시 팔레트여야 한다.
+// 리스킨 토큰 불변식 — globals.css 가 레거시 변수명을 유지하되 값은 예시 팔레트여야 함
 // (테스트 러너는 apps/web 에서 실행되므로 cwd 기준 경로.)
 const css = readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8").toLowerCase();
 
+/**
+ * globals.css 에서 토큰 값을 읽음
+ */
 function tokenValue(name: string): string {
   const m = css.match(new RegExp(`--${name}\\s*:\\s*([^;]+);`));
   assert.ok(m, `token --${name} not found`);
   return m![1].trim();
 }
 
+// 기존 violet 토큰 이름이 숲 초록 팔레트 값을 가짐
 test("legacy violet ramp maps to forest green", () => {
   assert.equal(tokenValue("violet-950"), "#183307");
   assert.equal(tokenValue("violet-800"), "#365f08"); // interactive primary
@@ -21,12 +25,14 @@ test("legacy violet ramp maps to forest green", () => {
   assert.equal(tokenValue("violet-100"), "#eaf3d0"); // selection bg source
 });
 
+// 기존 mint 토큰 이름이 청록·파랑 강조 값을 가짐
 test("legacy mint ramp maps to teal/blue accent", () => {
   assert.equal(tokenValue("mint-700"), "#006c8b"); // focus/info blue
   assert.equal(tokenValue("mint-500"), "#008aaa");
   assert.equal(tokenValue("mint-400"), "#00abdb"); // scanner accent blue
 });
 
+// 상태 색이 서로 구분됨. 성공 청록·정보 파랑·위험 빨강·경고 주황
 test("status stays distinct: success=teal, info=blue, danger=red, warning=orange", () => {
   assert.equal(tokenValue("status-success"), "#006c54");
   assert.equal(tokenValue("status-success-on-dark"), "#54d6b1");
@@ -39,6 +45,7 @@ test("status stays distinct: success=teal, info=blue, danger=red, warning=orange
   assert.equal(tokenValue("status-warning-on-dark"), "#f9c059");
 });
 
+// 상호작용·포커스 토큰이 리스킨 값을 가짐. 포커스는 흰 안쪽 + 파랑 이중 링
 test("interactive + focus are the reskin values (focus is blue double ring)", () => {
   assert.equal(tokenValue("interactive-primary-hover"), "#264f09");
   assert.equal(tokenValue("interactive-primary-active"), "#183307");
@@ -48,6 +55,7 @@ test("interactive + focus are the reskin values (focus is blue double ring)", ()
   assert.ok(focus.includes("#ffffff"), "focus ring must be a double ring (white inner)");
 });
 
+// 이전 파랑·하늘색 리터럴이 토큰 파일에 남아 있지 않음
 test("no legacy blue/sky literals remain in production tokens", () => {
   const forbidden = [
     "#1d4ed8", "#2563eb", "#3b82f6", "#1b3fa8", "#0f1b33", "#60a5fa",

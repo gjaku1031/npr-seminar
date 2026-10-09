@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
+# 통통통 원천에서 세 지점(A·B·C) 재원생 목록을 받아 체크섬이 붙은 스냅숏으로 저장
+# 로그인은 하지 않고 tongtong-login-once.sh 가 확인한 세션을 재사용. 요청은 재시도하지 않음
+# 실행: pve-release 에서 root 로 인자 없이 실행. 결과 경로를 snapshot=<경로> 로 출력
+# 종료 코드: 0 저장 완료, 1 실행 위치·세션 상태·자격 누락 또는 원천 응답 이상(중간에 멈춤)
 set -Eeuo pipefail
 
+# pve-release root 에서만 실행
 if [[ ${EUID} -ne 0 || $(hostname -s) != "pve-release" ]]; then
   echo "refusing to capture outside pve-release as root" >&2
   exit 1
 fi
 
+# 원천 주소·파일 경로와 페이지 크기
 base_url=https://www9.hakwonsarang.co.kr
 secret_dir=/etc/npr-seminar/secrets
 session_dir=/var/lib/npr-seminar/tongtong
@@ -14,6 +20,7 @@ state_file=${session_dir}/auth.state
 snapshot_root=${session_dir}/snapshots
 page_size=5000
 
+# 확인된 세션(AUTHENTICATED)과 자격 파일이 있어야 함
 if [[ ! -s ${cookie_file} || ! -s ${state_file} || $(cut -f1 "${state_file}") != AUTHENTICATED ]]; then
   echo "capture refused: no verified authenticated session" >&2
   exit 1
@@ -26,6 +33,7 @@ if [[ -z ${username} || -z ${password} ]]; then
   exit 1
 fi
 
+# 폼 값 퍼센트 인코딩
 urlencode() {
   local value=$1
   local output=''
@@ -41,6 +49,7 @@ urlencode() {
   printf '%s' "${output}"
 }
 
+# 임시 작업 디렉터리. 끝나면 이 경로만 지우고 자격 변수를 비움
 work_dir=$(mktemp -d /run/tongtong-capture.XXXXXX)
 cleanup() {
   case ${work_dir} in
@@ -52,10 +61,12 @@ cleanup() {
 trap cleanup EXIT
 umask 0077
 
+# 시각 기반 스냅숏 디렉터리
 snapshot_id=$(date +%Y%m%d-%H%M%S)
 snapshot_dir=${snapshot_root}/${snapshot_id}
 install -d -o root -g npr -m 0750 "${snapshot_root}" "${snapshot_dir}"
 
+# 공통 curl 옵션(재시도 없음, 세션 쿠키 재사용)
 curl_common=(
   --silent
   --show-error
@@ -67,6 +78,7 @@ curl_common=(
   --user-agent 'NPR-Student-Sync/1.0'
 )
 
+# 한 지점의 학생 목록을 받아 <지점 코드>.json·열 매핑 TSV 로 저장
 capture_branch() {
   local branch_name=$1
   local branch_code=$2
@@ -86,6 +98,7 @@ capture_branch() {
   printf 'param=&txtmb_kind=T&txtmb_id=%s&txtmb_pw=%s&gotarget=mmsc&gobrcode=%s' \
     "$(urlencode "${username}")" "$(urlencode "${password}")" "${branch_code}" > "${switch_form}"
 
+  # 상단 프레임의 학원 코드·환영 문구로 현재 세션이 그 지점인지 확인
   verify_branch() {
     top_status=$(curl "${curl_common[@]}" \
       --output "${top_body}" \
@@ -98,8 +111,7 @@ capture_branch() {
     grep -aFq '님 환영합니다' "${top_utf8}" || return 1
   }
 
-  # Avoid submitting the credential-bearing branch form when the verified
-  # session is already on the requested branch.
+  # 세션이 이미 그 지점이면 자격이 담긴 지점 전환 폼을 보내지 않음
   if ! verify_branch; then
     if ! switch_status=$(curl "${curl_common[@]}" \
       --request POST \
@@ -124,6 +136,7 @@ capture_branch() {
     fi
   fi
 
+  # 학생 목록 화면에서 열 키(m숫자)와 열 제목 매핑 추출
   if ! frame_status=$(curl "${curl_common[@]}" \
     --request POST \
     --data-urlencode 'selbs_inorout=NN' \
@@ -141,6 +154,7 @@ capture_branch() {
   grep -aoE 'dataIndx:"m[0-9]+"[^}]*' "${frame_utf8}" \
     | sed -E 's/^dataIndx:"([^"]+)", title:"([^"]*)".*/\1\t\2/' > "${column_map}"
 
+  # 제목이 정확히 하나인 필수 열의 키
   column_key() {
     local title=$1
     local matches
@@ -152,6 +166,7 @@ capture_branch() {
     printf '%s' "${matches}"
   }
 
+  # 선택 열의 키. 없으면 빈 값
   optional_column_key() {
     local title=$1
     local matches count
@@ -166,6 +181,7 @@ capture_branch() {
     fi
   }
 
+  # 필요한 열 키. 부 연락처 열만 선택
   student_key=$(column_key 학번) || exit 1
   name_key=$(column_key 성명) || exit 1
   class_key=$(column_key 반명) || exit 1
@@ -180,10 +196,12 @@ capture_branch() {
   class_registration_key=$(column_key 반등록번호) || exit 1
   source_unique_key=$(column_key 고유번호) || exit 1
 
+  # 열 매핑 저장
   cp "${column_map}" "${snapshot_dir}/${branch_code}-columns.tsv"
   chown root:npr "${snapshot_dir}/${branch_code}-columns.tsv"
   chmod 0640 "${snapshot_dir}/${branch_code}-columns.tsv"
 
+  # 페이지별로 받아 한 줄 JSON 으로 정규화해 이어 붙임. 전체 건수가 바뀌거나 100쪽을 넘으면 중단
   : > "${ndjson}"
   page_number=1
   total_records=0
@@ -204,8 +222,7 @@ capture_branch() {
       echo "student fetch transport failed for ${branch_name} page ${page_number}; capture stopped without retry" >&2
       exit 1
     fi
-    # The legacy service labels responses EUC-KR but some branches contain
-    # Windows-949 extension characters, so decode with the compatible superset.
+    # 원천은 EUC-KR 이라고 표시하지만 일부 지점에 CP949 확장 문자가 있어 상위 집합인 CP949 로 디코딩
     if ! iconv -f cp949 -t utf-8 "${page_body_raw}" > "${page_body}" 2>/dev/null; then
       echo "student response encoding invalid for ${branch_name} page ${page_number}; capture stopped without retry" >&2
       exit 1
@@ -259,6 +276,7 @@ capture_branch() {
     page_number=$((page_number + 1))
   done
 
+  # 받은 행 수가 전체 건수와 같아야 저장
   rows=$(wc -l < "${ndjson}")
   if [[ ${rows} -ne ${total_records} ]]; then
     echo "student row count mismatch for ${branch_name}: expected ${total_records}, captured ${rows}" >&2
@@ -272,12 +290,12 @@ capture_branch() {
   printf 'captured branch=%s code=%s rows=%s pages=%s\n' "${branch_name}" "${branch_code}" "${rows}" "${page_count}"
 }
 
-# The account session is intentionally reused; this script never calls the
-# login endpoints. Branches are switched and fetched sequentially.
+# 계정 세션을 일부러 재사용하고 로그인 엔드포인트는 부르지 않음. 지점은 순서대로 전환해 받음
 capture_branch A SE8A
 capture_branch B KG5M
 capture_branch C SE9P
 
+# 건수 파일과 체크섬 파일 작성, 권한 고정
 cp "${work_dir}/counts.tsv" "${snapshot_dir}/counts.tsv"
 chown root:npr "${snapshot_dir}/counts.tsv"
 chmod 0640 "${snapshot_dir}/counts.tsv"

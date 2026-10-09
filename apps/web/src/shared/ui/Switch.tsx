@@ -1,9 +1,12 @@
 "use client";
 
-/** DS Switch — 핸드오프 components/forms/Switch.jsx 이식. */
+// 디자인 시스템 스위치. 실제 checkbox를 숨기고 트랙·손잡이를 그림
 
 import type { CSSProperties, ReactNode } from "react";
 
+/**
+ * 켜고 끄는 스위치
+ */
 export function Switch({
   checked = false,
   onChange,
@@ -11,10 +14,29 @@ export function Switch({
   disabled = false,
   style,
 }: {
+  /**
+   * 켜짐 여부
+   */
   checked?: boolean;
+
+  /**
+   * 변경 처리
+   */
   onChange?: (checked: boolean) => void;
+
+  /**
+   * 라벨
+   */
   label?: ReactNode;
+
+  /**
+   * 비활성 여부
+   */
   disabled?: boolean;
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }) {
   return (

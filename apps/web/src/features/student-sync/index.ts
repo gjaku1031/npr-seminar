@@ -1,4 +1,4 @@
-// features/student-sync 공개 API (barrel).
+// features/student-sync 공개 API (barrel)
 export { useStudentSync } from "./model/useStudentSync";
 export type { StudentSyncState } from "./model/useStudentSync";
 

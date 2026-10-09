@@ -1,6 +1,6 @@
 /**
- * 스캐너 그리드 레이아웃 순수 테스트 (node:test + tsx). React·DOM 을 import 하지 않는다.
- * "4열에서 5대째부터 다음 행으로 흐른다"는 관리자 그리드 동작을 고정한다.
+ * 스캐너 그리드 레이아웃 순수 테스트 (node:test + tsx). React·DOM 을 import 하지 않음
+ * "4열에서 5대째부터 다음 행으로 흐른다"는 관리자 그리드 동작을 고정함
  *
  * 실행: pnpm --dir apps/web test
  */

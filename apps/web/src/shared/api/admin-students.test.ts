@@ -1,11 +1,11 @@
 /**
- * 수동 동기화 게이트 순수 헬퍼 테스트 (node:test + tsx).
+ * 수동 동기화 게이트 순수 헬퍼 테스트 (node:test + tsx)
  *
- * 이 파일은 fetch 를 부르지 않는다 — `evaluateManualSyncGate` 는 서버 상태 스냅샷만 보는
- * 순수 함수이고, "지금 눌러도 되는가" 의 유일한 판정이다. 특히 실시간 원천 어댑터가
- * 준비되지 않았을 때(`liveSourceReady:false`) 절대 시작을 허용하지 않는지 못박는다.
+ * 이 파일은 fetch 를 부르지 않음 — `evaluateManualSyncGate` 는 서버 상태 스냅샷만 보는
+ * 순수 함수이고, "지금 눌러도 되는가" 의 유일한 판정임. 특히 실시간 원천 어댑터가
+ * 준비되지 않았을 때(`liveSourceReady:false`) 절대 시작을 허용하지 않는지 못박음
  *
- * 픽스처는 계약(openapi.yaml StudentSyncStatus)의 **필수 필드를 전부** 채운 실제 응답 모양이다.
+ * 픽스처는 계약(openapi.yaml StudentSyncStatus)의 필수 필드를 전부 채운 실제 응답 모양임
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -41,7 +41,9 @@ import type {
 
 /* ── 픽스처 ──────────────────────────────────────────────────────────────── */
 
-/** 계약 StudentSyncStatus 필수 필드 전부. 기본은 "정상·준비됨·유휴" 다. */
+/**
+ * 계약 StudentSyncStatus 필수 필드 전부. 기본은 "정상·준비됨·유휴" 임
+ */
 const status = (overrides: Partial<StudentSyncStatus> = {}): StudentSyncStatus => ({
   studentSourceOfTruth: "POSTGRESQL",
   scheduleZone: "Asia/Seoul",
@@ -66,11 +68,15 @@ const status = (overrides: Partial<StudentSyncStatus> = {}): StudentSyncStatus =
   ...overrides,
 });
 
-/** circuit.status 만 바꾼 상태. */
+/**
+ * circuit.status 만 바꾼 상태
+ */
 const withCircuit = (circuitStatus: SyncCircuitStatus, overrides: Partial<StudentSyncStatus> = {}) =>
   status({ circuit: { ...status().circuit, status: circuitStatus }, ...overrides });
 
-/** 계약 StudentSourceAssignment 필수 필드 전부. 담임 판정 테스트가 쓰는 key·teacherName 만 바꾼다. */
+/**
+ * 계약 StudentSourceAssignment 필수 필드 전부. 담임 판정 테스트가 쓰는 key·teacherName 만 바꿈
+ */
 const assignment = (overrides: Partial<StudentSourceAssignment> = {}): StudentSourceAssignment => ({
   assignmentId: "a1",
   sourceAssignmentKey: "key-1",
@@ -90,8 +96,8 @@ const assignment = (overrides: Partial<StudentSourceAssignment> = {}): StudentSo
 });
 
 /**
- * 계약 AdminStudent(+ canonical 담임 오버레이) 필수 필드 전부. 기본은 "수학 반 있는 재원생".
- * teacherName 은 오버레이(선택 필드)라 기본 픽스처엔 없다(레거시 응답 모양) — 필요할 때만 얹는다.
+ * 계약 AdminStudent(+ canonical 담임 오버레이) 필수 필드 전부. 기본은 "수학 반 있는 재원생"
+ * teacherName 은 오버레이(선택 필드)라 기본 픽스처엔 없음(레거시 응답 모양) — 필요할 때만 얹음
  */
 const student = (
   overrides: Partial<AdminStudent & AdminStudentCanonicalTeacher> = {},
@@ -236,9 +242,9 @@ describe("studentReservationLabel — 정식 hasReservation 우선", () => {
 
 /* ── 대표 담임 폴백 (순수, 레거시 경로) ───────────────────────────────────────
  *
- * representativeTeacher 는 canonical 이 없을 때 쓰는 레거시 폴백이다 — 대표 배정으로 지목된
- * 담임, 아니면 후보가 하나로 좁혀질 때만. 여기서는 폴백 자체의 규칙만 못박는다(수학 반 게이트는
- * resolveHomeroomTeacher 가 맡는다).
+ * representativeTeacher 는 canonical 이 없을 때 쓰는 레거시 폴백임 — 대표 배정으로 지목된
+ * 담임, 아니면 후보가 하나로 좁혀질 때만. 여기서는 폴백 자체의 규칙만 못박음(수학 반 게이트는
+ * resolveHomeroomTeacher 가 맡음)
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("representativeTeacher — 레거시 폴백", () => {
@@ -276,13 +282,13 @@ describe("representativeTeacher — 레거시 폴백", () => {
 
 /* ── 대표 담임 최종 정책 (순수) ───────────────────────────────────────────────
  *
- * resolveHomeroomTeacher 는 담임 열의 유일한 판정이다:
+ * resolveHomeroomTeacher 는 담임 열의 유일한 판정임:
  *   1) 수학 반이 없으면(과학 전용) 최상위 canonical 이 있든 배정 담임이 몇이든 무조건 null,
  *   2) 수학 학생은 최상위 canonical teacherName 이 응답에 있으면(비 undefined) authoritative —
  *      비 null·비공백이면 그대로, null·공백이면 폴백 없이 null,
- *   3) teacherName 이 undefined(레거시 응답)일 때만 representativeTeacher 폴백.
+ *   3) teacherName 이 undefined(레거시 응답)일 때만 representativeTeacher 폴백
  *
- * null·공백·undefined·최상위 문자열 네 경우를 각각 분리해 못박는다.
+ * null·공백·undefined·최상위 문자열 네 경우를 각각 분리해 못박음
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
@@ -290,7 +296,7 @@ describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
     const s = student({
       teacherName: "정담임",
       representativeClass: { ...student().representativeClass, selectedSourceAssignmentKey: "key-1" },
-      // 폴백이라면 '다른담임' 을 골랐을 배정이지만 canonical 이 이겨야 한다.
+      // 폴백이라면 '다른담임' 을 골랐을 배정이지만 canonical 이 이겨야 함
       assignments: [assignment({ sourceAssignmentKey: "key-1", teacherName: "다른담임" })],
     });
     assert.equal(resolveHomeroomTeacher(s), "정담임");
@@ -336,7 +342,7 @@ describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
   it("과학 전용은 최상위 canonical teacherName 이 있어도 승격하지 않고 — (null)", () => {
     const s = student({
       mathClassName: null,
-      // 최상위 canonical 이 실려 있어도 과학 전용이면 담임을 짓지 않는다(수학 반 게이트가 이긴다).
+      // 최상위 canonical 이 실려 있어도 과학 전용이면 담임을 짓지 않음(수학 반 게이트가 이김)
       teacherName: "과학담임",
       representativeClass: {
         resolution: "SCIENCE_ALIAS",
@@ -389,7 +395,7 @@ describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
   it("수학 학생이라도 canonical 이 명시적 null 이면 확정 '담임 없음' — 폴백 없이 null", () => {
     const s = student({
       teacherName: null,
-      // 폴백이라면 '박유일' 을 골랐을 유효한 대표 배정이 있어도 canonical null 이 이긴다.
+      // 폴백이라면 '박유일' 을 골랐을 유효한 대표 배정이 있어도 canonical null 이 이김
       assignments: [assignment({ sourceAssignmentKey: "key-1", teacherName: "박유일" })],
       representativeClass: { ...student().representativeClass, selectedSourceAssignmentKey: "key-1" },
     });
@@ -399,7 +405,7 @@ describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
   it("수학 학생이라도 canonical 이 공백뿐이면 확정 '담임 없음' — 폴백 없이 null", () => {
     const s = student({
       teacherName: "   ",
-      // 공백 canonical 도 authoritative — 유효한 대표 배정이 있어도 폴백하지 않는다.
+      // 공백 canonical 도 authoritative — 유효한 대표 배정이 있어도 폴백하지 않음
       assignments: [assignment({ sourceAssignmentKey: "key-1", teacherName: "박유일" })],
       representativeClass: { ...student().representativeClass, selectedSourceAssignmentKey: "key-1" },
     });
@@ -409,11 +415,13 @@ describe("resolveHomeroomTeacher — 최종 담임 정책", () => {
 
 /* ── 분류 요약 4수 정규화 (순수) ──────────────────────────────────────────────
  *
- * resolveStudentSummaryCounts 는 신규 계약 필드를 우선하고, 없을 때만 각각 **1:1 로** 대응하는
- * 레거시 필드로 떨어진다 — 절대 두 값을 더하지 않는다. 각 폴백이 서로 독립인지 못박는다.
+ * resolveStudentSummaryCounts 는 신규 계약 필드를 우선하고, 없을 때만 각각 1:1 로 대응하는
+ * 레거시 필드로 떨어짐 — 절대 두 값을 더하지 않음. 각 폴백이 서로 독립인지 못박음
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** 계약 StudentClassificationSummary 필수(레거시) 필드 전부. 신규 4필드는 오버라이드로만 얹는다. */
+/**
+ * 계약 StudentClassificationSummary 필수(레거시) 필드 전부. 신규 4필드는 오버라이드로만 얹음
+ */
 const summary = (overrides: Partial<StudentClassificationSummary> = {}): StudentClassificationSummary => ({
   uniqueStudentCount: 100,
   multiAssignmentStudentCount: 12,
@@ -504,7 +512,7 @@ describe("resolveStudentSummaryCounts — 신규 우선·레거시 1:1 폴백", 
   });
 
   it("수학·과학을 더해 재원생을 만들지 않는다 — 세 수는 서로 독립이다", () => {
-    // math(77)+scienceOnly(33)=110 ≠ eligibleUnique(90). 합산이면 90 이 될 수 없다.
+    // math(77)+scienceOnly(33)=110 ≠ eligibleUnique(90). 합산이면 90 이 될 수 없음
     const counts = resolveStudentSummaryCounts(
       summary({ eligibleUniqueStudentCount: 90, mathStudentCount: 77, scienceOnlyStudentCount: 33, reviewRequiredStudentCount: 5 }),
     );
@@ -515,7 +523,7 @@ describe("resolveStudentSummaryCounts — 신규 우선·레거시 1:1 폴백", 
 
 /* ── 캠퍼스 접두 라벨 (순수) ──────────────────────────────────────────────────
  *
- * 요약은 캠퍼스(+단위) 범위라 라벨의 캠퍼스 접두가 곧 그 범위를 말한다. 전체(undefined)면 접두 없음.
+ * 요약은 캠퍼스(+단위) 범위라 라벨의 캠퍼스 접두가 곧 그 범위를 말함. 전체(undefined)면 접두 없음
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("campusScopedLabel — 캠퍼스 접두", () => {
@@ -532,8 +540,8 @@ describe("campusScopedLabel — 캠퍼스 접두", () => {
 
 /* ── 확인 필요 사유 라벨 (순수) ───────────────────────────────────────────────
  *
- * 서버는 코드만 준다 — 화면은 고정 한글 라벨로 그리고, 계약에 없던 미래 코드는 안전 라벨로
- * 떨어뜨려 절대 undefined 를 보이지 않는다.
+ * 서버는 코드만 줌 — 화면은 고정 한글 라벨로 그리고, 계약에 없던 미래 코드는 안전 라벨로
+ * 떨어뜨려 절대 undefined 를 보이지 않음
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("reviewReasonLabel — 알려진 enum 라벨 · 미지 코드 안전 폴백", () => {
@@ -553,11 +561,13 @@ describe("reviewReasonLabel — 알려진 enum 라벨 · 미지 코드 안전 �
 
 /* ── 원천 반명 · 페이지 정규화 (순수) ─────────────────────────────────────────
  *
- * rawClassNames(신규) 우선 → rawRepresentativeClassNames(레거시) → originalClassName(비공백).
- * 총원은 언제나 page.totalItems 다 — 첫 페이지 items 길이가 아니다.
+ * rawClassNames(신규) 우선 → rawRepresentativeClassNames(레거시) → originalClassName(비공백)
+ * 총원은 언제나 page.totalItems 임 — 첫 페이지 items 길이가 아님
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** 계약 AdminStudentReviewRequired 필수 필드 전부(현재 서버 모양: rawRepresentativeClassNames). */
+/**
+ * 계약 AdminStudentReviewRequired 필수 필드 전부(현재 서버 모양: rawRepresentativeClassNames)
+ */
 const reviewRaw = (overrides: Record<string, unknown> = {}) => ({
   studentId: "s1",
   sourceStudentNo: "S001",
@@ -649,17 +659,22 @@ describe("normalizeReviewRequiredPage — 총원은 page.totalItems", () => {
 
 /* ── 요청 인코딩 · 확인 필요 폴백 ─────────────────────────────────────────────
  *
- * 진짜 서버 없이 fetch 만 가짜로 세운다. 두 가지를 지킨다:
- *   1. seminarSessionId 가 목록 요청에 그대로 실리는가.
- *   2. review-required 가 미배포(404 등)일 때 빈 목록으로 떨어지고, 진짜 오류는 올라오는가.
+ * 진짜 서버 없이 fetch 만 가짜로 세움. 두 가지를 지킴:
+ *   1. seminarSessionId 가 목록 요청에 그대로 실리는가
+ *   2. review-required 가 미배포(404 등)일 때 빈 목록으로 떨어지고, 진짜 오류는 올라오는가
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * 테스트 후 되돌릴 원래 fetch
+ */
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** URL 을 붙잡고, 지정한 상태/본문으로 응답하는 가짜 fetch. */
+/**
+ * URL 을 붙잡고, 지정한 상태/본문으로 응답하는 가짜 fetch
+ */
 function stubFetch(status: number, body: unknown): { urls: string[] } {
   const urls: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -673,8 +688,8 @@ function stubFetch(status: number, body: unknown): { urls: string[] } {
 }
 
 /**
- * `page` 쿼리별로 다른 응답을 주는 가짜 fetch — 다중 페이지 수집·중복 제거를 검증한다.
- * 각 요청이 받은 URL 과 signal 을 기록한다(같은 AbortSignal 이 모든 페이지에 걸리는지 확인).
+ * `page` 쿼리별로 다른 응답을 주는 가짜 fetch — 다중 페이지 수집·중복 제거를 검증함
+ * 각 요청이 받은 URL 과 signal 을 기록함(같은 AbortSignal 이 모든 페이지에 걸리는지 확인)
  */
 function stubFetchByPage(byPage: Record<string, { status?: number; body: unknown }>): {
   urls: string[];
@@ -696,7 +711,9 @@ function stubFetchByPage(byPage: Record<string, { status?: number; body: unknown
   return { urls, signals };
 }
 
-/** review-required 한 페이지 응답 본문 — page 메타를 명시적으로 실어 준다. */
+/**
+ * review-required 한 페이지 응답 본문 — page 메타를 명시적으로 실어 줌
+ */
 function reviewPageBody(items: unknown[], page: number, totalItems: number, totalPages: number) {
   return { items, page: { page, pageSize: 200, totalItems, totalPages } };
 }
@@ -738,8 +755,8 @@ describe("listAdminStudents — seminarSessionId 인코딩", () => {
 
 /* ── canonical teacherName 보존 (어댑터) ──────────────────────────────────────
  *
- * 어댑터는 최상위 canonical `teacherName` 을 items 에 **그대로** 실어 와야 한다 — 비 null 이든
- * null(담임 없음)이든 보존하고, 아예 없는 레거시 응답(undefined)도 깨지지 않아야 한다.
+ * 어댑터는 최상위 canonical `teacherName` 을 items 에 그대로 실어 와야 함 — 비 null 이든
+ * null(담임 없음)이든 보존하고, 아예 없는 레거시 응답(undefined)도 깨지지 않아야 함
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("listAdminStudents — canonical teacherName 보존", () => {
@@ -771,11 +788,11 @@ describe("listAdminStudents — canonical teacherName 보존", () => {
 
   it("한 응답에서 생략(undefined)과 명시적 null 을 각각 그대로 둔다 — 함께 뭉개지 않는다", async () => {
     stubFetch(200, pageWith([
-      student({ studentId: "omitted" }), // teacherName 생략 → 키 자체가 없다
+      student({ studentId: "omitted" }), // teacherName 생략 → 키 자체가 없음
       student({ studentId: "explicit", teacherName: null }), // 명시적 null → 키가 있고 값이 null
     ]));
     const page = await listAdminStudents({ sourceActive: true });
-    // 생략은 undefined, 명시적 null 은 null 로 구별돼야 한다(둘을 같은 값으로 정규화하지 않는다).
+    // 생략은 undefined, 명시적 null 은 null 로 구별돼야 함(둘을 같은 값으로 정규화하지 않음)
     assert.equal(page.items[0]!.teacherName, undefined);
     assert.equal(page.items[1]!.teacherName, null);
     assert.equal("teacherName" in page.items[0]!, false);
@@ -794,7 +811,7 @@ describe("listReviewRequiredStudents — 실제 계약(페이지네이션·중�
     assert.equal(url.searchParams.get("branch"), "CAMPUS_B");
     assert.equal(url.searchParams.get("pageSize"), "200");
     assert.equal(url.searchParams.get("page"), "1");
-    // 엔드포인트는 단위 범위를 받지 않는다 — 클라이언트가 unit/unitGroup 을 지어내 보내지 않는다.
+    // 엔드포인트는 단위 범위를 받지 않음 — 클라이언트가 unit/unitGroup 을 지어내 보내지 않음
     assert.equal(url.searchParams.has("unit"), false);
     assert.equal(url.searchParams.has("unitGroup"), false);
   });
@@ -817,10 +834,10 @@ describe("listReviewRequiredStudents — 실제 계약(페이지네이션·중�
 
     const result = await listReviewRequiredStudents({ branch: "CAMPUS_A" });
 
-    // 두 페이지를 모두 부른다.
+    // 두 페이지를 모두 부름
     const pages = captured.urls.map((u) => new URL(u, "https://example.test").searchParams.get("page")).sort();
     assert.deepEqual(pages, ["1", "2"]);
-    // b 는 한 번만, 순서는 첫 등장 기준 a,b,c.
+    // b 는 한 번만, 순서는 첫 등장 기준 a,b,c
     assert.deepEqual(result.items.map((s) => s.studentId), ["a", "b", "c"]);
   });
 

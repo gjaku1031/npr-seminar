@@ -1,2 +1,2 @@
-// views/sms 공개 API (barrel). (설계 §4.1)
+// views/sms 공개 API (barrel)
 export { SmsView } from "./ui/SmsView";

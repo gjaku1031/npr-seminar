@@ -5,11 +5,17 @@ import type { PrismaService } from "../../src/common/prisma/prisma.service.js";
 import type { RedisService } from "../../src/common/redis/redis.service.js";
 import { HealthController } from "../../src/modules/health/health.controller.js";
 
+/**
+ * 상태 코드 기록용 응답 대역
+ */
 function response() {
   const status = vi.fn().mockReturnThis();
   return { value: { status } as unknown as Response, status };
 }
 
+/**
+ * 의존 저장소 설정·응답을 지정한 헬스 컨트롤러
+ */
 function controller(input: {
   readonly postgresConfigured: boolean;
   readonly postgresPing?: () => Promise<unknown>;
@@ -32,7 +38,9 @@ function controller(input: {
   return { health: new HealthController(prisma, redis), postgresPing, redisPing };
 }
 
+// 준비 상태 확인
 describe("HealthController readiness", () => {
+  // PostgreSQL·Redis 실제 확인이 모두 성공해야 준비 완료
   it("reports ready only after real PostgreSQL and Redis pings succeed", async () => {
     const { health, postgresPing, redisPing } = controller({ postgresConfigured: true, redisConfigured: true });
     const http = response();
@@ -46,6 +54,7 @@ describe("HealthController readiness", () => {
     expect(http.status).not.toHaveBeenCalled();
   });
 
+  // 미설정 의존성은 not-configured로 구분하고 설정된 쪽은 계속 확인
   it("distinguishes an unconfigured dependency while still checking the configured one", async () => {
     const missingPostgres = controller({ postgresConfigured: false, redisConfigured: true });
     const firstHttp = response();
@@ -68,6 +77,7 @@ describe("HealthController readiness", () => {
     expect(secondHttp.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
   });
 
+  // 설정됐지만 응답 실패면 unavailable과 503
   it("reports configured but failed pings as unavailable and returns 503", async () => {
     const { health, postgresPing, redisPing } = controller({
       postgresConfigured: true,

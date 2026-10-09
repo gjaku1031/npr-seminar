@@ -1,7 +1,7 @@
 /**
- * 과학반 팝오버 배치 규칙 테스트 (node:test + tsx). 순수 함수라 DOM 없이 검증한다.
+ * 과학반 팝오버 배치 규칙 테스트 (node:test + tsx). 순수 함수라 DOM 없이 검증함
  * 핵심 회귀: 좁은 표 칸에 얹혀도 팝오버 폭은 트리거 폭과 무관하게 고정 가독 폭이라
- * 한 글자로 무너져 세로 글자 기둥이 되지 않는다.
+ * 한 글자로 무너져 세로 글자 기둥이 되지 않음
  */
 
 import assert from "node:assert/strict";
@@ -14,10 +14,13 @@ import {
   SCIENCE_POPUP_WIDTH,
 } from "./science-popup-position";
 
+/**
+ * 테스트 화면 크기
+ */
 const viewport = { width: 1280, height: 800 };
 
 test("좁은 트리거 셀이어도 폭은 트리거와 무관한 고정 가독 폭이라 한 글자로 무너지지 않는다", () => {
-  // 트리거가 약 한 글자(24px) 폭이어도 팝오버는 넉넉한 폭을 갖는다 — 세로 글자 기둥 방지.
+  // 트리거가 약 한 글자(24px) 폭이어도 팝오버는 넉넉한 폭을 가짐 — 세로 글자 기둥 방지
   const anchor = { left: 600, right: 624, top: 300, bottom: 320 };
   const pos = computeSciencePopupPosition(anchor, viewport, 120);
   assert.equal(pos.width, SCIENCE_POPUP_WIDTH);
@@ -32,7 +35,7 @@ test("우측 정렬 — 팝오버 오른쪽이 트리거 오른쪽에 맞는다"
 });
 
 test("오른쪽 가장자리 충돌 — 화면 밖으로 넘치지 않게 여백 안으로 clamp 한다", () => {
-  // 트리거가 화면 오른쪽 끝이라 우측 정렬 그대로면 넘칠 수 있다.
+  // 트리거가 화면 오른쪽 끝이라 우측 정렬 그대로면 넘칠 수 있음
   const anchor = { left: 1252, right: 1276, top: 300, bottom: 320 };
   const pos = computeSciencePopupPosition(anchor, viewport, 120);
   assert.ok(pos.left >= SCIENCE_POPUP_MARGIN);
@@ -54,7 +57,7 @@ test("아래 공간이 충분하면 아래로 열고 top 은 트리거 바로 �
 });
 
 test("아래 공간이 부족하고 위가 넓으면 위로 뒤집고 top 은 여백 안에 든다", () => {
-  // 트리거가 화면 하단이라 아래로 열 자리가 없다.
+  // 트리거가 화면 하단이라 아래로 열 자리가 없음
   const anchor = { left: 600, right: 624, top: 740, bottom: 780 };
   const pos = computeSciencePopupPosition(anchor, viewport, 400);
   assert.equal(pos.placement, "above");
@@ -65,7 +68,7 @@ test("아래 공간이 부족하고 위가 넓으면 위로 뒤집고 top 은 �
 test("긴 목록은 남는 공간에 맞춰 최대 높이를 잘라 내부 스크롤에 맡긴다", () => {
   const anchor = { left: 600, right: 624, top: 100, bottom: 120 };
   const pos = computeSciencePopupPosition(anchor, viewport, 5000);
-  // 아래 공간(800 - 120 - gap - margin)보다 커질 수 없다.
+  // 아래 공간(800 - 120 - gap - margin)보다 커질 수 없음
   assert.ok(pos.maxHeight <= viewport.height - anchor.bottom);
   assert.ok(pos.maxHeight > 0);
 });

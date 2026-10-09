@@ -9,28 +9,82 @@ import { GuestBookingReconcilerService } from "./guest-booking-reconciler.servic
 import { StudentPromotionService } from "./student-promotion.service.js";
 import { TongTongTongGateway, type TongBranchDescriptor, type TongBranchSnapshot } from "./tongtontong.gateway.js";
 
+/**
+ * 지점 처리 순서
+ */
 const BRANCH_ORDER: readonly BranchCode[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
+
+/**
+ * 동기화 lease 이름
+ */
 const LEASE_NAME = "tongtontong-student-sync";
+
+/**
+ * 동기화 lease 유지 시간(밀리초). 30분
+ */
 const LEASE_MILLISECONDS = 30 * 60 * 1_000;
+
+/**
+ * 스테이징 행 일괄 저장 단위
+ */
 const BATCH_SIZE = 500;
 
-/** 통통통 학생 스냅샷 조회부터 검증·승격까지 실행하고 인증 회로와 실행 lease를 관리한다. */
+/**
+ * 통통통 학생 동기화 실행기
+ *
+ * 스냅샷 조회부터 검증·적재·원장 반영까지 실행하고 로그인 회로와 실행 lease 관리
+ * 원천 로그인은 실행당 1회이며 자동 재시도하지 않음. 결과가 불명확하면 회로를 열어 운영자 확인 전까지 중단
+ */
 @Injectable()
 export class StudentSyncOrchestratorService {
+  /**
+   * 비재원생 연결 실패 기록용 로거
+   */
   private readonly logger = new Logger(StudentSyncOrchestratorService.name);
 
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 수동 실행 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
+
+    /**
+     * 통통통 게이트웨이
+     */
     private readonly gateway: TongTongTongGateway,
+
+    /**
+     * 스냅샷 정규화
+     */
     private readonly normalizer: StudentNormalizerService,
+
+    /**
+     * 원장 반영
+     */
     private readonly promotion: StudentPromotionService,
+
+    /**
+     * 비재원생 예약 연결
+     */
     private readonly guestReconciler: GuestBookingReconcilerService,
   ) {}
 
   /**
-   * 관리자 수동 실행을 접수하고 공개 실행 ID를 반환한다. 같은 멱등 키의 재요청은 기존 실행을 돌려준다.
-   * {@link claim} 전에 DB·외부 설정·만료 lease를 확인하며 회로가 열렸거나 실행 중이면 거절한다.
+   * 관리자 수동 실행 접수
+   *
+   * claim 전에 DB·연동 설정·만료 lease를 확인. 회로가 열렸거나 실행 중이면 거부
+   * 같은 멱등 키 재요청은 기존 실행 ID만 반환하고 다시 시작하지 않음
+   *
+   * @returns 실행 공개 ID
+   * @throws {DomainError} 409 회로 열림·실행 중, 503 미설정
    */
   public async runManual(reason: string, actorSubject: string, idempotencyKey: string): Promise<string> {
     this.requireDatabase(); this.gateway.assertReady();
@@ -43,7 +97,12 @@ export class StudentSyncOrchestratorService {
     return claimed.value.runId;
   }
 
-  /** 예약 실행을 한 번 접수하고 공개 실행 ID를 반환한다. 중복 실행은 {@link claim}에서 거절한다. */
+  /**
+   * 예약 실행 1회 접수
+   *
+   * @returns 실행 공개 ID
+   * @throws {DomainError} 409 회로 열림·실행 중
+   */
   public async runScheduled(): Promise<string> {
     this.requireDatabase(); this.gateway.assertReady();
     await this.recoverAbandonedLease();
@@ -54,8 +113,9 @@ export class StudentSyncOrchestratorService {
   }
 
   /**
-   * 관리자 상태 조회에 쓸 외부 연동 설정 준비 여부를 반환한다.
-   * {@link TongTongTongGateway.assertReady}만 호출하고 로그인이나 외부 요청은 하지 않는다.
+   * 관리자 상태 조회용 연동 설정 준비 여부
+   *
+   * TongTongTongGateway.assertReady만 호출하며 로그인이나 외부 요청은 하지 않음
    */
   public liveSourceReady(): boolean {
     try {
@@ -67,9 +127,10 @@ export class StudentSyncOrchestratorService {
   }
 
   /**
-   * 접수 응답과 실행을 분리한다. 안전하게 밖으로 전파된 예외에는 가능한 실패 기록을 먼저 시도하고,
-   * 그 단계에서 예외가 없을 때 lease 해제를 시도한다. 외부 결과 불명확 상태는 {@link execute}가 lease를
-   * 보존해 만료 복구에 맡긴다.
+   * 접수 응답과 실행 분리
+   *
+   * 밖으로 전파된 예외는 실패 기록을 먼저 시도하고, 그 단계가 성공하면 lease 해제 시도
+   * 외부 결과가 불명확한 상태는 execute가 lease를 유지해 만료 복구에 맡김
    */
   private startInBackground(publicRunId: string): void {
     void this.execute(publicRunId).catch(async (error: unknown) => {
@@ -78,12 +139,19 @@ export class StudentSyncOrchestratorService {
         if (run !== null) await this.failValidation(run.id, this.errorCode(error, "TONG_BACKGROUND_EXECUTION_FAILED"));
         await this.releaseLease(publicRunId);
       } catch {
-        // A later lease-recovery pass fails the run closed; there is never an automatic upstream retry.
+        // 이후 lease 복구가 실행을 실패로 정리함. 원천 자동 재시도는 없음
       }
     });
   }
 
-  /** 실행·지점 행과 30분 lease를 한 트랜잭션에서 만들며 중복 실행을 409로 거절한다. */
+  /**
+   * 실행 접수
+   *
+   * 회로 행 잠금 후 OPEN이면 거부, 실행·지점 실행 생성, 30분 lease 획득, 대기 이벤트 기록
+   * 호출자 트랜잭션 안에서 실행. lease를 얻지 못하면 409로 실행 생성까지 롤백
+   *
+   * @throws {DomainError} 409 회로 열림·이미 실행 중, 500 지점·회로 설정 누락
+   */
   private async claim(transaction: Prisma.TransactionClient, runType: "MANUAL" | "SCHEDULED", actorSubject: string) {
     const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
       select status from tong_auth_circuit where singleton_id=1 for update`;
@@ -92,6 +160,7 @@ export class StudentSyncOrchestratorService {
     const branches = await transaction.branch.findMany({ where: { code: { in: [...BRANCH_ORDER] }, active: true } });
     if (branches.length !== BRANCH_ORDER.length) this.fail(500, "BRANCH_CONFIGURATION_INVALID");
     const run = await transaction.syncRun.create({ data: { runType, status: "RUNNING", initiatedBy: actorSubject.slice(0, 160) } });
+    // 비어 있거나 만료된 lease만 획득
     const lease = await transaction.$queryRaw<Array<{ lock_name: string }>>`
       update sync_leases set holder_run_public_id=${run.publicId}::uuid,
              locked_until=${new Date(Date.now() + LEASE_MILLISECONDS)},updated_at=now()
@@ -108,7 +177,14 @@ export class StudentSyncOrchestratorService {
     return { runId: run.publicId };
   }
 
-  /** 만료 lease의 실행을 정리한다. 로그인 시도 후 결과가 불명확하면 인증 회로를 열고 자동 재시도를 막는다. */
+  /**
+   * 만료 lease의 실행 정리
+   *
+   * 로그인 시도 후 끝나지 않은 실행은 로그인 결과가 불명확하므로 회로를 열고 실패 처리해 자동 재시도 차단
+   * 로그인 전에 버려진 실행은 취소 처리. 어느 경우든 lease 해제
+   *
+   * @throws {DomainError} 409 이번 정리로 회로가 열린 경우
+   */
   private async recoverAbandonedLease(): Promise<void> {
     const opened = await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -123,6 +199,7 @@ export class StudentSyncOrchestratorService {
       if (lease === undefined) this.fail(500, "SYNC_LEASE_MISSING");
       if (lease.holder_run_public_id === null || !lease.expired) return false;
       const run = await transaction.syncRun.findUnique({ where: { publicId: lease.holder_run_public_id } });
+      // 로그인 시도 후 버려진 실행: 회로 열기, 지점·실행 실패, 감사 기록, lease 해제
       if (run?.status === "RUNNING" && run.loginAttempted) {
         const reasonCode = "TONG_PREVIOUS_LOGIN_RESULT_INDETERMINATE";
         await transaction.tongAuthCircuit.update({ where: { singletonId: 1 }, data: {
@@ -150,6 +227,7 @@ export class StudentSyncOrchestratorService {
         } });
         return true;
       }
+      // 로그인 전 버려진 실행: 취소
       if (run?.status === "RUNNING") {
         await transaction.syncBranchRun.updateMany({ where: { syncRunId: run.id }, data: {
           status: "CANCELLED", errorCode: "SYNC_ABANDONED_BEFORE_LOGIN", finishedAt: new Date(),
@@ -171,9 +249,15 @@ export class StudentSyncOrchestratorService {
   }
 
   /**
-   * 로그인 시도를 먼저 영속화한 뒤 외부 로그인·세 지점 조회를 순서대로 수행한다.
-   * 외부 결과가 불명확하면 회로를 영속적으로 열기 전에는 lease를 놓지 않는다.
-   * 세 스냅샷 검증·적재 뒤 {@link StudentPromotionService.promote}를 호출하며, 이후 예약 연결 실패는 이미 끝난 승격을 되돌리지 않는다.
+   * 실행 본문
+   *
+   * 1. 로그인 시도 표식을 먼저 커밋
+   * 2. 원천 로그인 후 세 지점을 순서대로 조회. 실패하면 회로를 열고 중단
+   * 3. 지점별 행 수 급변 확인과 정규화. 충돌이 있으면 충돌 기록 후 중단
+   * 4. 스테이징 적재 후 StudentPromotionService.promote로 원장 반영
+   * 5. 비재원생 예약 연결. 실패해도 이미 끝난 원장 반영은 되돌리지 않음
+   *
+   * 로그인 시도 이후 외부 결과가 확정되기 전에는 회로 OPEN을 기록하기 전까지 lease를 놓지 않음
    */
   private async execute(publicRunId: string): Promise<void> {
     let leaseReleaseSafe = true;
@@ -183,8 +267,8 @@ export class StudentSyncOrchestratorService {
       } });
       try { await this.markLoginAttempt(run.id); }
       catch (error) { await this.failValidation(run.id, this.errorCode(error, "TONG_LOGIN_ATTEMPT_NOT_ALLOWED")); return; }
-      // 로그인 시도 이후 외부 결과가 확정되기 전에는 회로 OPEN을 기록한 뒤에만 lease를 놓는다.
-      // OPEN 기록도 실패하면 만료 lease 복구가 RUNNING·loginAttempted를 보고 회로를 연다.
+      // 로그인 시도 이후 외부 결과가 확정되기 전에는 회로 OPEN을 기록한 뒤에만 lease를 놓음
+      // OPEN 기록도 실패하면 만료 lease 복구가 RUNNING·loginAttempted를 보고 회로를 엶
       leaseReleaseSafe = false;
       let session: Awaited<ReturnType<TongTongTongGateway["login"]>>;
       try { session = await this.gateway.login(); }
@@ -194,6 +278,7 @@ export class StudentSyncOrchestratorService {
         return;
       }
 
+      // 지점별 조회. 각 지점 전에 lease 연장
       const snapshots: TongBranchSnapshot[] = [];
       for (const branchRun of run.branchRuns) {
         const descriptor: TongBranchDescriptor = { code: branchRun.branch.code as BranchCode, sourceCode: branchRun.branch.sourceCode };
@@ -218,6 +303,7 @@ export class StudentSyncOrchestratorService {
       }
       leaseReleaseSafe = true;
 
+      // 행 수 급변 확인과 정규화. 실패는 검증 실패로 기록
       let normalized: NormalizedLiveSnapshot;
       try {
         await this.validateRowCounts(run.id, run.branchRuns.map((branch) => ({ id: branch.id, branchId: branch.branchId, fetched: snapshots[branch.sequenceNo - 1]!.assignments.length })));
@@ -230,15 +316,15 @@ export class StudentSyncOrchestratorService {
         await this.stage(run.id, normalized, branchIds);
         await this.heartbeat(publicRunId);
         await this.promotion.promote(run.id, normalized, branchIds);
-        // 학생 원장이 최신이 된 직후에 잇는다. 예약할 때는 비재원생이었다가 그 뒤 등록한
-        // 가정을 여기서 재원생 예약으로 돌린다. 실패해도 동기화 자체는 이미 성공이므로
-        // 원장 갱신을 되돌리지 않는다 — 다음 갱신이 같은 후보를 다시 본다.
+        // 학생 원장이 최신이 된 직후 비재원생 예약 연결
+        // 실패해도 동기화 자체는 성공이므로 원장 갱신을 되돌리지 않음. 다음 동기화가 같은 후보를 다시 확인
         try {
           await this.guestReconciler.reconcile(run.initiatedBy ?? "system:tong-sync");
         } catch (error) {
           this.logger.error(`guest booking reconciliation failed: ${error instanceof Error ? error.message : "unknown"}`);
         }
       } catch (error) { await this.failValidation(run.id, this.errorCode(error, "TONG_PROMOTION_FAILED")); }
+    // lease를 놓으면 안 되는 구간의 예외는 삼키고 만료 복구에 맡김
     } catch (error) {
       if (!leaseReleaseSafe) return;
       throw error;
@@ -247,7 +333,13 @@ export class StudentSyncOrchestratorService {
     }
   }
 
-  /** 외부 로그인 전에 회로와 실행 행을 잠그고 단 한 번의 로그인 시도 표식을 커밋한다. */
+  /**
+   * 로그인 시도 표식 커밋
+   *
+   * 외부 로그인 전에 회로와 실행 행을 잠그고, 회로 CLOSED·실행 RUNNING·미시도일 때만 표식
+   *
+   * @throws {DomainError} 409 회로 열림·이미 시도함
+   */
   private async markLoginAttempt(runId: bigint): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -264,7 +356,13 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 10_000, maxWait: 5_000 });
   }
 
-  /** 외부 인증·조회 결과가 불명확할 때 회로 OPEN과 실행 실패·감사를 한 트랜잭션에 기록한다. */
+  /**
+   * 회로 열기와 실행 실패 기록
+   *
+   * 외부 인증·조회 결과가 불명확할 때 회로 OPEN, 지점·실행 실패, 감사를 한 트랜잭션에 기록
+   *
+   * @param failedBranchRunId 실패한 지점 실행. 로그인 실패면 null
+   */
   private async openCircuitAndFail(runId: bigint, failedBranchRunId: bigint | null, actor: string, reasonCode: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const circuit = await transaction.$queryRaw<Array<{ status: string }>>`
@@ -299,7 +397,13 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
-  /** 정규화된 전체 스냅샷과 해시·지점별 검증 기록을 원자적으로 적재한다. 아직 학생 원장을 바꾸지 않는다. */
+  /**
+   * 정규화 스냅샷 스테이징 적재
+   *
+   * 스테이징 행, 지점별 검증 결과, 실행의 해시·지표를 한 트랜잭션에 기록. 학생 원장은 아직 변경하지 않음
+   *
+   * @throws {DomainError} 409 실행이 RUNNING이 아님
+   */
   private async stage(runId: bigint, snapshot: NormalizedLiveSnapshot, branchIds: ReadonlyMap<BranchCode, bigint>): Promise<void> {
     const metrics = this.json({ counts: snapshot.counts, branches: snapshot.branchCounts });
     await this.prisma.$transaction(async (transaction) => {
@@ -335,7 +439,9 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 120_000, maxWait: 10_000 });
   }
 
-  /** 정규화 충돌을 저장하고 승격 없이 실행을 CONFLICT로 마무리한다. */
+  /**
+   * 정규화 충돌을 저장하고 원장 반영 없이 실행을 CONFLICT로 종료
+   */
   private async persistConflicts(runId: bigint, snapshot: NormalizedLiveSnapshot): Promise<void> {
     const metrics = this.json({ counts: snapshot.counts, branches: snapshot.branchCounts });
     await this.prisma.$transaction(async (transaction) => {
@@ -361,7 +467,11 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
-  /** 검증·승격 실패를 실행 상태와 감사에 기록한다. 종료된 실행은 다시 실패 처리하지 않는다. */
+  /**
+   * 검증·반영 실패 기록
+   *
+   * RUNNING·PUBLISHING 실행만 실패 처리. 이미 종료된 실행은 그대로 둠
+   */
   private async failValidation(runId: bigint, code: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       const run = await transaction.syncRun.findUnique({ where: { id: runId }, select: { initiatedBy: true, status: true } });
@@ -378,7 +488,13 @@ export class StudentSyncOrchestratorService {
     }, { timeout: 15_000, maxWait: 5_000 });
   }
 
-  /** 직전 성공 조회가 20행 이상인 지점의 행 수가 절반 미만 또는 1.5배 초과로 변하면 거절한다. */
+  /**
+   * 지점별 행 수 급변 확인
+   *
+   * 직전 성공 조회가 20행 이상인 지점에서 절반 미만 또는 1.5배 초과로 바뀌면 거부
+   *
+   * @throws {DomainError} 422 TONG_ROW_COUNT_DRIFT
+   */
   private async validateRowCounts(runId: bigint, branches: readonly { id: bigint; branchId: bigint; fetched: number }[]): Promise<void> {
     for (const branch of branches) {
       const previous = await this.prisma.syncBranchRun.findFirst({ where: {
@@ -393,6 +509,11 @@ export class StudentSyncOrchestratorService {
     void runId;
   }
 
+  /**
+   * 스테이징 행 저장 데이터
+   *
+   * 제외 행은 개인정보 없이 순번·해시·제외 사유만 저장
+   */
   private stagingData(row: StagedSnapshotRow, syncRunId: bigint, branchId: bigint) {
     if (!row.included) return {
       syncRunId, branchId, sourceOrdinal: row.sourceOrdinal, sourceUniqueNo: `excluded:${row.sourceOrdinal}`,
@@ -420,25 +541,56 @@ export class StudentSyncOrchestratorService {
     };
   }
 
-  /** 현재 실행이 소유한 lease만 30분 연장한다. 소유권을 잃으면 갱신 수는 0이다. */
+  /**
+   * 현재 실행이 소유한 lease만 30분 연장. 소유권을 잃으면 갱신 0건
+   */
   private heartbeat(publicRunId: string): Promise<unknown> {
     return this.prisma.syncLease.updateMany({ where: { lockName: LEASE_NAME, holderRunPublicId: publicRunId }, data: {
       lockedUntil: new Date(Date.now() + LEASE_MILLISECONDS), updatedAt: new Date(),
     } });
   }
-  /** 현재 실행이 소유한 lease만 해제한다. 다른 실행의 lease는 건드리지 않는다. */
+
+  /**
+   * 현재 실행이 소유한 lease만 해제. 다른 실행의 lease는 유지
+   */
   private async releaseLease(publicRunId: string): Promise<void> {
     if (!this.prisma.configured) return;
     await this.prisma.syncLease.updateMany({ where: { lockName: LEASE_NAME, holderRunPublicId: publicRunId }, data: {
       holderRunPublicId: null, lockedUntil: null, updatedAt: new Date(),
     } });
   }
+
+  /**
+   * 저장 가능한 오류 코드
+   *
+   * @returns DomainError 코드가 형식에 맞으면 그 코드, 아니면 대체 코드
+   */
   private errorCode(error: unknown, fallback: string): string {
     const code = error instanceof DomainError ? error.code : fallback;
     return /^[A-Z0-9_]{3,100}$/.test(code) ? code : fallback;
   }
+
+  /**
+   * JSON 왕복으로 Prisma JSON 입력값 생성
+   */
   private json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+
+  /**
+   * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+   */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> { const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy; }
+
+  /**
+   * DB 연결 설정 확인
+   *
+   * @throws {DomainError} 503 DATABASE_NOT_CONFIGURED
+   */
   private requireDatabase(): void { if (!this.prisma.configured) this.fail(503, "DATABASE_NOT_CONFIGURED"); }
+
+  /**
+   * 동기화 작업 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never { throw new DomainError(status, code, "The student sync operation could not be completed."); }
 }

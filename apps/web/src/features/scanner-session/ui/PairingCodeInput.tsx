@@ -1,30 +1,59 @@
 "use client";
 
 /**
- * 6자리 연결 코드 입력 — 핸드오프: 단일 실제 input + 시각적 6칸, `autocomplete="one-time-code"`.
+ * 6자리 연결 코드 입력. 실제 input 하나 + 시각적 6칸, `autocomplete="one-time-code"`
  *
- * 칸을 6개의 input 으로 쪼개지 않는다: 스크린리더·붙여넣기·IME 가 모두 깨진다.
- * 실제 input 하나를 투명하게 덮고 칸은 표시 전용으로 그린다.
+ * 칸을 6개의 input 으로 쪼개지 않음: 스크린리더·붙여넣기·IME 가 모두 깨짐
+ * 실제 input 하나를 투명하게 덮고 칸은 표시 전용으로 그림
  *
- * 코드는 부모의 메모리 state 에만 있다 — 저장하지 않는다.
+ * 코드는 부모의 메모리 state 에만 있음 — 저장하지 않음
  */
 
 import { useId, useRef } from "react";
 import { PAIRING_CODE_LENGTH, normalizePairingCode } from "@/shared/api";
 
+/**
+ * 연결 코드 입력 속성
+ */
 export interface PairingCodeInputProps {
+  /**
+   * 입력값
+   */
   value: string;
+
+  /**
+   * 변경 처리
+   */
   onChange: (value: string) => void;
+
+  /**
+   * 제출 처리
+   */
   onSubmit: () => void;
+
+  /**
+   * 비활성 여부
+   */
   disabled?: boolean;
-  /** 접근성: 오류가 있으면 aria-invalid 와 설명을 연결한다. */
+  /**
+   * 접근성: 오류가 있으면 aria-invalid 와 설명을 연결함
+   */
   error?: string | null;
+
+  /**
+   * 입력 아래 안내 문구
+   */
   hint?: string;
 }
 
-/** 터치 영역 최소 60px (핸드오프 iPad 기준). */
+/**
+ * 터치 영역 최소 60px. iPad 기준
+ */
 const CELL_SIZE = 60;
 
+/**
+ * 6자리 연결 코드 입력
+ */
 export function PairingCodeInput({
   value,
   onChange,
@@ -49,7 +78,7 @@ export function PairingCodeInput({
       </label>
 
       <div style={{ position: "relative" }}>
-        {/* 표시 전용 6칸 — 실제 포커스는 아래 input 이 갖는다 */}
+        {/* 표시 전용 6칸 — 실제 포커스는 아래 input 이 가짐 */}
         <div aria-hidden="true" style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
           {cells.map((char, index) => {
             const active = !disabled && index === Math.min(value.length, PAIRING_CODE_LENGTH - 1);
@@ -84,7 +113,7 @@ export function PairingCodeInput({
           })}
         </div>
 
-        {/* 실제 입력 — 시각적으로 투명하지만 포커스 링은 칸에 그려진다 */}
+        {/* 실제 입력 — 시각적으로 투명하지만 포커스 링은 칸에 그려짐 */}
         <input
           ref={inputRef}
           id={inputId}

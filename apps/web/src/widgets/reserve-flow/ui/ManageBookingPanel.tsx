@@ -1,30 +1,30 @@
 "use client";
 
 /**
- * 예약 조회 · 변경 · 취소 · QR 표시 — 세 진입 모드가 한 패널을 공유한다.
+ * 예약 조회 · 변경 · 취소 · QR 표시 — 세 진입 모드가 한 패널을 공유함
  *
- * - `lookup`  (루트 `/reserve?mode=manage`): 전체 연락처 **조회**로 마스킹 목록을 받는다(OTP·proof·
+ * - `lookup`  (루트 `/reserve?mode=manage`): 전체 연락처 조회로 마스킹 목록을 받음(OTP·proof·
  *   쿠키 없음). 목록에서 예약 하나를 고르면 그 예약에 한해 이미 메모리에 있는 전체 연락처로
- *   **읽기 세션**(`read-session`, 쿠키)을 세워 마스킹 상세와 현재 QR 을 복구한다. 그 세션은 읽기
- *   전용이라 변경·취소에는 절대 쓰이지 않는다 — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
- * - `direct`  (문자 링크 `/booking/{id}`): **인증번호 없이** 예약 연락처만 대조해 읽기 세션을
- *   세우고(`read-session`), 이 예약 하나만 상세 조회하고 현재 QR 을 복구한다. 링크(추측 불가능한
- *   UUID)가 "가진 것", 연락처가 "아는 것"이다. 그 세션은 `access` 와 똑같이 읽기 전용이라
- *   변경·취소에는 쓰이지 않는다.
- * - `access` (SMS 개인 링크 교환 세션): 쿠키 세션으로 마스킹 상세 GET·QR 복구만 한다.
- *   변경·취소는 **절대 세션으로 인증하지 않는다** — 언제나 새 BOOKING_MANAGE proof 가 필요하다.
+ *   읽기 세션(`read-session`, 쿠키)을 세워 마스킹 상세와 현재 QR 을 복구함. 그 세션은 읽기
+ *   전용이라 변경·취소에는 절대 쓰이지 않음 — 언제나 새 BOOKING_MANAGE proof 가 필요함
+ * - `direct`  (문자 링크 `/booking/{id}`): 인증번호 없이 예약 연락처만 대조해 읽기 세션을
+ *   세우고(`read-session`), 이 예약 하나만 상세 조회하고 현재 QR 을 복구함. 링크(추측 불가능한
+ *   UUID)가 "가진 것", 연락처가 "아는 것"임. 그 세션은 `access` 와 똑같이 읽기 전용이라
+ *   변경·취소에는 쓰이지 않음
+ * - `access` (SMS 개인 링크 교환 세션): 쿠키 세션으로 마스킹 상세 GET·QR 복구만 함
+ *   변경·취소는 절대 세션으로 인증하지 않음 — 언제나 새 BOOKING_MANAGE proof 가 필요함
  *
- * 변경 경계 인증(공통): 회차 변경·참석 변경·취소는 **선택을 마친 순간** 사용 가능한 proof 가
- * 없으면 BOOKING_MANAGE OTP 오버레이를 연다. 오버레이는 이미 메모리에 있는 전체 연락처를 채워 주고,
- * 새 검증 뒤에만 그 변경을 X-Booking-Proof 로 수행한다. 변경 성공은 같은 트랜잭션에서 proof 를 소비하고,
- * 실패는 서버가 소비를 롤백하므로 같은 proof 로 재시도할 수 있다.
+ * 변경 경계 인증(공통): 회차 변경·참석 변경·취소는 선택을 마친 순간 사용 가능한 proof 가
+ * 없으면 BOOKING_MANAGE OTP 오버레이를 엶. 오버레이는 이미 메모리에 있는 전체 연락처를 채워 주고,
+ * 새 검증 뒤에만 그 변경을 X-Booking-Proof 로 수행함. 변경 성공은 같은 트랜잭션에서 proof 를 소비하고,
+ * 실패는 서버가 소비를 롤백하므로 같은 proof 로 재시도할 수 있음
  *
  * 시크릿·마스킹 경계:
- * - 표시하는 이름·연락처는 서버가 **이미 마스킹한** DTO 값(`maskedName`·`maskedContact`)이다 —
- *   그대로 그린다. 복원·역마스킹·이중 마스킹·저장·로깅·URL 노출을 하지 않는다.
- * - 원문 QR 은 **읽기 인증(proof/세션)** 이 있을 때만 복구 GET 으로 메모리에 온다: direct·access,
- *   그리고 lookup 에서 예약을 골라 읽기 세션을 세운 뒤. 목록만 보는 동안은 QR 을 요청하지 않는다.
- * - 전체 연락처는 화면 메모리에만 머문다(조회·읽기 세션 본문·OTP 발송에만 쓰고 저장·로깅·URL 금지).
+ * - 표시하는 이름·연락처는 서버가 이미 마스킹한 DTO 값(`maskedName`·`maskedContact`)임 —
+ *   그대로 그림. 복원·역마스킹·이중 마스킹·저장·로깅·URL 노출을 하지 않음
+ * - 원문 QR 은 읽기 인증(proof/세션) 이 있을 때만 복구 GET 으로 메모리에 옴: direct·access,
+ *   그리고 lookup 에서 예약을 골라 읽기 세션을 세운 뒤. 목록만 보는 동안은 QR 을 요청하지 않음
+ * - 전체 연락처는 화면 메모리에만 머묾(조회·읽기 세션 본문·OTP 발송에만 쓰고 저장·로깅·URL 금지)
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -66,10 +66,13 @@ import { BottomBar, ErrorNote, FlowHeader, FlowOverlay, FlowToast } from "./Mobi
 import { ContactEntryForm } from "./ContactEntry";
 import { OtpFields } from "./ReserveFlow";
 
+/**
+ * 예약 관리 패널 단계
+ */
 type Stage = "lookup" | "list" | "auth" | "loading" | "detail" | "expired";
 
 /**
- * 변경 경계에서 인증이 필요한 작업. move/party/cancel 은 검증 직후 **바로 수행**하고,
+ * 변경 경계에서 인증이 필요한 작업. move/party/cancel 은 검증 직후 바로 수행하고,
  */
 type PendingAction =
   | { kind: "move"; targetSessionId: string }
@@ -77,81 +80,165 @@ type PendingAction =
   | { kind: "cancel" }
 ;
 
+/**
+ * 예약 관리 변경 의도. 이동·참석 보호자 변경·취소
+ */
 type ManageMutationIntent =
   | {
+      /**
+       * 의도 종류
+       */
       kind: "move";
+
+      /**
+       * 가족 예약 ID
+       */
       familyBookingId: string;
+
+      /**
+       * 옮길 회차 ID
+       */
       targetSessionId: string;
+
+      /**
+       * 현재 버전. 다르면 409
+       */
       expectedVersion: number;
+
+      /**
+       * 변경 권한 증명
+       */
       proof: BookingProof;
     }
   | {
+      /**
+       * 의도 종류
+       */
       kind: "party";
+
+      /**
+       * 가족 예약 ID
+       */
       familyBookingId: string;
+
+      /**
+       * 바꿀 참석 보호자
+       */
       party: AttendanceParty;
+
+      /**
+       * 현재 버전. 다르면 409
+       */
       expectedVersion: number;
+
+      /**
+       * 변경 권한 증명
+       */
       proof: BookingProof;
     }
   | {
+      /**
+       * 의도 종류
+       */
       kind: "cancel";
+
+      /**
+       * 가족 예약 ID
+       */
       familyBookingId: string;
+
+      /**
+       * 현재 버전. 다르면 409
+       */
       expectedVersion: number;
+
+      /**
+       * 변경 권한 증명
+       */
       proof: BookingProof;
     };
 
 /**
- * lookup 모드에서 고른 예약 하나에 읽기 세션을 세우려는 **불변 의도**.
+ * lookup 모드에서 고른 예약 하나에 읽기 세션을 세우려는 불변 의도
  * 대상 키는 하나뿐(`READ_SESSION_TARGET`)이라, 결과 미상인 채로 *다른 예약*을 고르면 divergence 로
- * 막힌다 — 같은 예약을 그대로 다시 고르는 재시도만 같은 키·같은 `{contact}` 본문으로 나간다.
+ * 막힘 — 같은 예약을 그대로 다시 고르는 재시도만 같은 키·같은 `{contact}` 본문으로 나감
  */
 type ReadSessionIntent = { familyBookingId: string; contact: string };
 
-/** 읽기 세션은 한 번에 하나만 진행한다 — 단일 대상 키로 divergent 선택을 막는다. */
+/**
+ * 읽기 세션은 한 번에 하나만 진행함 — 단일 대상 키로 divergent 선택을 막음
+ */
 const READ_SESSION_TARGET = "read-session";
 
+/**
+ * 예약 관리 패널 속성
+ */
 export interface ManageBookingPanelProps {
-  /** 공개 회차 목록 — 예약의 회차 메타를 붙일 때만 쓴다(없으면 지어내지 않는다). */
+  /**
+   * 공개 회차 목록 — 예약의 회차 메타를 붙일 때만 씀(없으면 지어내지 않음)
+   */
   sessions: PublicSeminarSession[];
   /**
-   * 문자 링크(`/booking/{id}`)로 들어온 경우의 대상 예약 id — **direct 모드**.
-   * 최초 OTP 로 읽기 proof 를 얻어 이 id 하나만 범위 조회한다. id 는 조회 키일 뿐 권한이 아니다.
+   * 문자 링크(`/booking/{id}`)로 들어온 경우의 대상 예약 id — direct 모드
+   * 최초 OTP 로 읽기 proof 를 얻어 이 id 하나만 범위 조회함. id 는 조회 키일 뿐 권한이 아님
    */
   initialBookingId?: string;
   /**
-   * SMS 개인 링크 교환 성공으로 세운 **access(관리 세션) 모드**의 대상 예약 id.
-   * OTP 없이 쿠키 세션으로 조회·QR 복구만 하고, 변경은 새 proof 로만 한다.
+   * SMS 개인 링크 교환 성공으로 세운 access(관리 세션) 모드의 대상 예약 id
+   * OTP 없이 쿠키 세션으로 조회·QR 복구만 하고, 변경은 새 proof 로만 함
    */
   accessSession?: { familyBookingId: string };
   /**
-   * 이미 메모리에 있는 전체 연락처(access 모드의 교환 입력값). 변경 경계 OTP 를 채워 주는 데만 쓴다.
-   * ★ 저장·로깅·URL 노출 금지 — 오직 OTP 발송 대상 입력을 미리 채우는 용도다.
+   * 이미 메모리에 있는 전체 연락처(access 모드의 교환 입력값). 변경 경계 OTP 를 채워 주는 데만 씀
+   * 저장·로깅·URL 노출 금지 — 오직 OTP 발송 대상 입력을 미리 채우는 용도임
    */
   prefillContact?: string;
+
+  /**
+   * 패널 나가기
+   */
   onExit: () => void;
+
+  /**
+   * 짧은 안내 띄우기
+   */
   onToast: (message: string) => void;
 }
 
-/** 세션 만료 안내(access 모드). */
+/**
+ * 세션 만료 안내(access 모드)
+ */
 const SESSION_EXPIRED_NOTE = "예약 관리 세션이 만료됐습니다. 문자로 받은 예약 링크를 다시 열어 주세요.";
 
-/** 현재 QR 상태 — 로딩/표시/불가(폐기·만료)/취소/조회전용/오류를 서로 다른 상태로 구분한다. */
+/**
+ * 현재 QR 상태 — 로딩/표시/불가(폐기·만료)/취소/조회전용/오류를 서로 다른 상태로 구분함
+ */
 type QrState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ready"; token: string }
-  /** QR 이 폐기·만료됨(409/410) 또는 활성 QR 이 없음 — 재발급이 아니라 상태만 알린다. */
+  /**
+   * QR 이 폐기·만료됨(409/410) 또는 활성 QR 이 없음 — 재발급이 아니라 상태만 알림
+   */
   | { kind: "unavailable" }
-  /** 예약이 취소돼 QR 이 없음. */
+  /**
+   * 예약이 취소돼 QR 이 없음
+   */
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
 
-/** 변경 경계 OTP 오버레이의 제목에 쓸 작업 이름 — 어떤 작업을 인증하는지 분명히 밝힌다. */
+/**
+ * 변경 경계 OTP 오버레이의 제목에 쓸 작업 이름 — 어떤 작업을 인증하는지 분명히 밝힘
+ */
 const ACTION_LABELS: Record<PendingAction["kind"], string> = {
   move: "회차 변경",
   party: "참석 학부모 변경",
   cancel: "예약 취소",
 };
 
+/**
+ * 예약 조회·변경·취소 패널. 변경마다 새 증명을 받음
+ */
 export function ManageBookingPanel({
   sessions,
   initialBookingId,
@@ -175,12 +262,12 @@ export function ManageBookingPanel({
   const [lookupContact, setLookupContact] = useState("");
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  // direct 모드(문자 링크) 본인 확인 입력 — 인증번호 없이 이 연락처 하나로 대조한다.
+  // direct 모드(문자 링크) 본인 확인 입력 — 인증번호 없이 이 연락처 하나로 대조함
   const [directContact, setDirectContact] = useState("");
   const [directBusy, setDirectBusy] = useState(false);
   const [directError, setDirectError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  // lookup 목록에서 고른 예약에 읽기 세션을 세우는 중 — 그 항목만 진행 표시하고 목록 전체는 잠근다.
+  // lookup 목록에서 고른 예약에 읽기 세션을 세우는 중 — 그 항목만 진행 표시하고 목록 전체는 잠금
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -190,14 +277,14 @@ export function ManageBookingPanel({
   const [otpOpen, setOtpOpen] = useState(false);
   const [qr, setQr] = useState<QrState>({ kind: "idle" });
   const [toast, setToast] = useState<string | null>(null);
-  // 오버레이 제목이 어떤 작업을 인증하는지 밝히려면 render 에서 읽어야 하므로 state 로 둔다
-  // (전체 action 은 ref 로 두어 onVerified 클로저의 최신값을 보장한다).
+  // 오버레이 제목이 어떤 작업을 인증하는지 밝히려면 render 에서 읽어야 하므로 state 로 둠
+  // (전체 action 은 ref 로 두어 onVerified 클로저의 최신값을 보장함)
   const [pendingKind, setPendingKind] = useState<PendingAction["kind"] | null>(null);
   const [hasRetainedMutation, setHasRetainedMutation] = useState(false);
 
   const proof = useBookingProof();
   const mutationIntents = useKeyedOperationIntents<ManageMutationIntent>();
-  // 변경 intent 와 **별개** 키다 — 읽기 세션(POST)의 결과 미상 재시도가 변경과 섞이지 않게 한다.
+  // 변경 intent 와 별개 키임 — 읽기 세션(POST)의 결과 미상 재시도가 변경과 섞이지 않게 함
   const readSessionIntents = useKeyedOperationIntents<ReadSessionIntent>();
   const pendingActionRef = useRef<PendingAction | null>(null);
 
@@ -207,7 +294,7 @@ export function ManageBookingPanel({
     [sessions],
   );
 
-  /** 현재 활성 QR 복구(direct·access 읽기 인증 전용) — 취소/폐기/만료를 구분한다. 조회로 버전이 안 바뀐다. */
+  // 현재 활성 QR 복구(direct·access 읽기 인증 전용) — 취소/폐기/만료를 구분함. 조회로 버전이 안 바뀜
   const loadQr = useCallback(
     async (booking: PublicMaskedFamilyBooking, auth: OwnedBookingReadAuth) => {
       if (booking.status === "CANCELLED") {
@@ -236,18 +323,14 @@ export function ManageBookingPanel({
     [mode],
   );
 
-  /**
-   * lookup 모드: 마스킹 목록에서 고른 예약에 **읽기 세션**을 세우고 상세·현재 QR 을 연다.
-   *
-   * 1) 이미 메모리에 있는 전체 연락처로 `POST …/read-session`(본문 정확히 `{contact}`, CSRF·
-   *    credentials·안정적 Idempotency-Key). 어댑터가 응답 csrfToken 을 즉시 채택한다.
-   * 2) 같은 예약을 관리 세션 쿠키로 마스킹 상세 GET → 현재 QR 복구 GET(원문 QR 은 메모리에만).
-   * 3) 같은 페이지에서 기존 상세·ReservationQr 를 그린다.
-   *
-   * 결과 미상(network·5xx)이면 키·본문을 그대로 붙잡아 두고 목록에 남긴다 — 같은 예약 재시도만
-   * 같은 키로 나가고, 다른 예약 선택은 divergence 로 막는다. 변경·취소는 여기서 인증하지
-   * 않는다(언제나 새 BOOKING_MANAGE proof) — 읽기 세션은 읽기 전용이다.
-   */
+  // lookup 모드: 마스킹 목록에서 고른 예약에 읽기 세션을 세우고 상세·현재 QR 을 엶
+  // 1) 이미 메모리에 있는 전체 연락처로 `POST …/read-session`(본문 정확히 `{contact}`, CSRF·
+  //    credentials·안정적 Idempotency-Key). 어댑터가 응답 csrfToken 을 즉시 채택함
+  // 2) 같은 예약을 관리 세션 쿠키로 마스킹 상세 GET → 현재 QR 복구 GET(원문 QR 은 메모리에만)
+  // 3) 같은 페이지에서 기존 상세·ReservationQr 를 그림
+  // 결과 미상(network·5xx)이면 키·본문을 그대로 붙잡아 두고 목록에 남김 — 같은 예약 재시도만
+  // 같은 키로 나가고, 다른 예약 선택은 divergence 로 막음. 변경·취소는 여기서 인증하지
+  // 않음(언제나 새 BOOKING_MANAGE proof) — 읽기 세션은 읽기 전용임
   const selectLookupBooking = useCallback(
     async (booking: PublicMaskedFamilyBooking) => {
       if (selectingId !== null) return;
@@ -269,13 +352,13 @@ export function ManageBookingPanel({
       setSelectingId(booking.familyBookingId);
       setListError(null);
       try {
-        // 읽기 세션 수립(durable POST) — 응답 csrfToken 채택은 어댑터가 한다.
+        // 읽기 세션 수립(durable POST) — 응답 csrfToken 채택은 어댑터가 함
         await establishFamilyBookingContactReadSession(intent.familyBookingId, intent.contact, {
           idempotencyKey: operation.key,
         });
-        // POST 가 확정 성공했으니 키·본문을 놓아준다(이후 GET 은 읽기라 멱등키와 무관하다).
+        // POST 가 확정 성공했으니 키·본문을 놓아줌(이후 GET 은 읽기라 멱등키와 무관함)
         readSessionIntents.settle(READ_SESSION_TARGET);
-        // 관리 세션 쿠키로 마스킹 상세 GET → 현재 QR 복구. proof 는 붙지 않는다.
+        // 관리 세션 쿠키로 마스킹 상세 GET → 현재 QR 복구. proof 는 붙지 않음
         const detail = await getPublicFamilyBooking(intent.familyBookingId, { session: "management" });
         setSelected(detail);
         setActionError(null);
@@ -286,8 +369,8 @@ export function ManageBookingPanel({
         await loadQr(detail, { session: "management" });
       } catch (caught) {
         if (isAborted(caught)) return;
-        // POST 가 이미 성공했으면 settle 로 키가 빠져 이 호출은 무해하다(GET 실패는 읽기 실패다).
-        // POST 자체가 미상(network·5xx)이면 키·본문을 붙잡아 같은 예약 재시도가 같은 키로 나가게 한다.
+        // POST 가 이미 성공했으면 settle 로 키가 빠져 이 호출은 무해함(GET 실패는 읽기 실패임)
+        // POST 자체가 미상(network·5xx)이면 키·본문을 붙잡아 같은 예약 재시도가 같은 키로 나가게 함
         readSessionIntents.settle(READ_SESSION_TARGET, caught);
         setListError(readSessionErrorMessage(caught));
       } finally {
@@ -297,7 +380,7 @@ export function ManageBookingPanel({
     [selectingId, lookupContact, readSessionIntents, mutationIntents, loadQr],
   );
 
-  /* ── access 모드: 마운트 시 대상 예약 하나 GET + 현재 QR 복구 ── */
+  // ── access 모드: 마운트 시 대상 예약 하나 GET + 현재 QR 복구 ──
   useEffect(() => {
     if (mode !== "access" || accessBookingId === null) return;
     const controller = new AbortController();
@@ -330,19 +413,14 @@ export function ManageBookingPanel({
     return () => controller.abort();
   }, [mode, accessBookingId, loadQr]);
 
-  /**
-   * direct 모드 본인 확인 — **인증번호 없이 연락처 대조만** 한다.
-   *
-   * 문자로 나가는 `/booking/{id}` 링크는 접근 링크(`/booking/access`)와 같은 수준으로 열린다:
-   * 링크(추측 불가능한 UUID)는 "가진 것", 예약 연락처는 "아는 것"이다. 서버가 그 예약 하나에
-   * 대해 연락처 digest 를 대조하고(read-session), 맞을 때만 읽기 세션을 세운다.
-   *
-   * 브루트포스는 서버가 막는다 — 예약당 10회·연락처당 10회·IP 30회·전역 600회/분이고,
-   * 없는 예약·연락처 불일치·취소된 예약이 모두 같은 오류로 돌아와 열거 단서를 주지 않는다.
-   *
-   * ★ 이 세션은 **읽기 전용**이다. 회차 변경·취소는 여전히 새 BOOKING_MANAGE proof 를
-   *   요구한다 — 링크를 주운 사람이 남의 예약을 취소할 수 있게 되면 안 된다.
-   */
+  // direct 모드 본인 확인 — 인증번호 없이 연락처 대조만 함
+  // 문자로 나가는 `/booking/{id}` 링크는 접근 링크(`/booking/access`)와 같은 수준으로 열림:
+  // 링크(추측 불가능한 UUID)는 "가진 것", 예약 연락처는 "아는 것"임. 서버가 그 예약 하나에
+  // 대해 연락처 digest 를 대조하고(read-session), 맞을 때만 읽기 세션을 세움
+  // 브루트포스는 서버가 막음 — 예약당 10회·연락처당 10회·IP 30회·전역 600회/분이고,
+  // 없는 예약·연락처 불일치·취소된 예약이 모두 같은 오류로 돌아와 열거 단서를 주지 않음
+  // 이 세션은 읽기 전용임. 회차 변경·취소는 여전히 새 BOOKING_MANAGE proof 를
+  //   요구함 — 링크를 주운 사람이 남의 예약을 취소할 수 있게 되면 안 됨
   const submitDirectAuth = useCallback(
     async (bookingId: string) => {
       const contact = normalizeContactDigits(directContact);
@@ -381,7 +459,7 @@ export function ManageBookingPanel({
     [directContact, readSessionIntents, mutationIntents, loadQr],
   );
 
-  /** 변경 성공 공통 처리 — proof 소비 + 선택·목록 항목을 반환 마스킹 DTO 로 갱신 + 성공 안내. */
+  // 변경 성공 공통 처리 — proof 소비 + 선택·목록 항목을 반환 마스킹 DTO 로 갱신 + 성공 안내
   const applyMutation = useCallback(
     (updated: PublicMaskedFamilyBooking, message: string) => {
       proof.consume();
@@ -395,7 +473,7 @@ export function ManageBookingPanel({
     [proof, onToast],
   );
 
-  /** 불변 intent 로 선택된 변경을 보낸다. 결과 미상에서는 같은 key+같은 body만 재시도한다. */
+  // 불변 intent 로 선택된 변경을 보냄. 결과 미상에서는 같은 key+같은 body만 재시도함
   const runMutationIntent = useCallback(
     async (requested: ManageMutationIntent) => {
       const target = `booking:${requested.familyBookingId}`;
@@ -448,8 +526,8 @@ export function ManageBookingPanel({
         mutationIntents.settle(target, caught);
         const retained = mutationIntents.retained(target) !== null;
         setHasRetainedMutation(retained);
-        // 서버가 실패 트랜잭션에서 proof 소비를 롤백하므로 재시도용으로 유지한다.
-        // 단, proof 자체가 죽은 계열(BOOKING_PROOF_*)은 되살릴 수 없으니 버리고 재인증을 요구한다.
+        // 서버가 실패 트랜잭션에서 proof 소비를 롤백하므로 재시도용으로 유지함
+        // 단, proof 자체가 죽은 계열(BOOKING_PROOF_*)은 되살릴 수 없으니 버리고 재인증을 요구함
         if (isProofDead(caught)) proof.clear();
         else proof.adopt(intent.proof);
         setActionError(
@@ -464,7 +542,7 @@ export function ManageBookingPanel({
     [mutationIntents, applyMutation, proof],
   );
 
-  /** 화면 선택값을 첫 전송 전에 불변 intent로 굳힌다. */
+  // 화면 선택값을 첫 전송 전에 불변 intent로 굳힘
   const runAction = useCallback(
     (action: PendingAction, issued: BookingProof) => {
       if (!selected) return;
@@ -494,7 +572,7 @@ export function ManageBookingPanel({
     void runMutationIntent(retained);
   }, [selected, mutationIntents, runMutationIntent]);
 
-  /* ── 변경 경계 OTP — 사용 가능한 proof 가 없을 때만 열린다 ── */
+  // ── 변경 경계 OTP — 사용 가능한 proof 가 없을 때만 열린다 ──
   const actionOtp = useOtpFlow({
     purpose: "BOOKING_MANAGE",
     onVerified: (issued) => {
@@ -507,14 +585,12 @@ export function ManageBookingPanel({
     },
   });
 
-  /** 이미 메모리에 있는 전체 연락처 — 변경 경계 OTP 발송 입력을 미리 채운다. */
+  // 이미 메모리에 있는 전체 연락처 — 변경 경계 OTP 발송 입력을 미리 채움
   const manageContact =
     mode === "lookup" ? lookupContact : mode === "access" ? (prefillContact ?? "") : directContact;
 
-  /**
-   * 변경 작업 시작 — 선택을 마친 직후 호출한다.
-   * 사용 가능한 proof 가 있으면 바로 수행/진입하고, 없으면 연락처를 채운 BOOKING_MANAGE OTP 를 연다.
-   */
+  // 변경 작업 시작 — 선택을 마친 직후 호출함
+  // 사용 가능한 proof 가 있으면 바로 수행/진입하고, 없으면 연락처를 채운 BOOKING_MANAGE OTP 를 엶
   const beginAction = useCallback(
     (action: PendingAction) => {
       setActionError(null);
@@ -531,7 +607,7 @@ export function ManageBookingPanel({
     [proof.proof, proof.isUsable, runAction, actionOtp, manageContact],
   );
 
-  /** 변경 경계 OTP 를 닫는다 — 미완 인증이면 대기 작업을 버린다(새로 발급된 미사용 proof 는 없다). */
+  // 변경 경계 OTP 를 닫음 — 미완 인증이면 대기 작업을 버림(새로 발급된 미사용 proof 는 없음)
   const dismissActionOtp = useCallback(() => {
     setOtpOpen(false);
     pendingActionRef.current = null;
@@ -539,7 +615,7 @@ export function ManageBookingPanel({
     actionOtp.restart();
   }, [actionOtp]);
 
-  /* ── lookup 모드 연락처 조회 ── */
+  // ── lookup 모드 연락처 조회 ──
   const submitLookup = useCallback(async () => {
     const digits = normalizeContactDigits(lookupContact);
     if (!isCompleteContact(digits) || lookupBusy) return;
@@ -558,7 +634,7 @@ export function ManageBookingPanel({
 
   const lookupDigits = normalizeContactDigits(lookupContact);
 
-  /* ── 세션 만료(access 모드) ── */
+  // ── 세션 만료(access 모드) ──
   if (stage === "expired")
     return (
       <div data-screen-label="모바일 — 예약 링크 만료" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -575,7 +651,7 @@ export function ManageBookingPanel({
       </div>
     );
 
-  /* ── access 모드 로딩 ── */
+  // ── access 모드 로딩 ──
   if (stage === "loading")
     return (
       <div data-screen-label="모바일 — 예약 불러오는 중" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -587,7 +663,7 @@ export function ManageBookingPanel({
       </div>
     );
 
-  /* ── 연락처 조회 (lookup 모드) ── */
+  // ── 연락처 조회 (lookup 모드) ──
   if (stage === "lookup")
     return (
       <div data-screen-label="모바일 — 예약 조회" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -615,7 +691,7 @@ export function ManageBookingPanel({
       </div>
     );
 
-  /* ── direct 모드(문자 링크) 본인 확인 — 인증번호 없이 연락처 대조만 ── */
+  // ── direct 모드(문자 링크) 본인 확인 — 인증번호 없이 연락처 대조만 ──
   if (stage === "auth")
     return (
       <div data-screen-label="모바일 — 예약 조회" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -644,7 +720,7 @@ export function ManageBookingPanel({
       </div>
     );
 
-  /* ── 조회 결과 목록 (lookup 모드) ── */
+  // ── 조회 결과 목록 (lookup 모드) ──
   if (stage === "list")
     return (
       <div data-screen-label="모바일 — 예약 목록" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -672,7 +748,7 @@ export function ManageBookingPanel({
                 >
                   <span style={{ flex: 1 }}>
                     <span style={{ display: "block", fontWeight: 800, fontSize: 14.5, color: "var(--text-strong)" }}>
-                      {/* 서버가 이미 마스킹한 이름 — 그대로 표시한다(이중 마스킹 금지). */}
+                      {/* 서버가 이미 마스킹한 이름 — 그대로 표시함(이중 마스킹 금지) */}
                       {b.participants.map((p) => p.maskedName).join(", ")}
                     </span>
                     <span style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -699,9 +775,9 @@ export function ManageBookingPanel({
 
   if (!selected) return null;
 
-  /* ── 예약 상세 · 관리 ── */
+  // ── 예약 상세 · 관리 ──
   const detailSession = sessionOf(selected);
-  // 회차 이동 후보는 정책 모듈이 마스킹 참가자(유형·캠퍼스)만으로 판정한다 — 타입을 약화시키지 않는다.
+  // 회차 이동 후보는 정책 모듈이 마스킹 참가자(유형·캠퍼스)만으로 판정함 — 타입을 약화시키지 않음
   const movable = moveTargetSessions(sessions, {
     seminarSessionId: selected.seminarSessionId,
     participants: selected.participants,
@@ -734,7 +810,7 @@ export function ManageBookingPanel({
             <QrArea qr={qr} bookingId={selected.familyBookingId} status={FAMILY_BOOKING_STATUS_LABELS[selected.status]} />
 
             <div style={{ display: "flex", flexDirection: "column", gap: 9, width: "100%" }}>
-              {/* 서버가 이미 마스킹한 값(maskedName·maskedContact) — 그대로 표시한다(이중 마스킹 금지). */}
+              {/* 서버가 이미 마스킹한 값(maskedName·maskedContact) — 그대로 표시함(이중 마스킹 금지) */}
               <KV k="참석자명" v={maskedNames} />
               <KV k="참석 학부모" v={attendancePartySummary(selected.attendanceParty)} />
               {detailSession && <KV k="일시" v={`${fmtSessionCardDateTime(new Date(detailSession.startsAt))} · ${SEMINAR_LOCATION}`} />}
@@ -793,7 +869,7 @@ export function ManageBookingPanel({
                 >
                   <span style={{ flex: 1 }}>
                     <span style={{ display: "block", fontWeight: 700, fontSize: 14, color: "var(--text-strong)" }}>{s.seminarTitle}</span>
-                    {/* 회차 선택에는 일시만 보여 주고 서버의 예약 가능 기간 판정을 따른다. */}
+                    {/* 회차 선택에는 일시만 보여 주고 서버의 예약 가능 기간 판정을 따름 */}
                     <span style={{ display: "block", fontSize: 12, color: "var(--text-faint)", marginTop: 2 }}>
                       {fmtDateTime(new Date(s.startsAt))}
                     </span>
@@ -885,7 +961,9 @@ export function ManageBookingPanel({
   );
 }
 
-/** QR 영역 — 복구 상태(로딩/표시/불가/취소/조회전용/오류)를 서로 다르게 보여 준다. */
+/**
+ * QR 영역 — 복구 상태(로딩/표시/불가/취소/조회전용/오류)를 서로 다르게 보여 줌
+ */
 function QrArea({ qr, bookingId, status }: { qr: QrState; bookingId: string; status: string }) {
   if (qr.kind === "ready") {
     return <ReservationQr qrToken={qr.token} downloadName={BRAND_QR_DOWNLOAD_BASENAME} familyBookingId={bookingId} />;
@@ -911,14 +989,19 @@ function QrArea({ qr, bookingId, status }: { qr: QrState; bookingId: string; sta
   }
 }
 
-/** proof 자체가 무효·소진된 계열인가 — 되살릴 수 없으므로 재인증을 요구한다. */
+/**
+ * proof 자체가 무효·소진된 계열인가 — 되살릴 수 없으므로 재인증을 요구함
+ */
 function isProofDead(error: unknown): boolean {
   return isApiError(error) && error.code.startsWith("BOOKING_PROOF");
 }
 
+/**
+ * 예약 변경 오류를 안내 문구로 변환
+ */
 function manageErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
-  // 정확한 도메인 code 를 HTTP status 폴백보다 먼저 본다.
+  // 정확한 도메인 code 를 HTTP status 폴백보다 먼저 봄
   const byCode = manageErrorMessageForCode(error.code);
   if (byCode !== null) return byCode;
   switch (error.status) {
@@ -937,9 +1020,9 @@ function manageErrorMessage(error: unknown): string {
 }
 
 /**
- * 읽기 세션 수립(또는 이어지는 상세·QR GET) 실패 문구 — 목록에 남아 정중하게 안내한다.
+ * 읽기 세션 수립(또는 이어지는 상세·QR GET) 실패 문구 — 목록에 남아 정중하게 안내함
  * 401(BOOKING_READ_SESSION_INVALID)·429(BOOKING_READ_SESSION_RATE_LIMITED)·서비스(5xx)·네트워크를
- * 서로 다른 정식 한국어로 구분한다. 401 은 예약 없음·연락처 불일치·취소·자격 없음을 하나로 뭉친다.
+ * 서로 다른 정식 한국어로 구분함. 401 은 예약 없음·연락처 불일치·취소·자격 없음을 하나로 뭉침
  */
 function readSessionErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
@@ -957,6 +1040,9 @@ function readSessionErrorMessage(error: unknown): string {
   }
 }
 
+/**
+ * 예약 조회 오류를 안내 문구로 변환
+ */
 function lookupErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
   switch (error.status) {
@@ -965,7 +1051,7 @@ function lookupErrorMessage(error: unknown): string {
     case 403:
       return "예약 조회를 진행할 수 없습니다. 잠시 후 다시 시도해 주세요.";
     case 429:
-      // 계약 code: BOOKING_LOOKUP_RATE_LIMITED.
+      // 계약 code: BOOKING_LOOKUP_RATE_LIMITED
       return "조회 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.";
     case 503:
       return "예약 조회가 일시적으로 어렵습니다. 잠시 후 다시 시도해 주세요.";

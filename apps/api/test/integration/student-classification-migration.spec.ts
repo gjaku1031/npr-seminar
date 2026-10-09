@@ -5,16 +5,28 @@ import { Client } from "pg";
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * 검증 대상 마이그레이션 SQL 경로
+ */
 const migrationPath = resolve(
   apiDirectory,
   "prisma/migrations/20260718021000_student_schedule_suffix_classes/migration.sql",
 );
 
+// 시간표 접미사 반 분류 마이그레이션
 describe("student timetable-suffix classification migration", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let client: Client;
 
+  // 컨테이너 기동과 이전 마이그레이션까지 적용
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_student_classification" })
@@ -35,11 +47,13 @@ describe("student timetable-suffix classification migration", () => {
     await client.connect();
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await client?.end();
     await postgres?.stop();
   });
 
+  // 재실행해도 안전하고 완화된 안전 실패 제약을 붙임
   it("is replay-safe and attaches the relaxed fail-closed constraint", async () => {
     const migration = readFileSync(migrationPath, "utf8");
     await client.query(migration);
@@ -56,6 +70,7 @@ describe("student timetable-suffix classification migration", () => {
     }]);
   });
 
+  // 대괄호 없는 반 또는 끝의 정확한 시간표 접미사 하나만 허용
   it("accepts only a bracketless class or one exact trailing timetable suffix", async () => {
     const values = [
       "3T3A", "과1특A[토3]", "과고1가람[일4]", "고1수학[월토1]", "고1수학[월수]", "고1수학[월수금1]",
@@ -95,6 +110,7 @@ describe("student timetable-suffix classification migration", () => {
     ]);
   });
 
+  // 대표 반·표시 단위 분류에 접미사를 뗀 기본 반 이름 사용
   it("uses the suffix-stripped base for canonical and representative classification", async () => {
     const result = await client.query<{
       value: string;

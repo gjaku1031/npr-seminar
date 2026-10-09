@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
+# 통통통 학생 동기화 켜기·끄기. api.env·runtime.env 의 활성화 두 값을 바꾸고 API 재시작. 원천에 요청하지 않음
+# 실행: pve-release 에서 root 로 tong-sync-control.sh enable|disable
+# 종료 코드: 0 반영 완료, 1 사전 조건 실패·배포 진행 중·API 재시작 실패(이전 설정으로 복구)
 set -Eeuo pipefail
 
+# 대상 파일과 서비스
 readonly api_env=/etc/npr-seminar/api.env
 readonly runtime_env=/etc/npr-seminar/runtime.env
 readonly service=npr-seminar-api.service
 
+# 오류를 출력하고 종료 코드 1로 끝냄
 die() { printf 'tong sync control: %s\n' "$*" >&2; exit 1; }
 
+# 실행 위치·인자·env 파일 권한 확인
 [[ ${EUID} -eq 0 && $(hostname -s) == pve-release ]] \
   || die "refusing to run outside pve-release as root"
 [[ $# -eq 1 && ( $1 == enable || $1 == disable ) ]] \
@@ -18,6 +24,7 @@ for environment_file in "${api_env}" "${runtime_env}"; do
     || die "${environment_file} must be root:root mode 0600"
 done
 
+# 필요한 명령과 env 키가 정확히 하나씩 있는지 확인
 for command_name in awk chmod chown cp flock hostname mktemp mv rm stat systemctl; do
   command -v "${command_name}" >/dev/null 2>&1 || die "required command is missing: ${command_name}"
 done
@@ -32,11 +39,13 @@ for key in TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD; do
     || die "API environment must contain exactly one ${key}"
 done
 
+# 배포와 동시에 실행하지 않음
 exec 8>/run/lock/npr-seminar-deploy.lock
 flock -n 8 || die "an NPR deployment is active"
 exec 9>/run/lock/npr-seminar-tong-sync-control.lock
 flock -n 9 || die "another Tong sync control operation is active"
 
+# 임시 파일과 복구용 사본. 중간에 실패하면 사본으로 되돌리고 API 재시작
 api_temp=$(mktemp /etc/npr-seminar/.api.env.tong.XXXXXX)
 runtime_temp=$(mktemp /etc/npr-seminar/.runtime.env.tong.XXXXXX)
 api_rollback=$(mktemp /etc/npr-seminar/.api.env.tong-rollback.XXXXXX)
@@ -56,6 +65,7 @@ cp --preserve=mode,ownership,timestamps -- "${runtime_env}" "${runtime_rollback}
 chown root:root "${api_rollback}" "${runtime_rollback}"
 chmod 0600 "${api_rollback}" "${runtime_rollback}"
 
+# 두 키를 지우고 새 값으로 다시 써서 임시 파일 생성
 enabled=false
 confirmed=false
 if [[ $1 == enable ]]; then enabled=true; confirmed=true; fi
@@ -68,10 +78,12 @@ for source_and_temp in "${runtime_env}:${runtime_temp}" "${api_env}:${api_temp}"
   chmod 0600 "${temp}"
 done
 
+# 원자적으로 교체
 rollback_required=true
 mv -fT -- "${runtime_temp}" "${runtime_env}"
 mv -fT -- "${api_temp}" "${api_env}"
 
+# API 가 새 설정으로 뜨지 않으면 이전 설정으로 복구
 if ! systemctl restart "${service}" || ! systemctl is-active --quiet "${service}"; then
   mv -fT -- "${runtime_rollback}" "${runtime_env}"
   mv -fT -- "${api_rollback}" "${api_env}"

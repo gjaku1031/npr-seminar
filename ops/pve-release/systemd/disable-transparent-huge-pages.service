@@ -1,9 +1,11 @@
+# 부팅 때 투명 huge page 를 끔. Redis 지연 시간 안정화용으로 Redis·PostgreSQL 보다 먼저 실행
 [Unit]
 Description=Disable transparent huge pages for Redis latency stability
 Before=redis-server.service postgresql.service
 
 [Service]
 Type=oneshot
+# 한 번 쓰고 끝나는 oneshot. RemainAfterExit 로 활성 상태 유지
 ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled'
 RemainAfterExit=yes
 

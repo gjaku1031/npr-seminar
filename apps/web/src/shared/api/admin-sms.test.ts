@@ -1,10 +1,10 @@
 /**
- * 문자 어댑터 순수 헬퍼 테스트 (node:test + tsx).
+ * 문자 어댑터 순수 헬퍼 테스트 (node:test + tsx)
  *
- * 여기서 지키려는 것은 "안 보내는 것"이다 — 이 파일은 fetch 를 부르지 않고, 실제 게이트웨이나
- * 큐를 건드리지 않는다. 검증 대상은 전부 순수 함수다.
+ * 여기서 지키려는 것은 "안 보내는 것"임 — 이 파일은 fetch 를 부르지 않고, 실제 게이트웨이나
+ * 큐를 건드리지 않음. 검증 대상은 전부 순수 함수임
  *
- * 픽스처는 계약(openapi.yaml SMS 스키마)의 **필수 필드를 전부** 채운 실제 응답 모양이다.
+ * 픽스처는 계약(openapi.yaml SMS 스키마)의 필수 필드를 전부 채운 실제 응답 모양임
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -38,9 +38,14 @@ import type {
 
 /* ── 픽스처 ──────────────────────────────────────────────────────────────── */
 
+/**
+ * 테스트 회차 ID
+ */
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 
-/** 계약 SmsTargetPreview 필수 필드 전부. */
+/**
+ * 계약 SmsTargetPreview 필수 필드 전부
+ */
 const preview = (overrides: Partial<SmsTargetPreview> = {}): SmsTargetPreview => ({
   branch: "CAMPUS_A",
   seminarSessionId: SESSION_ID,
@@ -78,6 +83,9 @@ const preview = (overrides: Partial<SmsTargetPreview> = {}): SmsTargetPreview =>
   ...overrides,
 });
 
+/**
+ * 테스트 API 오류 생성
+ */
 const problem = (status: number, code: string): ApiError =>
   new ApiError({ kind: "problem", status, code, message: "실패" });
 
@@ -102,19 +110,22 @@ describe("primarySample", () => {
     });
 
     assert.equal(primarySample(empty), null);
-    // 원문은 여전히 읽을 수 있어야 한다 (화면이 "치환 전"이라고 밝히고 보여 준다).
+    // 원문은 여전히 읽을 수 있어야 함 (화면이 "치환 전"이라고 밝히고 보여 줌)
     assert.equal(empty.messageTemplate, "[npr] {학생명}님 {설명회명} 안내");
   });
 });
 
 /* ── 게이트웨이 준비 상태 ────────────────────────────────────────────────── */
 
+/**
+ * 테스트 게이트웨이 준비 상태 생성
+ */
 const readiness = (overrides: Partial<SmsGatewayReadiness> = {}): SmsGatewayReadiness => ({
   enabled: true,
   configured: true,
   allowlistEnabled: false,
   testMode: false,
-  // 계약: HTTP API 프로세스에서는 항상 false / const true.
+  // 계약: HTTP API 프로세스에서는 항상 false / const true
   adapterAvailable: false,
   workerOnly: true,
   ...overrides,
@@ -164,7 +175,7 @@ describe("classifySmsSendFailure", () => {
     const failure = classifySmsSendFailure(problem(409, "SMS_PREVIEW_TOKEN_CHANGED"));
 
     assert.equal(failure.action, "re-preview");
-    // 아무것도 큐에 들어가지 않았다는 사실을 사용자에게 분명히 말해야 한다.
+    // 아무것도 큐에 들어가지 않았다는 사실을 사용자에게 분명히 말해야 함
     assert.match(failure.message, /발송하지 않았어요/);
   });
 
@@ -240,6 +251,9 @@ describe("smsOutcomeOf", () => {
   });
 });
 
+/**
+ * 테스트 발송 배치 요약 생성
+ */
 const batch = (overrides: Partial<SmsBatchSummary> = {}): SmsBatchSummary => ({
   batchId: "55555555-5555-4555-8555-555555555555",
   source: "ADMIN_GROUP",
@@ -259,6 +273,9 @@ const batch = (overrides: Partial<SmsBatchSummary> = {}): SmsBatchSummary => ({
   ...overrides,
 });
 
+/**
+ * 테스트 문자 요약 생성
+ */
 const message = (overrides: Partial<SmsMessageSummary> = {}): SmsMessageSummary => ({
   messageId: "66666666-6666-4666-8666-666666666666",
   batchId: "55555555-5555-4555-8555-555555555555",
@@ -283,6 +300,9 @@ const message = (overrides: Partial<SmsMessageSummary> = {}): SmsMessageSummary 
   ...overrides,
 });
 
+/**
+ * 테스트 문자 이력 응답 생성
+ */
 const list = (overrides: Partial<SmsMessageList> = {}): SmsMessageList => ({
   batches: [],
   items: [],
@@ -303,7 +323,7 @@ describe("toSmsLogRows", () => {
   });
 
   it("배치에 속한 items 를 다시 묶어 이중 계상하지 않는다", () => {
-    // 서버는 배치 집계와 그 구성원 행을 **함께** 준다. 둘 다 세면 수신 인원이 배로 뛴다.
+    // 서버는 배치 집계와 그 구성원 행을 함께 줌. 둘 다 세면 수신 인원이 배로 뜀
     const rows = toSmsLogRows(
       list({
         batches: [batch({ recipientCount: 3, successCount: 2, failureCount: 1, pendingCount: 0 })],
@@ -345,7 +365,7 @@ describe("toSmsLogRows", () => {
     assert.equal(loose?.recipientCount, 1);
     assert.equal(loose?.successCount, 1);
     assert.equal(loose?.maskedRecipient, "***-****-1234");
-    // 서버가 주지 않은 이름·대상은 지어내지 않는다.
+    // 서버가 주지 않은 이름·대상은 지어내지 않음
     assert.equal(loose?.templateName, null);
     assert.equal(loose?.audience, null);
   });
@@ -407,6 +427,9 @@ describe("smsSuccessRate", () => {
 
 /* ── 템플릿 보호 ─────────────────────────────────────────────────────────── */
 
+/**
+ * 테스트 문자 템플릿 생성
+ */
 const template = (overrides: Partial<SmsTemplate> = {}): SmsTemplate => ({
   templateId: "t1",
   key: "GROUP_A",
@@ -433,7 +456,7 @@ describe("removeSmsTemplate", () => {
 
   const TEMPLATE_ID = "22222222-2222-4222-8222-222222222222";
 
-  /** CSRF 부트스트랩과 DELETE 를 함께 처리하면서 DELETE 요청의 method·url·헤더를 붙잡는다. */
+  // CSRF 부트스트랩과 DELETE 를 함께 처리하면서 DELETE 요청의 method·url·헤더를 붙잡음
   function serveRemove(result: SmsTemplateRemovalResult): {
     methods: Array<string | undefined>;
     urls: string[];
@@ -476,7 +499,7 @@ describe("removeSmsTemplate", () => {
 
     const returned = await removeSmsTemplate(TEMPLATE_ID, "7", { idempotencyKey: "op-remove-1" });
 
-    // 응답은 그대로 통과시킨다 — 여기서 모양을 바꾸지 않는다.
+    // 응답은 그대로 통과시킴 — 여기서 모양을 바꾸지 않음
     assert.deepEqual(returned, result);
     assert.equal(captured.methods[0], "DELETE");
     const url = new URL(captured.urls[0]!, "https://example.test");
@@ -507,7 +530,7 @@ describe("removeSmsTemplate", () => {
 
 describe("SmsTemplate isDefault", () => {
   it("기본 재지정 입력은 isDefault:true 와 낙관적 잠금 version 을 함께 싣는다", () => {
-    // 서버가 같은 용도의 이전 기본을 동시에 내리고 version 을 올리므로, 성공 뒤에는 목록을 다시 읽는다.
+    // 서버가 같은 용도의 이전 기본을 동시에 내리고 version 을 올리므로, 성공 뒤에는 목록을 다시 읽음
     const input: UpdateSmsTemplateInput = { isDefault: true, version: "3" };
 
     assert.equal(input.isDefault, true);

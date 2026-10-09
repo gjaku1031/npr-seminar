@@ -1,7 +1,7 @@
 /**
- * 예약 관리 URL·클립보드 조정 순수 테스트 (node:test + tsx).
+ * 예약 관리 URL·클립보드 조정 순수 테스트 (node:test + tsx)
  *
- * ⚠️ 이 테스트는 클라이언트 QR 컴포넌트를 import 하지 않는다 — 순수 헬퍼만 본다 (server 존 안전).
+ * ⚠️ 이 테스트는 클라이언트 QR 컴포넌트를 import 하지 않음 — 순수 헬퍼만 봄 (server 존 안전)
  *
  * 실행: pnpm --dir apps/web test
  */

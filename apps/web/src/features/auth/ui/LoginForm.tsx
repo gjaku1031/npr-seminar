@@ -5,13 +5,13 @@ import { defaultErrorMessage, isApiError, loginProjectSession, useOperationKey }
 import { BrandMark, Button, Icons, Input } from "@/shared/ui";
 
 /**
- * 단일 관리자 로그인 카드 (명세 §1.1 · flows ADMIN-F1) — 와이어프레임 LoginScreen 이식.
- * 역할 선택 없음. 학부모·학생은 로그인 없이 공개 루트(`/`)의 모바일 예약만 이용한다.
+ * 단일 관리자 로그인 카드
+ * 역할 선택 없음. 학부모·학생은 로그인 없이 공개 루트(`/`)의 모바일 예약만 이용함
  *
- * 계약 POST /api/v1/auth/login 을 브라우저에서 직접 부른다 — CSRF 토큰이 클라이언트
- * 메모리에만 사는 값이라(shared/api/client.ts) 서버 액션으로는 계약을 만족시킬 수 없다.
+ * 계약 POST /api/v1/auth/login 을 브라우저에서 직접 부름 — CSRF 토큰이 클라이언트
+ * 메모리에만 사는 값이라(shared/api/client.ts) 서버 액션으로는 계약을 만족시킬 수 없음
  *
- * 자격증명은 제출 순간에만 메모리에 있고, 성공하든 실패하든 로그·스토리지에 남기지 않는다.
+ * 자격증명은 제출 순간에만 메모리에 있고, 성공하든 실패하든 로그·스토리지에 남기지 않음
  */
 export function LoginForm() {
   const [username, setUsername] = useState("");
@@ -36,9 +36,9 @@ export function LoginForm() {
     try {
       await loginProjectSession({ username: id, password }, { idempotencyKey: operationKey.current() });
       operationKey.settle();
-      // 성공 후 자격증명을 메모리에서도 지운다.
+      // 성공 후 자격증명을 메모리에서도 지움
       setPassword("");
-      // pending 을 풀지 않는다 — 화면 전환까지 버튼이 잠겨 있어야 중복 제출이 없다.
+      // pending 을 풀지 않음 — 화면 전환까지 버튼이 잠겨 있어야 중복 제출이 없음
       window.location.replace("/sessions/");
     } catch (err) {
       operationKey.settle(err);
@@ -109,11 +109,11 @@ export function LoginForm() {
 }
 
 /**
- * 계정 존재 여부를 드러내지 않는 한국어 문구.
+ * 계정 존재 여부를 드러내지 않는 한국어 문구
  *
- * 401(자격증명 불일치)과 403(계정은 맞지만 거절)을 **같은 문구**로 묶는다 — 둘을 나누면
+ * 401(자격증명 불일치)과 403(계정은 맞지만 거절)을 같은 문구로 묶음 — 둘을 나누면
  * 그 차이 자체가 "이 아이디는 존재한다"는 신호가 되어, 계약이 401 을 generic 으로 규정한
- * 이유를 화면에서 되돌리게 된다.
+ * 이유를 화면에서 되돌리게 됨
  */
 function loginErrorMessage(error: unknown): string {
   if (isApiError(error) && (error.status === 401 || error.status === 403 || error.status === 400)) {

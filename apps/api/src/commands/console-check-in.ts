@@ -10,20 +10,17 @@ import { PrismaService } from "../common/prisma/prisma.service.js";
 import { SheetOutboxService } from "../modules/google-sheets/sheet-outbox.service.js";
 import { currentOrHistoricMathHomeroomTeacher } from "../modules/student-sync/student-homeroom-policy.js";
 
-/**
- * 운영 콘솔 수동 입장 — 게이트를 거치지 않고 예약 하나를 입장 처리한다.
- *
- * 언제 쓰나: 현장에서 QR 도 번호 조회도 여의치 않을 때 운영자가 "이 가족 들어왔다"를
- * 사후에 적는 경로다. 스캐너용 API 는 페어링된 기기 세션을 요구하므로 콘솔에서는 쓸 수 없다.
- *
- * **정식 입장이 남기는 기록을 전부 남긴다** — 예약 상태 전이(경합 안전), booking_events,
- * 구글시트 투영, check_in_events 원장. 하나라도 빼면 명단·통계·시트·실시간 로그 중 어딘가가
- * 거짓말을 하게 된다. 원장에는 게이트 대신 `콘솔`로 남아, 나중에 "이 입장은 현장 스캔이
- * 아니었다"를 구분할 수 있다.
- *
- * 사용: console-check-in <familyBookingId> <attendedCount>
- */
+// 운영 콘솔 수동 입장 명령. 게이트를 거치지 않고 예약 하나를 입장 처리
+// QR·번호 조회가 모두 어려운 현장 상황에서 운영자가 입장을 사후 기록하는 경로
+// 스캐너 API는 페어링된 기기 세션이 필요해 콘솔에서 쓸 수 없음
+// 정식 입장과 같은 기록(경합 안전 상태 전이, 예약 이벤트, 시트 반영, 입장 이벤트)을 모두 남김
+// 하나라도 빠지면 명단·통계·시트·실시간 로그 중 어딘가가 사실과 달라짐
+// 입장 이벤트에는 게이트 대신 `콘솔`로 남겨 현장 스캔이 아닌 입장을 구분
+// 사용: node dist/commands/console-check-in.js <familyBookingId> <attendedCount>
 
+/**
+ * 명령 전용 모듈. 환경 설정·DB·연락처 보호·시트 반영 대기열 구성
+ */
 @Module({
   imports: [
     ConfigModule.forRoot({ cache: true, isGlobal: true, ignoreEnvFile: process.env.NODE_ENV === "production" }),
@@ -34,13 +31,34 @@ import { currentOrHistoricMathHomeroomTeacher } from "../modules/student-sync/st
 })
 class ConsoleCheckInModule {}
 
+/**
+ * 콘솔 입장 결과
+ */
 export interface ConsoleCheckInResult {
+  /**
+   * 처리 결과. 입장 처리 또는 이미 입장
+   */
   readonly result: "CHECKED_IN" | "ALREADY_CHECKED_IN";
+
+  /**
+   * 가족 예약 공개 ID
+   */
   readonly familyBookingId: string;
+
+  /**
+   * 현재 참가 학생 이름
+   */
   readonly studentNames: readonly string[];
+
+  /**
+   * 이번에 기록한 입장 인원. 이미 입장이면 null
+   */
   readonly attendedCount: number | null;
 }
 
+/**
+ * 콘솔 입장 이벤트 메타데이터. 스캐너 정보 대신 운영 콘솔 표시
+ */
 const CONSOLE_METADATA = {
   scannerDeviceName: "운영 콘솔",
   scannerEntranceName: null,
@@ -48,6 +66,14 @@ const CONSOLE_METADATA = {
   scannerBranchCode: null,
 } as const;
 
+/**
+ * 콘솔 수동 입장
+ *
+ * 예약 상태 전이·예약 이벤트·시트 반영·입장 이벤트를 한 트랜잭션으로 기록
+ *
+ * @param attendedCount 실제 입장 인원. 1~20 정수
+ * @throws {Error} 인원 범위 밖, 예약 없음, 취소된 예약
+ */
 export async function consoleCheckIn(
   prisma: PrismaService,
   sheetOutbox: SheetOutboxService,
@@ -65,7 +91,7 @@ export async function consoleCheckIn(
     if (booking === null) throw new Error(`No family booking ${familyBookingPublicId}`);
     if (booking.status === "CANCELLED") throw new Error("booking is cancelled — reinstate it first");
 
-    // 스캐너 흐름과 같은 경합 안전 전이 — RESERVED 일 때만 넘어간다.
+    // 스캐너 흐름과 같은 경합 안전 전이. RESERVED일 때만 입장 처리
     const updated = await transaction.familyBooking.updateMany({
       where: { id: booking.id, status: "RESERVED", checkedInAt: null },
       data: {
@@ -124,7 +150,7 @@ export async function consoleCheckIn(
       });
     }
 
-    // 원장은 결과와 무관하게 한 줄 남는다 — 시도 자체가 사건이다.
+    // 입장 이벤트는 결과와 무관하게 한 줄 기록. 시도 자체가 사건임
     await transaction.checkInEvent.create({
       data: {
         familyBookingId: booking.id,
@@ -141,6 +167,7 @@ export async function consoleCheckIn(
       },
     });
 
+    // 응답용 현재 참가 학생 이름
     const names = await transaction.familyBookingStudent.findMany({
       where: { familyBookingId: booking.id, active: true },
       select: { studentNameSnapshot: true },
@@ -155,6 +182,11 @@ export async function consoleCheckIn(
   });
 }
 
+/**
+ * 인자를 읽어 콘솔 입장 실행 후 결과 JSON 출력
+ *
+ * @throws {Error} 인자 누락
+ */
 async function main(): Promise<void> {
   const [, , familyBookingId, countRaw] = process.argv;
   if (familyBookingId === undefined || countRaw === undefined) {
@@ -174,6 +206,7 @@ async function main(): Promise<void> {
   }
 }
 
+// 직접 실행할 때만 main 호출
 const entrypoint = process.argv[1];
 if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
   void main().catch((error: unknown) => {

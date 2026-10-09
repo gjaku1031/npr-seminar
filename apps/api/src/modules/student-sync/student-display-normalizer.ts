@@ -1,16 +1,33 @@
 import { studentClassBaseName } from "./student-classification.js";
 
+/**
+ * 표시용 단위 이름
+ */
 export type CanonicalUnitName = "과학" | "예고1" | "특목" | "예중1" | "초등" | "고등" | "중등1" | "중등2" | "중등3";
 
+/**
+ * 과학 단위로 분류하는 반 이름 접두사
+ */
 const SCIENCE_PREFIXES = ["과초6", "과고1", "과고2", "과고3", "과1", "과2", "과3", "과예중1", "과예고1"] as const;
 
+/**
+ * 대표 담임. 쉼표로 여러 명이면 첫 번째
+ *
+ * @returns 담임 이름. 없거나 비어 있으면 null
+ */
 export function primaryTeacher(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const first = value.normalize("NFKC").split(",", 1)[0]?.trim() ?? "";
   return first === "" ? null : first;
 }
 
-/** Canonical display unit. Ordering intentionally mirrors the product/Excel rule. */
+/**
+ * 반 이름 기준 표시용 단위
+ *
+ * 판정 순서는 운영 엑셀 규칙과 같게 의도적으로 유지. 앞의 규칙이 우선
+ *
+ * @returns 단위. 비재원생·미분류면 null
+ */
 export function canonicalUnitName(value: string | null | undefined): CanonicalUnitName | null {
   if (value === null || value === undefined) return null;
   const className = studentClassBaseName(value);

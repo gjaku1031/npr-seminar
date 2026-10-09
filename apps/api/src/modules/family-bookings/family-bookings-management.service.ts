@@ -27,41 +27,123 @@ import {
   type PublicMaskedFamilyBooking,
 } from "./public-masked-family-booking.js";
 
+/**
+ * 예약 변경 입력. seminarSessionId 옮길 회차, attendanceParty 참석 보호자, studentIds 교체할 재원생, expectedVersion 현재 버전, reason 감사 사유
+ */
 interface UpdateInput { readonly seminarSessionId?: string; readonly attendanceParty?: AttendanceParty; readonly studentIds?: readonly string[]; readonly expectedVersion: number; readonly reason: string; }
 
-/** {@link FamilyBookingsManagementService}의 공통 include가 실제로 조회하는 예약 행. */
+/**
+ * include()가 조회하는 예약 행
+ */
 type BookingRow = Prisma.FamilyBookingGetPayload<{
+  /**
+   * 예약 상세 include 조건
+   */
   include: ReturnType<FamilyBookingsManagementService["include"]>;
 }>;
 
-/** 멱등성 재생은 JSON 저장값을 돌려주므로 날짜가 문자열일 수도 있다. */
+/**
+ * 멱등 재생은 JSON 저장값을 돌려주므로 날짜가 문자열일 수 있는 예약 응답
+ */
 type ReplayableBookingDates<T> = Omit<T, "createdAt" | "updatedAt" | "checkedInAt" | "cancelledAt"> & {
+  /**
+   * 생성 시각. 재생 응답이면 문자열
+   */
   readonly createdAt: Date | string;
+
+  /**
+   * 변경 시각
+   */
   readonly updatedAt: Date | string;
+
+  /**
+   * 입장 시각
+   */
   readonly checkedInAt: Date | string | null;
+
+  /**
+   * 취소 시각
+   */
   readonly cancelledAt: Date | string | null;
 };
 
-/** 관리자 예약 조회와 변경·취소 응답. 공개 응답과 달리 연락처를 포함한다. */
+/**
+ * 관리자 예약 조회·변경·취소 응답. 공개 응답과 달리 연락처 포함
+ */
 type AdminFamilyBooking = ReplayableBookingDates<Awaited<ReturnType<FamilyBookingsManagementService["get"]>>>;
 
-/** 관리자와 공개 예약 조회의 연락처 공개 경계를 유지한다. */
+/**
+ * 예약 조회·변경·취소
+ *
+ * 관리자 응답은 연락처 포함, 공개 응답은 마스킹해 연락처 공개 경계 유지
+ */
 @Injectable()
 export class FamilyBookingsManagementService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
+
+    /**
+     * 토큰 발급·다이제스트
+     */
     private readonly crypto: BookingCryptoService,
+
+    /**
+     * 문자 대기열
+     */
     private readonly smsOutbox: SmsOutboxService,
+
+    /**
+     * 문자 템플릿
+     */
     private readonly smsTemplates: SmsTemplateCatalog,
+
+    /**
+     * 시트 반영 대기열
+     */
     private readonly sheetOutbox: SheetOutboxService,
+
+    /**
+     * OTP 예약 증명
+     */
     private readonly bookingProof: BookingProofService,
+
+    /**
+     * 연락처 보호
+     */
     private readonly phoneProtector: PhoneProtector,
+
+    /**
+     * 예약 관리 세션
+     */
     private readonly bookingAccess: BookingAccessService,
+
+    /**
+     * QR 원문 복호화
+     */
     private readonly qrTokenProtector: QrTokenProtector,
+
+    /**
+     * 실행 환경. 공개 기준 URL
+     */
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
+  /**
+   * 관리자 예약 목록. 생성 역순
+   *
+   * 캠퍼스·검색어는 활성 참가자 기준. 검색어가 숫자 4자리면 연락처 끝 4자리도 검색
+   */
   public async list(filters: { sessionId?: string; branch?: string; status?: string; query?: string; page: number; pageSize: number }) {
     const query = filters.query?.normalize("NFKC").trim();
     const where: Prisma.FamilyBookingWhereInput = {
@@ -83,12 +165,24 @@ export class FamilyBookingsManagementService {
     return { items: rows.map((row) => this.map(row)), page: { page: filters.page, pageSize: filters.pageSize, totalItems, totalPages: Math.ceil(totalItems / filters.pageSize) } };
   }
 
+  /**
+   * 관리자 예약 상세
+   *
+   * @throws {DomainError} 404 FAMILY_BOOKING_NOT_FOUND
+   */
   public async get(id: string) {
     const row = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, include: this.include() });
     if (row === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
     return this.map(row);
   }
 
+  /**
+   * 공개 예약 상세. 마스킹 응답
+   *
+   * 예약 증명이 있으면 증명 연락처와 예약 연락처 일치 확인, 없으면 예약 관리 세션 확인
+   *
+   * @throws {DomainError} 404 없음, 403 증명 연락처 불일치, 401 증명·세션 없음
+   */
   public async getAuthorized(id: string, proofValue: string, request?: Request) {
     const row = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, include: this.include() });
     if (row === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
@@ -102,6 +196,11 @@ export class FamilyBookingsManagementService {
     return mapMaskedFamilyBookingRow(row, this.phoneProtector.reveal(row.contactCiphertext));
   }
 
+  /**
+   * 예약 증명 연락처의 예약 최대 100건. 최신순, 마스킹 응답
+   *
+   * @throws {DomainError} 401 증명 무효, 403 용도 불일치
+   */
   public async listAuthorized(proofValue: string) {
     const proof = await this.bookingProof.authorize(proofValue, "BOOKING_MANAGE");
     const rows = await this.prisma.familyBooking.findMany({
@@ -118,11 +217,31 @@ export class FamilyBookingsManagementService {
     };
   }
 
-  /** 공개 변경은 {@link PublicMaskedFamilyBooking}으로 연락처·학생 식별자를 가린다. */
+  /**
+   * 공개 변경. 응답은 마스킹
+   */
   public update(id: string, input: UpdateInput, actorSubject: null, key: string, proofValue: string, request?: Request): Promise<PublicMaskedFamilyBooking>;
-  /** 관리자 변경은 연락처를 포함하며 멱등성 재생 시 날짜는 문자열일 수 있다. */
+
+  /**
+   * 관리자 변경. 응답은 연락처 포함, 멱등 재생 시 날짜는 문자열일 수 있음
+   */
   public update(id: string, input: UpdateInput, actorSubject: string, key: string, proofValue?: string, request?: Request): Promise<AdminFamilyBooking>;
-  /** 증명 소비·잠금·문자 및 시트 이벤트를 한 멱등성 트랜잭션에서 처리한다. */
+
+  /**
+   * 예약 변경
+   *
+   * 1. 공개 변경은 예약 증명 필수
+   * 2. 원래 회차와 옮길 회차를 ID 순으로 잠근 뒤 예약 행 잠금
+   * 3. 공개 변경은 증명 소비와 연락처 일치 확인
+   * 4. 버전 일치·RESERVED 상태 확인. 회차를 옮기면 대상 회차 OPEN·예약 기간·중복 예약 확인
+   * 5. 학생 교체(비재원생 예약은 불가) 또는 회차 이동 시 참가자 연락처 소유·캠퍼스 재확인
+   * 6. 예약 갱신, 회차 이동이면 참가자 회차 변경과 QR·관리 링크 만료 연장
+   * 7. 변경 이벤트·시트 반영(이동 시 기존 회차는 해제, 새 회차는 추가)·변경 문자 적재
+   *
+   * 모두 하나의 멱등 트랜잭션. 실패 시 증명 소비를 포함해 전체 롤백
+   *
+   * @throws {DomainError} 401 증명 없음, 403 연락처 불일치, 404 예약·회차 없음, 409 버전 충돌·변경 불가·중복 예약
+   */
   public async update(id: string, input: UpdateInput, actorSubject: string | null, key: string, proofValue?: string, _request?: Request) {
     if (actorSubject === null && (proofValue === undefined || proofValue.trim().length === 0)) {
       this.fail(401, "BOOKING_PROOF_INVALID");
@@ -142,6 +261,7 @@ export class FamilyBookingsManagementService {
         ? { id: snapshot.sessionId }
         : await transaction.seminarSession.findUnique({ where: { publicId: input.seminarSessionId }, select: { id: true } });
       if (targetSession === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
+      // 원래 회차와 대상 회차를 ID 순으로 잠가 교착 방지
       const sessionIds = [...new Set([snapshot.sessionId, targetSession.id])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
       const sessionRows = await transaction.$queryRaw<Array<{
         session_id: bigint; session_public_id: string;
@@ -159,6 +279,7 @@ export class FamilyBookingsManagementService {
       const sourceSession = sessionRows.find((row) => row.session_id === snapshot.sessionId);
       const targetSessionState = sessionRows.find((row) => row.session_id === targetSession.id);
       if (sourceSession === undefined || targetSessionState === undefined) this.fail(409, "SEMINAR_SESSION_NOT_FOUND");
+      // 예약 행 잠금 후 잠금 전 조회한 회차가 그대로인지 확인
       const lockedRows = await transaction.$queryRaw<Array<{
         id: bigint; session_id: bigint; status: string; version: bigint; attendance_party: string; seat_count: number;
         contact_digest: Uint8Array; contact_ciphertext: Uint8Array; contact_last4: string;
@@ -179,6 +300,7 @@ export class FamilyBookingsManagementService {
       if (moved && (targetSessionState.status !== "OPEN" || targetSessionState.seminar_status !== "PUBLISHED")) this.fail(409, "SESSION_NOT_BOOKABLE");
       if (moved && ((targetSessionState.booking_opens_at !== null && now < targetSessionState.booking_opens_at)
         || (targetSessionState.booking_closes_at !== null && now > targetSessionState.booking_closes_at))) this.fail(409, "BOOKING_WINDOW_CLOSED");
+      // 대상 회차에 같은 연락처의 활성 예약이 있으면 거부
       if (moved) {
         const duplicate = await transaction.familyBooking.findFirst({
           where: {
@@ -189,6 +311,7 @@ export class FamilyBookingsManagementService {
         });
         if (duplicate !== null) this.fail(409, "ACTIVE_FAMILY_BOOKING_EXISTS");
       }
+      // 변경 전 참가자 스냅샷. 시트에서 빠진 학생 해제 반영에 사용
       const beforeChildren = await this.sheetChildren(transaction, booking.id, true);
       if (input.studentIds !== undefined) {
         const guestParticipant = await transaction.familyBookingStudent.findFirst({
@@ -196,6 +319,7 @@ export class FamilyBookingsManagementService {
         });
         if (guestParticipant !== null) this.fail(409, "GUEST_PARTICIPANT_IMMUTABLE");
         await this.replaceStudents(transaction, booking.id, targetSession.id, input.studentIds, booking.contact_digest, targetSessionState.scope, targetSessionState.branch_id);
+      // 회차만 옮기는 경우 기존 참가자의 연락처 소유·비재원생 허용·캠퍼스 재확인
       } else if (moved) {
         const participants = await transaction.$queryRaw<Array<{
           participant_type: string; branch_code_at_booking: string; source_active: boolean | null;
@@ -220,6 +344,7 @@ export class FamilyBookingsManagementService {
           if (branch === null || participants.some((participant) => participant.branch_code_at_booking !== branch.code)) this.fail(409, "SESSION_BRANCH_MISMATCH");
         }
       }
+      // 회차 이동 시 예약과 참가자의 회차를 함께 바꾸므로 복합 외래 키 검사를 커밋 시점으로 미룸
       if (moved) {
         await transaction.$executeRawUnsafe("set constraints family_booking_students_family_session_fk deferred");
       }
@@ -228,6 +353,7 @@ export class FamilyBookingsManagementService {
       });
       if (moved) {
         await transaction.familyBookingStudent.updateMany({ where: { familyBookingId: booking.id }, data: { sessionId: targetSession.id } });
+        // 회차 이동 시 QR·관리 링크 만료를 새 회차 기준으로 연장. 줄이지는 않음
         const targetQrExpiresAt = new Date(Math.max(
           targetSessionState.starts_at.getTime() + 6 * 60 * 60 * 1_000,
           targetSessionState.ends_at.getTime() + 60 * 60 * 1_000,
@@ -256,6 +382,7 @@ export class FamilyBookingsManagementService {
         familyBookingPublicId: snapshot.publicId, bookingVersion: updatedBooking.version, bookingCreatedAt: snapshot.createdAt,
         attendanceParty: party, bookingSource: snapshot.bookingSource as "WEB_APP" | "PHONE" | "TEACHER" | "ON_SITE",
       };
+      // 시트 반영: 이동이면 기존 회차에 해제, 새 회차에 추가. 같은 회차면 변경 전후 학생 합집합
       if (moved) {
         await this.sheetOutbox.enqueueBookingEvent(transaction, {
           ...projection, seminarSessionPublicId: snapshot.session.publicId,
@@ -272,6 +399,7 @@ export class FamilyBookingsManagementService {
       }
       const branch = afterChildren[0]?.branch;
       if (branch === undefined) this.fail(409, "BOOKING_BRANCH_MISSING");
+      // 변경 문자. 이벤트 키에 예약 버전을 넣어 변경마다 한 번 적재
       const bookingUrl = this.bookingUrl(snapshot.publicId);
       const rendered = await this.smsTemplates.renderDefault(transaction, "BOOKING_UPDATED", {
         studentName: afterChildren.map((child) => child.studentName).join(", "),
@@ -297,23 +425,21 @@ export class FamilyBookingsManagementService {
         ? mapMaskedFamilyBookingCore(loaded, this.phoneProtector.reveal(booking.contact_ciphertext))
         : loaded;
     });
+    // 관리자 응답은 커밋 후 연락처를 다시 붙임
     return actorSubject === null
       ? response
       : this.attachContact(id, response as ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>);
   }
 
   /**
-   * 테스트 예약의 캠퍼스를 바꾼다 — 테스트 예약만.
+   * 테스트 예약 캠퍼스 변경. 테스트 예약 전용
    *
-   * 문자 발송은 캠퍼스별로 대상을 고르므로, 세 캠퍼스 발송을 확인하려면 리허설 예약이
-   * 캠퍼스를 옮겨 다닐 수 있어야 한다. 캠퍼스마다 테스트 예약을 하나씩 만들면 명단·집계에
-   * 가짜 행이 셋 생기므로, 하나를 옮기는 편이 낫다.
+   * 문자 발송은 캠퍼스별로 대상을 고르므로 세 캠퍼스 발송을 확인하려면 리허설 예약을 옮겨야 함
+   * 캠퍼스마다 테스트 예약을 만들면 명단·집계에 가짜 행이 늘어나므로 하나를 옮김
+   * 실제 예약에는 쓸 수 없음. 실제 가족의 캠퍼스는 예약 시점 사실이며 바꾸면 이미 나간 문자·시트와 어긋남
+   * 캠퍼스는 참가자 행(branch_code_at_booking)에 있고 테스트 예약은 비재원생 한 명이라 그 행만 변경
    *
-   * **실제 예약에는 쓸 수 없다.** 실제 가족의 캠퍼스는 예약 시점의 사실이고, 그것을 바꾸면
-   * 이미 나간 문자·시트 투영과 어긋난다. 그래서 is_test 가 아니면 거절한다.
-   *
-   * 캠퍼스는 참가자 행(branch_code_at_booking)에 있다 — 테스트 예약은 GUEST 한 명뿐이라
-   * 그 한 행만 옮기면 된다.
+   * @throws {DomainError} 404 예약 없음, 409 테스트 예약 아님
    */
   public async changeTestBookingBranch(id: string, branch: string, actorSubject: string, key: string) {
     return this.idempotency.execute("FAMILY_BOOKING_TEST_BRANCH", key, { id, branch }, async (transaction) => {
@@ -322,6 +448,7 @@ export class FamilyBookingsManagementService {
         select: { id: true, sessionId: true },
       });
       if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
+      // 회차 → 예약 순으로 잠금
       await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
       const rows = await transaction.$queryRaw<Array<{ id: bigint; is_test: boolean }>>`
         select id,is_test from family_bookings where id=${snapshot.id} for update`;
@@ -349,13 +476,13 @@ export class FamilyBookingsManagementService {
   }
 
   /**
-   * 테스트 예약을 다시 미입장으로 되돌린다.
+   * 테스트 예약 입장 취소. 다시 미입장 상태로 되돌림
    *
-   * **실제 입장 기록은 되돌릴 수 없다.** 오스캔은 인원을 고쳐 바로잡고, 일어난 입장은 일어난
-   * 것으로 남는다. 이 경로가 존재하는 이유는 하나뿐이다 — 게이트 장비와 QR 흐름을 같은 예약으로
-   * 반복 리허설하기 위해서다. 그래서 is_test 가 아닌 예약은 무조건 거절한다.
+   * 실제 입장 기록은 되돌릴 수 없음. 잘못 찍은 입장은 인원을 고쳐 바로잡고, 일어난 입장은 그대로 남김
+   * 게이트 장비와 QR 흐름을 같은 예약으로 반복 리허설하기 위한 경로라 테스트 예약이 아니면 거부
+   * QR은 그대로 둠. 취소와 달리 예약은 유효하고 같은 QR을 다시 찍어야 리허설이 됨
    *
-   * QR 은 건드리지 않는다. 취소와 달리 예약은 살아 있고, 같은 QR 을 다시 찍어야 리허설이 된다.
+   * @throws {DomainError} 404 예약 없음, 409 테스트 예약 아님
    */
   public async rollbackCheckIn(id: string, actorSubject: string, key: string) {
     return this.idempotency.execute("FAMILY_BOOKING_CHECK_IN_ROLLBACK", key, { id }, async (transaction) => {
@@ -364,12 +491,13 @@ export class FamilyBookingsManagementService {
         select: { id: true, sessionId: true },
       });
       if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
+      // 회차 → 예약 순으로 잠금
       await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
       const rows = await transaction.$queryRaw<Array<{ id: bigint; status: string; is_test: boolean }>>`
         select id,status,is_test from family_bookings where id=${snapshot.id} for update`;
       const booking = rows[0]!;
       if (!booking.is_test) this.fail(409, "CHECK_IN_ROLLBACK_REQUIRES_TEST_BOOKING");
-      // 이미 미입장이면 되돌릴 것이 없다 — 같은 상태를 그대로 돌려준다.
+      // 이미 미입장이면 되돌릴 것이 없어 현재 상태 반환
       if (booking.status !== "CHECKED_IN") return this.load(transaction, booking.id);
 
       await transaction.familyBooking.update({
@@ -394,17 +522,36 @@ export class FamilyBookingsManagementService {
     });
   }
 
-  /** 공개 취소는 {@link PublicMaskedFamilyBooking}으로 연락처·학생 식별자를 가린다. */
+  /**
+   * 공개 취소. 응답은 마스킹
+   */
   public cancel(
     id: string, expectedVersion: number, cancellationType: BookingCancellationType,
     actorSubject: null, key: string, proofValue: string, legacyPublicReason?: string, request?: Request,
   ): Promise<PublicMaskedFamilyBooking>;
-  /** 관리자 취소는 연락처를 포함하며 멱등성 재생 시 날짜는 문자열일 수 있다. */
+
+  /**
+   * 관리자 취소. 응답은 연락처 포함, 멱등 재생 시 날짜는 문자열일 수 있음
+   */
   public cancel(
     id: string, expectedVersion: number, cancellationType: BookingCancellationType,
     actorSubject: string, key: string, proofValue?: string, legacyPublicReason?: string, request?: Request,
   ): Promise<AdminFamilyBooking>;
-  /** 취소 상태·버전을 잠그고 문자 및 시트 이벤트와 함께 멱등 처리한다. */
+
+  /**
+   * 예약 취소
+   *
+   * 1. 공개 취소는 예약 증명 필수
+   * 2. 회차 → 예약 순으로 잠금, 공개 취소는 증명 소비와 연락처 일치 확인
+   * 3. 이미 취소된 예약은 현재 상태 반환
+   * 4. 버전 일치·RESERVED 상태 확인. 입장한 예약은 취소 불가
+   * 5. 예약 취소, 참가자 해제, ACTIVE QR 폐기, 취소 이벤트·문자·시트 해제 반영
+   *
+   * 하나의 멱등 트랜잭션. 요청 다이제스트에는 공개 취소는 사유, 관리자 취소는 취소 유형을 포함
+   *
+   * @param legacyPublicReason 공개 취소 사유. 이벤트 메타데이터에 기록
+   * @throws {DomainError} 401 증명 없음, 403 연락처 불일치, 404 예약 없음, 409 버전 충돌·입장 완료
+   */
   public async cancel(
     id: string,
     expectedVersion: number,
@@ -430,6 +577,7 @@ export class FamilyBookingsManagementService {
         select: { id: true, publicId: true, sessionId: true, createdAt: true, bookingSource: true, attendanceParty: true, session: { select: { publicId: true } } },
       });
       if (snapshot === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
+      // 회차 → 예약 순으로 잠금
       await transaction.$executeRaw`select id from seminar_sessions where id=${snapshot.sessionId} for update`;
       const rows = await transaction.$queryRaw<Array<{
         id: bigint; session_id: bigint; status: string; version: bigint; seat_count: number;
@@ -443,6 +591,7 @@ export class FamilyBookingsManagementService {
         const proof = await this.bookingProof.consume(transaction, proofValue!, "BOOKING_MANAGE");
         if (!Buffer.from(booking.contact_digest).equals(Buffer.from(proof.contactDigest))) this.fail(403, "BOOKING_PROOF_CONTACT_MISMATCH");
       }
+      // 이미 취소된 예약은 같은 결과로 응답
       if (booking.status === "CANCELLED") {
         const loaded = await this.load(transaction, booking.id);
         return actorSubject === null
@@ -451,6 +600,7 @@ export class FamilyBookingsManagementService {
       }
       if (booking.version !== BigInt(expectedVersion)) this.fail(409, "FAMILY_BOOKING_VERSION_CONFLICT");
       if (booking.status !== "RESERVED") this.fail(409, "CHECKED_IN_BOOKING_CANNOT_CANCEL");
+      // 취소 전 참가자 스냅샷. 문자 학생 이름과 시트 해제 반영에 사용
       const beforeChildren = await this.sheetChildren(transaction, booking.id, true);
       const updatedBooking = await transaction.familyBooking.update({ where: { id: booking.id }, data: { status: "CANCELLED", cancelledAt: new Date(), version: { increment: 1 }, updatedAt: new Date() } });
       await transaction.familyBookingStudent.updateMany({ where: { familyBookingId: booking.id, active: true }, data: { active: false, releasedAt: new Date() } });
@@ -514,6 +664,14 @@ export class FamilyBookingsManagementService {
       : this.attachContact(id, response as ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>);
   }
 
+  /**
+   * 예약 이벤트 커서 조회
+   *
+   * 사유는 최대 500자로 분리하고 스캐너 정보는 메타데이터에서 추출
+   *
+   * @param requestedLimit 최대 200, 기본 50
+   * @throws {DomainError} 404 예약 없음
+   */
   public async bookingEvents(id: string, afterSequence?: string, requestedLimit?: number) {
     const booking = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, select: { id: true } });
     if (booking === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
@@ -537,6 +695,11 @@ export class FamilyBookingsManagementService {
     };
   }
 
+  /**
+   * 이벤트 처리 주체 표시
+   *
+   * UUID 주체는 입장 이벤트면 스캐너, 그 외 관리자. 그 밖의 문자열은 시스템, QR 발급은 시스템, 주체 없음은 공개 예약 증명
+   */
   private bookingEventActor(eventType: string, actorSubject: string | null) {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
     if (actorSubject !== null && uuid.test(actorSubject)) return {
@@ -547,12 +710,21 @@ export class FamilyBookingsManagementService {
     return { type: "PUBLIC_PROOF", subjectId: null, displayName: null };
   }
 
+  /**
+   * JSON 메타데이터에서 문자열·숫자·불리언·null 값만 남긴 객체
+   */
   private safeMetadata(value: Prisma.JsonValue): Record<string, string | number | boolean | null> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string | number | boolean | null] =>
       entry[1] === null || ["string", "number", "boolean"].includes(typeof entry[1])));
   }
 
+  /**
+   * 예약 입장 이벤트 커서 조회. 스캐너 표시 정보는 입장 당시 메타데이터 우선
+   *
+   * @param requestedLimit 최대 200, 기본 50
+   * @throws {DomainError} 404 예약 없음
+   */
   public async checkInEvents(id: string, afterSequence?: string, requestedLimit?: number) {
     const booking = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, select: { id: true } });
     if (booking === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
@@ -584,6 +756,11 @@ export class FamilyBookingsManagementService {
     };
   }
 
+  /**
+   * QR 토큰으로 입장권 정보 조회. 연락처는 끝 4자리만
+   *
+   * @throws {DomainError} 401 토큰 길이 오류, 404 없음, 410 만료·폐기
+   */
   public async qrPass(rawToken: string) {
     if (rawToken.length < 43 || rawToken.length > 512) this.fail(401, "QR_INVALID");
     const digest = this.crypto.digest(rawToken);
@@ -601,6 +778,13 @@ export class FamilyBookingsManagementService {
     };
   }
 
+  /**
+   * 공개 예약 QR 재표시
+   *
+   * 예약 증명 또는 예약 관리 세션 확인 후 최신 ACTIVE QR의 원문을 복호화하고 다이제스트로 대조
+   *
+   * @throws {DomainError} 401 증명·세션 없음, 403 연락처 불일치, 404 QR 없음, 409 원문 보관 안 됨, 410 만료, 500 다이제스트 불일치
+   */
   public async recoverQr(id: string, proofValue: string, request?: Request) {
     if (proofValue.trim().length > 0) {
       const proof = await this.bookingProof.authorize(proofValue, "BOOKING_MANAGE");
@@ -629,8 +813,21 @@ export class FamilyBookingsManagementService {
     return { familyBookingId: id, version: credential.version, expiresAt: credential.expiresAt, qrToken };
   }
 
+  /**
+   * 예약 증명 확인 불가 오류 발생
+   *
+   * @throws {DomainError} 503 OTP_PROOF_UNAVAILABLE
+   */
   public proofUnavailable(): never { throw new DomainError(503, "OTP_PROOF_UNAVAILABLE", "Booking proof verification is unavailable."); }
 
+  /**
+   * 재원생 참가자 전체 교체
+   *
+   * 학생 ID 순으로 잠그고 연락처 소유·지점 회차 캠퍼스 확인 후 기존 참가자 해제
+   * 이전에 연결된 학생은 기존 행을 다시 활성화, 새 학생은 행 생성. 스냅샷은 현재 원장 값
+   *
+   * @throws {DomainError} 400 중복·빈 목록, 403 연락처 불일치, 404 학생 없음, 409 캠퍼스 불일치
+   */
   private async replaceStudents(transaction: Prisma.TransactionClient, familyBookingId: bigint, sessionId: bigint, studentPublicIds: readonly string[], contactDigest: Uint8Array, scope: string, sessionBranchId: bigint | null) {
     const ids = [...new Set(studentPublicIds)].sort(); if (ids.length === 0 || ids.length !== studentPublicIds.length) this.fail(400, "STUDENT_SELECTION_INVALID");
     const students = await transaction.$queryRaw<Array<{ id: bigint; public_id: string; branch_id: bigint; source_student_no: string; name: string; class_name: string; school_name: string | null; grade: string | null; branch_code: string; mother_phone_digest: Uint8Array | null; father_phone_digest: Uint8Array | null; teacher_name: string | null; unit_name: string | null }>>`
@@ -659,6 +856,11 @@ export class FamilyBookingsManagementService {
     }
   }
 
+  /**
+   * 시트 반영용 참가자 스냅샷
+   *
+   * @param activeOnly true면 현재 참가자만
+   */
   private async sheetChildren(transaction: Prisma.TransactionClient, familyBookingId: bigint, activeOnly: boolean): Promise<SheetBookingChildSnapshot[]> {
     const links = await transaction.familyBookingStudent.findMany({
       where: { familyBookingId, ...(activeOnly ? { active: true } : {}) },
@@ -685,23 +887,39 @@ export class FamilyBookingsManagementService {
     }));
   }
 
+  /**
+   * 변경 후 참가자에 변경 전에만 있던 참가자를 해제 상태로 더한 합집합
+   */
   private unionSheetChildren(before: readonly SheetBookingChildSnapshot[], after: readonly SheetBookingChildSnapshot[]): SheetBookingChildSnapshot[] {
     const current = new Map(after.map((child) => [child.familyBookingStudentPublicId, child]));
     for (const child of before) if (!current.has(child.familyBookingStudentPublicId)) current.set(child.familyBookingStudentPublicId, { ...child, active: false });
     return [...current.values()];
   }
 
-  /** 모든 예약 상세 매핑에 필요한 관계를 실제 Prisma include 타입으로 고정한다. */
+  /**
+   * 예약 상세 매핑에 필요한 관계. 참가자, 학생 원장 담임·수강 등록, 최신 QR 1건
+   */
   private include() { return { session: true, students: { include: { student: { select: {
     publicId: true,
     teacherName: true,
     assignments: { select: { className: true, sourceActive: true } },
   } } }, orderBy: { id: "asc" as const } }, qrCredentials: { orderBy: { version: "desc" as const }, take: 1 } } as const satisfies Prisma.FamilyBookingInclude; }
-  /** 잠긴 트랜잭션 안에서 조회한 예약을 관리자 응답의 연락처 제외 부분으로 매핑한다. */
+
+  /**
+   * 트랜잭션 안에서 예약을 다시 읽어 연락처 제외 응답으로 변환
+   */
   private async load(transaction: Prisma.TransactionClient, id: bigint) { return this.mapCore(await transaction.familyBooking.findUniqueOrThrow({ where: { id }, include: this.include() })); }
-  /** 관리자 조회에서만 연락처를 복호화해 반환한다. */
+
+  /**
+   * 관리자 응답. 연락처 복호화 포함
+   */
   private map(row: BookingRow) { return { ...this.mapCore(row), contact: this.phoneProtector.reveal(row.contactCiphertext) }; }
-  /** 공개·관리자 응답이 공유하는 예약 필드만 매핑하고 연락처는 제외한다. */
+
+  /**
+   * 공개·관리자 응답 공통 필드. 연락처 제외
+   *
+   * 참가자는 현재 참가자, 없으면 마지막 해제 참가자. QR이 없으면 상태 REVOKED·버전 1
+   */
   private mapCore(row: BookingRow) {
     const qr = row.qrCredentials[0];
     return {
@@ -737,36 +955,70 @@ export class FamilyBookingsManagementService {
       cancelledAt: row.cancelledAt,
     };
   }
-  /** 활성 학생 연결을 우선하고 없으면 가장 최근 해제된 연결들을 반환한다. */
+
+  /**
+   * 활성 참가자 우선, 없으면 마지막 해제 시각의 참가자
+   */
   private currentStudentLinks(links: readonly BookingRow["students"][number][]) {
     const active = links.filter((link) => link.active === true);
     if (active.length > 0) return active;
     const latestRelease = Math.max(...links.map((link) => link.releasedAt instanceof Date ? link.releasedAt.getTime() : -1));
     return links.filter((link) => link.releasedAt instanceof Date && link.releasedAt.getTime() === latestRelease);
   }
-  /** 멱등성 재생값에도 최신 암호문을 조회해 관리자 응답의 연락처를 붙인다. */
+
+  /**
+   * 관리자 응답에 연락처 추가. 멱등 재생 응답에도 최신 암호문을 조회해 붙임
+   *
+   * @throws {DomainError} 404 예약 없음
+   */
   private async attachContact(id: string, response: ReplayableBookingDates<ReturnType<FamilyBookingsManagementService["mapCore"]>>) {
     const booking = await this.prisma.familyBooking.findUnique({ where: { publicId: id }, select: { contactCiphertext: true } });
     if (booking === null) this.fail(404, "FAMILY_BOOKING_NOT_FOUND");
     return { ...response, contact: this.phoneProtector.reveal(booking.contactCiphertext) };
   }
+
+  /**
+   * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+   */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> { const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy; }
+
+  /**
+   * 예약 확인 링크. 공개 기준 URL의 /booking/{예약 ID}
+   */
   private bookingUrl(familyBookingId: string): string {
     const base = this.environment.publicBaseUrl ?? "https://invalid.local";
     return new URL(`/booking/${encodeURIComponent(familyBookingId)}`, base).toString();
   }
+
+  /**
+   * 회차 일시 문자 표기. 서울 시간, ko-KR 형식
+   */
   private formatSessionDateTime(value: Date): string {
     return new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
       weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
     }).format(value);
   }
+
+  /**
+   * 캠퍼스별 문의 전화번호
+   */
   private inquiryPhone(branch: SmsBranch): string {
     return ({ CAMPUS_A: "02-000-0001", CAMPUS_B: "02-000-0002", CAMPUS_C: "02-000-0003" } as const)[branch];
   }
+
+  /**
+   * 메타데이터 문자열 값. 없거나 빈 문자열이면 null
+   */
   private metadataText(metadata: Readonly<Record<string, string | number | boolean | null>>, key: string): string | null {
     const value = metadata[key];
     return typeof value === "string" && value.length > 0 ? value : null;
   }
+
+  /**
+   * 예약 관리 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never { throw new DomainError(status, code, "The family booking operation could not be completed."); }
 }

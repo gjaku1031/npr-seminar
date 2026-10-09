@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# 공개 HTTPS 경로(GCP Caddy → WireGuard → PVE 소켓 프록시 → web) 설정의 정적 검사
+# 실행: 저장소 어디서든 bash 로 실행. 운영 서버에 접속하지 않고 저장소 파일만 읽음
+# 종료 코드: 0 통과, 0 이 아니면 어긋난 검사가 있음
 set -Eeuo pipefail
 
+# 검사 대상 파일과 기대값
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 deploy=${repo_root}/ops/pve-release/deploy-nest-release.sh
 installer=${repo_root}/ops/pve-release/install-datastores.sh
@@ -15,6 +19,7 @@ gateway_pve_wireguard=${gateway_dir}/wireguard/pve-release-wg0.conf
 public_base_url=https://survey.example.kr
 gcp_public_ip=203.0.113.10
 
+# 배포·설치 스크립트 문법과 공개 주소·포트 검증 코드
 bash -n "${deploy}"
 bash -n "${installer}"
 
@@ -29,10 +34,12 @@ grep -Fq 'systemctl enable "${deployment_units[@]}"' "${deploy}"
 grep -Fq 'start_and_verify_caddy_upstream' "${deploy}"
 grep -Fq 'verify_public_https' "${deploy}"
 
+# 소켓 프록시 유닛
 grep -Fq 'ListenStream=10.10.10.165:3001' "${socket_unit}"
 grep -Fq 'ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3000' "${service_unit}"
 grep -Fq 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' "${service_unit}"
 
+# GCP 게이트웨이 Caddy·WireGuard 설정. 개인 키는 저장소에 없어야 함
 grep -Fq 'survey.example.kr {' "${gateway_caddyfile}"
 grep -Fq 'reverse_proxy 10.10.10.165:3001' "${gateway_caddyfile}"
 grep -Fq 'Address = 10.99.0.1/30' "${gateway_gcp_wireguard}"
@@ -44,6 +51,7 @@ if rg -n 'PrivateKey\s*=' "${gateway_dir}"; then
   exit 1
 fi
 
+# README 의 공개 경로 설명
 grep -Fq '## Public HTTPS exposure through GCP Caddy and WireGuard' "${readme}"
 grep -Fq "public IP \`${gcp_public_ip}\`" "${readme}"
 grep -Fq '(`10.99.0.1` on GCP and `10.99.0.2` on `pve-release`)' "${readme}"
@@ -52,6 +60,7 @@ grep -Fq '`https://survey.example.kr` exactly' "${readme}"
 grep -Fq 'public GCP Caddy URL is ${default_public_base_url}' "${deploy}"
 grep -Fq 'behind the GCP Caddy/WireGuard ingress and Next' "${deploy}"
 
+# 이전 진입 방식(문자열을 나눠 이 파일 자체가 걸리지 않게 함)이 배포 스크립트·README 에 남아 있지 않음
 legacy_client=tail
 legacy_client+=scale
 legacy_mode=fun

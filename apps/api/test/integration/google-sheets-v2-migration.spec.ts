@@ -6,17 +6,33 @@ import { Client } from "pg";
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * v2 시트 구조 지문
+ */
 const V2_SHEET_SCHEMA_FINGERPRINT = "416dd80e01708970c9c5fb2293da9caab29bf4f009c1a959dcfff53ce08e6de4";
+
+/**
+ * 검증 대상 v2 마이그레이션 SQL 경로
+ */
 const migrationPath = resolve(
   apiDirectory,
   "prisma/migrations/20260718010000_google_sheets_roster_v2/migration.sql",
 );
 
+// Google Sheets v2 추가 마이그레이션
 describe("Google Sheets v2 additive migration", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let client: Client;
 
+  // 컨테이너 기동과 이전 마이그레이션까지 적용
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_sheet_migration" })
@@ -37,11 +53,13 @@ describe("Google Sheets v2 additive migration", () => {
     await client.connect();
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await client?.end();
     await postgres?.stop();
   });
 
+  // 매핑을 v2로 올리면서 대기 중인 생성·입장 반영 각 2건을 보존
   it("upgrades the mapping while preserving two CREATED and two CHECKED_IN pending deliveries", async () => {
     const sessionId = randomUUID();
     const mapping = await client.query<{ id: string }>(`
@@ -106,6 +124,7 @@ describe("Google Sheets v2 additive migration", () => {
     expect(after.rows.every((row) => row.status === "PENDING")).toBe(true);
   });
 
+  // 격리 워커에는 현재 시트 반영에 필요한 도메인 읽기 권한만 부여
   it("grants the isolated worker only the domain reads required by the current Sheet projection", async () => {
     const privileges = await client.query<{
       table_name: string;

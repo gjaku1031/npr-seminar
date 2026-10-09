@@ -4,13 +4,13 @@
  * 회차별 비재원생 예약 허용 토글 — 계약 PATCH /admin/seminar-sessions/{id}.
  *
  * 규칙:
- * - **낙관적 확정 금지**(pessimistic): 서버 200 을 받기 전에는 값을 바꾼 척하지 않는다.
- * - 멱등 키는 회차별로 잡는다(useKeyedOperationKeys). 결과 미상(network·5xx) 뒤 같은 회차를
- *   다시 눌러도 같은 키가 나가 리플레이된다. 회차를 바꾸면 그 회차의 미확정 키를 재사용하지 않는다.
- * - 성공/409 는 목록 reload 로 실제 상태를 다시 읽는다(단건 PATCH 응답은 operationsSummary 를
- *   0 으로 폴백할 수 있어, 이 응답으로 목록의 실집계를 덮지 않는다).
- * - 409 낙관적 잠금 충돌은 "다른 관리자 변경" 으로 안내하고 reload.
- * - network/5xx 는 결과 미상이므로 키를 유지하고, 재시도 전 reload 로 실제 상태를 확인하게 한다.
+ * - 낙관적 확정 금지(pessimistic): 서버 200 을 받기 전에는 값을 바꾼 척하지 않음
+ * - 멱등 키는 회차별로 잡음(useKeyedOperationKeys). 결과 미상(network·5xx) 뒤 같은 회차를
+ *   다시 눌러도 같은 키가 나가 리플레이됨. 회차를 바꾸면 그 회차의 미확정 키를 재사용하지 않음
+ * - 성공/409 는 목록 reload 로 실제 상태를 다시 읽음(단건 PATCH 응답은 operationsSummary 를
+ *   0 으로 폴백할 수 있어, 이 응답으로 목록의 실집계를 덮지 않음)
+ * - 409 낙관적 잠금 충돌은 "다른 관리자 변경" 으로 안내하고 reload
+ * - network/5xx 는 결과 미상이므로 키를 유지하고, 재시도 전 reload 로 실제 상태를 확인하게 함
  */
 
 import { useCallback, useState } from "react";
@@ -22,17 +22,38 @@ import {
   type AdminSeminarSession,
 } from "@/shared/api";
 
+/**
+ * 비재원생 예약 허용 토글 상태
+ */
 export interface GuestBookingToggleState {
-  /** 저장 중인 회차 id (없으면 null) — 저장 중에는 스위치를 disabled 로 둔다. */
+  /**
+   * 저장 중인 회차 id (없으면 null) — 저장 중에는 스위치를 disabled 로 둠
+   */
   savingId: string | null;
-  /** 짧게 알릴 성공 상태 문구 ("허용됨" | "허용 안 함"). */
+  /**
+   * 짧게 알릴 성공 상태 문구 ("허용됨" | "허용 안 함")
+   */
   status: string | null;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
+
+  /**
+   * 회차의 허용 여부를 바꿔 저장
+   */
   toggle: (session: AdminSeminarSession, next: boolean) => Promise<void>;
+
+  /**
+   * 성공·오류 문구 지우기
+   */
   clearStatus: () => void;
 }
 
-/** reload 는 목록 훅의 reload — 성공/충돌 시 실제 상태를 다시 읽는다. */
+/**
+ * reload 는 목록 훅의 reload — 성공/충돌 시 실제 상태를 다시 읽음
+ */
 export function useGuestBookingToggle(reload: () => void): GuestBookingToggleState {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -60,7 +81,7 @@ export function useGuestBookingToggle(reload: () => void): GuestBookingToggleSta
         );
         keys.settle(id);
         setStatus(next ? "허용됨" : "허용 안 함");
-        // 실집계(operationsSummary)를 지키려고 목록을 다시 읽는다.
+        // 실집계(operationsSummary)를 지키려고 목록을 다시 읽음
         reload();
       } catch (caught) {
         keys.settle(id, caught);
@@ -77,7 +98,7 @@ export function useGuestBookingToggle(reload: () => void): GuestBookingToggleSta
     [keys, reload],
   );
 
-  /** 다른 회차를 고를 때 이전 회차의 성공/오류 알림을 지운다(조작 키는 회차별이라 이미 분리돼 있다). */
+  // 다른 회차를 고를 때 이전 회차의 성공/오류 알림을 지움(조작 키는 회차별이라 이미 분리돼 있음)
   const clearStatus = useCallback(() => {
     setStatus(null);
     setError(null);

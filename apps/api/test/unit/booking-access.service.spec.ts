@@ -8,6 +8,9 @@ import { BookingAccessService } from "../../src/modules/family-bookings/booking-
 import { BookingCryptoService } from "../../src/modules/family-bookings/booking-crypto.service.js";
 import { BookingAccessExchangeDto } from "../../src/modules/family-bookings/booking-access.controller.js";
 
+/**
+ * 연락처 암호화 키를 가진 테스트 실행 환경
+ */
 function environment(): AppEnvironment {
   return {
     appEnv: "test", processRole: "api", port: 4000,
@@ -20,7 +23,9 @@ function environment(): AppEnvironment {
   };
 }
 
+// 예약 관리 링크 교환과 읽기 세션 발급
 describe("booking access exchange", () => {
+  // 길이 범위 안의 형식 오류 토큰도 DTO를 통과해 서비스의 IP 제한과 INVALID 감사를 거침
   it("lets bounded malformed tokens reach the service IP limiter and records an invalid audit", async () => {
     const body = Object.assign(new BookingAccessExchangeDto(), {
       accessToken: "malformed-token",
@@ -64,6 +69,7 @@ describe("booking access exchange", () => {
     }));
   });
 
+  // 형식 오류 토큰도 형식 거부 전에 시도 제한·감사 기록
   it("rate-limits and audits malformed tokens before format rejection", async () => {
     const auditCreate = vi.fn().mockResolvedValue({});
     const redis = {
@@ -90,6 +96,7 @@ describe("booking access exchange", () => {
     }));
   });
 
+  // 토큰·세션은 다이제스트만 저장하고 30분 예약 범위 세션 발급. 같은 키 재요청도 새 세션 발급
   it("stores only token/session digests and establishes a 30-minute booking-scoped session", async () => {
     const crypto = new BookingCryptoService();
     const phone = new PhoneProtector(environment());
@@ -186,6 +193,7 @@ describe("booking access exchange", () => {
     expect(JSON.stringify(durableRequest)).not.toContain("01000007147");
   });
 
+  // 연락처 소유 확인 후 읽기·QR 세션 발급. 전체 연락처는 저장하지 않음
   it("establishes a contact-owned read/QR session without persisting the full contact", async () => {
     const crypto = new BookingCryptoService();
     const phone = new PhoneProtector(environment());
@@ -278,6 +286,7 @@ describe("booking access exchange", () => {
     expect(JSON.stringify(idempotency.execute.mock.calls)).not.toContain("01000007147");
   });
 
+  // 예약 없음과 연락처 불일치에 같은 일반 오류 반환
   it("returns one generic error for a missing booking or mismatched contact", async () => {
     const crypto = new BookingCryptoService();
     const phone = new PhoneProtector(environment());
@@ -318,6 +327,7 @@ describe("booking access exchange", () => {
     }));
   });
 
+  // 미참석·취소 예약은 같은 일반 읽기 세션 오류
   it.each(["NO_SHOW", "CANCELLED"])(
     "returns the same generic read-session error for a %s booking",
     async (bookingStatus) => {

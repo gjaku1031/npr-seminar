@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * QR 스캐너 (관리자) — 시각안 1: 카드 중심 기기 모니터링 + 네 번째 슬롯의 연결 코드 발급.
+ * QR 스캐너 (관리자) — 시각안 1: 카드 중심 기기 모니터링 + 네 번째 슬롯의 연결 코드 발급
  *
  * 역할 분리 (계약 기준):
- * - 이 화면은 ADMIN 세션으로 기기를 **모니터링·페어링·해제**한다.
- * - 실제 스캔은 SCANNER 세션을 가진 iPad(`/scanner/connect`)가 한다.
- *   ADMIN 브라우저에는 SCANNER 세션이 없어서 계약상 체크인 엔드포인트를 부를 수 없다.
+ * - 이 화면은 ADMIN 세션으로 기기를 모니터링·페어링·해제함
+ * - 실제 스캔은 SCANNER 세션을 가진 iPad(`/scanner/connect`)가 함
+ *   ADMIN 브라우저에는 SCANNER 세션이 없어서 계약상 체크인 엔드포인트를 부를 수 없음
  *
- * 기기 사실(온라인·배터리·마지막 신호)은 전부 서버 응답에서만 온다.
+ * 기기 사실(온라인·배터리·마지막 신호)은 전부 서버 응답에서만 옴
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,7 +21,7 @@ import {
   useOperationKey,
   type ScannerDevice,
 } from "@/shared/api";
-// index.ts 는 다른 에이전트가 만질 수 있어, 하드 삭제 어댑터는 모듈에서 직접 가져온다.
+// 하드 삭제 어댑터는 barrel 을 거치지 않고 모듈에서 직접 가져옴
 import { deleteScannerDevice, reconcileScannerDelete } from "@/shared/api/scanner-admin";
 import {
   DeleteDeviceDialog,
@@ -33,10 +33,12 @@ import {
 } from "@/features/scanner-pairing";
 import { SCANNER_GRID_COLUMNS } from "../lib/scanner-grid";
 
-/** 계약 PairingCodeMetadata.ttlSeconds 는 상수 300 — 발급 시각을 만료 시각에서 되돌려 구한다. */
+/**
+ * 계약 PairingCodeMetadata.ttlSeconds 는 상수 300 — 발급 시각을 만료 시각에서 되돌려 구함
+ */
 const PAIRING_TTL_MS = 300_000;
 
-// 4열 그리드 — 기기 수 상한이 없어 5대째부터 다음 줄로 흐른다(scanner-grid.test 로 잠금).
+// 4열 그리드 — 기기 수 상한이 없어 5대째부터 다음 줄로 흐름(scanner-grid.test 로 잠금)
 const GRID_STYLES = `
   .npr-scanner-grid {
     display: grid;
@@ -53,12 +55,18 @@ const GRID_STYLES = `
   }
 `;
 
+/**
+ * 페어링 코드 발급 입력 기본값
+ */
 const DEFAULT_FORM: PairingFormValue = { branch: "CAMPUS_A", gateCode: "", intendedDeviceName: "" };
 
+/**
+ * 관리자 QR 스캐너 관리 화면. 기기 목록과 연결 코드 발급
+ */
 export function ScannerView() {
   const { devices, loading, error: listError, reload, removeDevice } = useScannerDevices();
   const sessions = useSeminarSessions();
-  // 취소가 claim 에 진 경우 연결된 기기가 목록에 바로 보여야 한다.
+  // 취소가 claim 에 진 경우 연결된 기기가 목록에 바로 보여야 함
   const pairing = usePairingCode({ onClaimDetected: reload });
 
   const [form, setForm] = useState<PairingFormValue>(DEFAULT_FORM);
@@ -67,13 +75,10 @@ export function ScannerView() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const deleteKey = useOperationKey();
-  /**
-   * 결과가 확정되지 않은 삭제 요청이 걸린 기기 id.
-   *
-   * 삭제는 멱등이라 사유 같은 본문이 없어 "본문 고정"이 필요 없다 — 같은 Idempotency-Key 만
-   * 유지하면 서버가 리플레이로 처리한다. 다이얼로그를 닫았다 다시 열어도 이 id 가 남아
-   * 같은 조작(같은 키)을 이어간다.
-   */
+  // 결과가 확정되지 않은 삭제 요청이 걸린 기기 id
+  // 삭제는 멱등이라 사유 같은 본문이 없어 "본문 고정"이 필요 없음 — 같은 Idempotency-Key 만
+  // 유지하면 서버가 리플레이로 처리함. 다이얼로그를 닫았다 다시 열어도 이 id 가 남아
+  // 같은 조작(같은 키)을 이어감
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,10 +87,8 @@ export function ScannerView() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  /**
-   * 코드가 사용됐는지는 서버가 알려준다 — 발급 시각 이후에 같은 이름으로 페어링된
-   * 기기가 목록에 나타나면 슬롯을 비운다(원문 코드도 함께 버려진다).
-   */
+  // 코드가 사용됐는지는 서버가 알려줌 — 발급 시각 이후에 같은 이름으로 페어링된
+  // 기기가 목록에 나타나면 슬롯을 비움(원문 코드도 함께 버려짐)
   const issuedPairing = pairing.pairing;
   const pairingStatus = pairing.status;
   const markClaimed = pairing.markClaimed;
@@ -120,17 +123,14 @@ export function ScannerView() {
     void pairing.cancel().then(reload);
   }, [pairing, reload]);
 
-  /**
-   * 삭제 다이얼로그 열기.
-   *
-   * 미확정 조작이 남아 있으면 **키를 새로 만들지 않는다**. 그대로 두면 닫았다 다시 여는 것만으로
-   * 같은 미해결 조작에 새 키가 붙어 이중 조작이 될 수 있다.
-   * 미확정 조작이 있는 동안 다른 기기로 넘어가는 것도 막는다 (그건 별개의 새 조작이다).
-   */
+  // 삭제 다이얼로그 열기
+  // 미확정 조작이 남아 있으면 키를 새로 만들지 않음. 그대로 두면 닫았다 다시 여는 것만으로
+  // 같은 미해결 조작에 새 키가 붙어 이중 조작이 될 수 있음
+  // 미확정 조작이 있는 동안 다른 기기로 넘어가는 것도 막음 (그건 별개의 새 조작임)
   const handleOpenDelete = useCallback(
     (target: ScannerDevice) => {
-      // 미확정 대상이 더는 ACTIVE 목록에 없으면(다른 경로로 삭제/해제됨) 그 조작은 의미가 없다.
-      // 이 경우까지 붙잡으면 콘솔 전체에서 삭제가 영구히 막힌다.
+      // 미확정 대상이 더는 ACTIVE 목록에 없으면(다른 경로로 삭제/해제됨) 그 조작은 의미가 없음
+      // 이 경우까지 붙잡으면 콘솔 전체에서 삭제가 영구히 막힘
       const stale = pendingDeleteId !== null && !devices.some((d) => d.deviceId === pendingDeleteId);
       const activePendingId = stale ? null : pendingDeleteId;
 
@@ -144,7 +144,7 @@ export function ScannerView() {
         return;
       }
 
-      // 미확정 조작을 이어서 여는 게 아니라면 새 조작이다.
+      // 미확정 조작을 이어서 여는 게 아니라면 새 조작임
       if (!activePendingId) {
         deleteKey.reset();
         setDeleteError(null);
@@ -155,7 +155,7 @@ export function ScannerView() {
     [pendingDeleteId, devices, deleteKey],
   );
 
-  /** 삭제 성공 확정 — 카드를 즉시 빼고 목록 재조회. 기록된 체크인은 서버에 남는다. */
+  // 삭제 성공 확정 — 카드를 즉시 빼고 목록 재조회. 기록된 체크인은 서버에 남음
   const finishDelete = useCallback(
     (target: ScannerDevice) => {
       deleteKey.settle();
@@ -176,8 +176,8 @@ export function ScannerView() {
     setDeleteError(null);
 
     try {
-      // 응답이 유실돼 사용자가 다시 누르더라도 같은 키로 나가 서버가 리플레이로 처리한다
-      // (204, 멱등 — 두 번 삭제되지 않는다).
+      // 응답이 유실돼 사용자가 다시 누르더라도 같은 키로 나가 서버가 리플레이로 처리함
+      // (204, 멱등 — 두 번 삭제되지 않음)
       await deleteScannerDevice(target.deviceId, { idempotencyKey: deleteKey.current() });
       finishDelete(target);
     } catch (caught) {
@@ -188,17 +188,17 @@ export function ScannerView() {
         return;
       }
 
-      // 결과 미상(네트워크·5xx) — 응답 유실이 곧 실패는 아니다.
-      // 성공/실패를 단정하기 전에 서버 상태를 되묻는다 (404 면 이미 삭제된 것).
+      // 결과 미상(네트워크·5xx) — 응답 유실이 곧 실패는 아님
+      // 성공/실패를 단정하기 전에 서버 상태를 되물음 (404 면 이미 삭제된 것)
       const reconciliation = await reconcileScannerDelete(target.deviceId);
 
       if (reconciliation === "deleted") {
-        // GET 404 — 이미 삭제돼 있었다. 사용자에겐 성공이다.
+        // GET 404 — 이미 삭제돼 있었음. 사용자에겐 성공임
         finishDelete(target);
         return;
       }
 
-      // 아직 존재하거나 확인 실패 — 같은 키를 유지하고(settle 은 미상에서 키를 남긴다) 재시도를 제공한다.
+      // 아직 존재하거나 확인 실패 — 같은 키를 유지하고(settle 은 미상에서 키를 남김) 재시도를 제공함
       deleteKey.settle(caught);
       setPendingDeleteId(target.deviceId);
       setDeleteError(
@@ -211,7 +211,7 @@ export function ScannerView() {
     }
   }, [deleteTarget, deleteKey, finishDelete]);
 
-  /** 남은 회차가 없으면 대상도 없다 — 지난 회차를 "다음"이라고 부르지 않는다. */
+  // 남은 회차가 없으면 대상도 없음 — 지난 회차를 "다음"이라고 부르지 않음
   const target = useUpcomingSession(sessions.options);
 
   return (
@@ -235,7 +235,7 @@ export function ScannerView() {
           연결 코드를 발급해 iPad를 스캐너로 등록하고 연결 상태를 실시간으로 확인합니다. 이 화면은
           기기를 모니터링·페어링만 하고, 실제 스캔은 스캐너 기기에서 진행합니다.
         </p>
-        {/* 이 관리자 화면은 스캔을 하지 못한다(SCANNER 세션이 없다). iPad 연결 화면(/scanner/connect)을 새 창으로 연다. */}
+        {/* 이 관리자 화면은 스캔을 하지 못함(SCANNER 세션이 없음). iPad 연결 화면(/scanner/connect)을 새 창으로 엶 */}
         <Button
           variant="secondary"
           size="sm"
@@ -274,7 +274,7 @@ export function ScannerView() {
             />
           ))}
 
-          {/* 발급 슬롯 — 기기 수 상한이 없어 항상 마지막 칸에 남는다(5대째부터는 다음 줄로 흐른다). */}
+          {/* 발급 슬롯 — 기기 수 상한이 없어 항상 마지막 칸에 남음(5대째부터는 다음 줄로 흐름) */}
           <PairingSlotCard
             status={pairing.status}
             code={pairing.code}
@@ -295,7 +295,7 @@ export function ScannerView() {
         </div>
       )}
 
-      {/* 스캔 대상 요약 — 정원·좌석 집계는 노출하지 않고 현재 회차만 확인한다. */}
+      {/* 스캔 대상 요약 — 정원·좌석 집계는 노출하지 않고 현재 회차만 확인함 */}
       {target !== null && (
         <Card
           variant="accent"
@@ -324,13 +324,13 @@ export function ScannerView() {
         device={deleteTarget}
         busy={deleting}
         error={deleteError}
-        /* 미확정 조작이 이 기기에 걸려 있으면 재시도 문구로 바꾼다(같은 키로만 재전송). */
+        /* 미확정 조작이 이 기기에 걸려 있으면 재시도 문구로 바꿈(같은 키로만 재전송) */
         pending={deleteTarget !== null && pendingDeleteId === deleteTarget.deviceId}
         onConfirm={() => void handleDelete()}
         onCancel={() => {
-          // 닫아도 미확정 조작(pendingDeleteId + 키)은 그대로 남는다 —
-          // 같은 기기를 다시 열면 같은 키로 이어서 재시도한다.
-          // 미확정 오류 문구는 다시 열었을 때도 맥락으로 남겨 둔다.
+          // 닫아도 미확정 조작(pendingDeleteId + 키)은 그대로 남음 —
+          // 같은 기기를 다시 열면 같은 키로 이어서 재시도함
+          // 미확정 오류 문구는 다시 열었을 때도 맥락으로 남겨 둠
           setDeleteTarget(null);
           if (!pendingDeleteId) setDeleteError(null);
         }}

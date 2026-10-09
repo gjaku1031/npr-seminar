@@ -3,6 +3,9 @@ import { DomainError } from "../../common/errors/domain-error.js";
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 import { Prisma } from "../../generated/prisma/client.js";
 
+/**
+ * 통계 단위 그룹. ALL은 전체
+ */
 type StatisticsUnitGroup =
   | "ALL"
   | "ELEMENTARY"
@@ -13,49 +16,204 @@ type StatisticsUnitGroup =
   | "HIGH"
   | "SCIENCE";
 
+/**
+ * 회차 운영 요약 행
+ */
 interface OperationsSummaryRow {
+  /**
+   * 활성 예약 수
+   */
   readonly active_booking_count: bigint;
+
+  /**
+   * 입장 예약 수
+   */
   readonly checked_in_booking_count: bigint;
+
+  /**
+   * 미입장 예약 수
+   */
   readonly unchecked_booking_count: bigint;
+
+  /**
+   * 취소 예약 수
+   */
   readonly cancelled_booking_count: bigint;
+
+  /**
+   * 미참석 예약 수
+   */
   readonly no_show_booking_count: bigint;
+
+  /**
+   * 예상 참석 인원
+   */
   readonly attendee_count: bigint;
 }
 
+/**
+ * 단위 그룹별 통계 행. summary_·mobile_·manual_ 열은 모든 행에 같은 값
+ */
 interface StatisticsRow {
+  /**
+   * 단위 그룹
+   */
   readonly unit_group: StatisticsUnitGroup;
+
+  /**
+   * 단위 그룹 예약 수
+   */
   readonly reserved_booking_count: bigint;
+
+  /**
+   * 단위 그룹 입장 예약 수
+   */
   readonly checked_in_booking_count: bigint;
+
+  /**
+   * 단위 그룹 활성 예약 수
+   */
   readonly active_booking_count: bigint;
+
+  /**
+   * 단위 그룹 명단 학생 수
+   */
   readonly linked_student_count: bigint;
+
+  /**
+   * 단위 그룹 가족 예약 수
+   */
   readonly family_booking_count: bigint;
+
+  /**
+   * 단위 그룹 예상 참석 인원
+   */
   readonly attendee_count: bigint;
+
+  /**
+   * 전체 명단 학생 수
+   */
   readonly summary_linked_student_count: bigint;
+
+  /**
+   * 전체 가족 예약 수
+   */
   readonly summary_family_booking_count: bigint;
+
+  /**
+   * 전체 예상 참석 인원
+   */
   readonly summary_attendee_count: bigint;
+
+  /**
+   * 전체 예약 수
+   */
   readonly summary_reserved_booking_count: bigint;
+
+  /**
+   * 전체 입장 예약 수
+   */
   readonly summary_checked_in_booking_count: bigint;
+
+  /**
+   * 전체 활성 예약 수
+   */
   readonly summary_active_booking_count: bigint;
+
+  /**
+   * 전체 취소 예약 수
+   */
   readonly summary_cancelled_booking_count: bigint;
+
+  /**
+   * 전체 미참석 예약 수
+   */
   readonly summary_no_show_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 예약 수
+   */
   readonly mobile_reserved_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 입장 예약 수
+   */
   readonly mobile_checked_in_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 활성 예약 수
+   */
   readonly mobile_active_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 취소 예약 수
+   */
   readonly mobile_cancelled_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 미참석 예약 수
+   */
   readonly mobile_no_show_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 명단 학생 수
+   */
   readonly mobile_linked_student_count: bigint;
+
+  /**
+   * 웹앱 예약 가족 예약 수
+   */
   readonly mobile_family_booking_count: bigint;
+
+  /**
+   * 웹앱 예약 예상 참석 인원
+   */
   readonly mobile_attendee_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 예약 수
+   */
   readonly manual_reserved_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 입장 예약 수
+   */
   readonly manual_checked_in_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 활성 예약 수
+   */
   readonly manual_active_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 취소 예약 수
+   */
   readonly manual_cancelled_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 미참석 예약 수
+   */
   readonly manual_no_show_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 명단 학생 수
+   */
   readonly manual_linked_student_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 가족 예약 수
+   */
   readonly manual_family_booking_count: bigint;
+
+  /**
+   * 수동 예약(전화·선생님·현장) 예상 참석 인원
+   */
   readonly manual_attendee_count: bigint;
 }
 
+/**
+ * 예약이 없을 때의 0 운영 요약
+ */
 const EMPTY_OPERATIONS_SUMMARY: OperationsSummaryRow = {
   active_booking_count: 0n,
   checked_in_booking_count: 0n,
@@ -65,14 +223,23 @@ const EMPTY_OPERATIONS_SUMMARY: OperationsSummaryRow = {
   attendee_count: 0n,
 };
 
-/** 회차 예약의 상태별 합계와 지점·단위·채널별 운영 통계를 읽기 전용 SQL로 제공한다. */
+/**
+ * 회차 운영 요약과 캠퍼스·단위·예약 경로별 통계. 읽기 전용 SQL
+ */
 @Injectable()
 export class SessionStatisticsService {
+  /**
+   * DB 클라이언트 주입
+   */
   public constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 테스트 예약을 포함한 상태별 예약 수와 예약 기준 예상 참석 인원을 반환한다.
-   * 실제 입장 인원은 계산하지 않으며 회차가 없으면 404를 던진다.
+   * 회차 운영 요약
+   *
+   * 테스트 예약을 포함한 상태별 예약 수와 예약 기준 예상 참석 인원. 실제 입장 인원은 계산하지 않음
+   * 테스트 예약 포함 이유: 당일 전에 집계가 실제로 움직이는지 확인하기 위함
+   *
+   * @throws {DomainError} 404 회차 없음
    */
   public async operationsSummary(sessionPublicId: string) {
     const session = await this.session(sessionPublicId);
@@ -99,9 +266,14 @@ export class SessionStatisticsService {
   }
 
   /**
-   * 회차·요청 지점 범위의 전체·단위·예약 채널 통계와 명단 모니터링 수치를 반환한다.
-   * 지점 회차에 연결 지점이 없으면 409, 요청 지점이 다르면 빈 집계로 제한한다.
-   * 회차가 없으면 404, 집계 행이 없으면 500을 던지며 명시적 행 잠금은 사용하지 않는다.
+   * 회차 통계
+   *
+   * 캠퍼스 범위의 전체·단위·예약 경로별 예약 수와 명단 모니터링 수치
+   * 단위 예약 수는 활성 대표 반이 있는 재원생 기준, 명단 모니터링은 명단 행마다 현재 예약 우선·최신 예약 하나 기준
+   * 지점 회차에 다른 캠퍼스를 요청하면 0 집계. 명시적 행 잠금 없음
+   *
+   * @param requestedBranch 캠퍼스. 지점 회차는 회차 캠퍼스로 고정
+   * @throws {DomainError} 404 회차 없음, 409 지점 회차의 지점 누락, 500 집계 행 없음
    */
   public async statistics(sessionPublicId: string, requestedBranch?: string) {
     const session = await this.session(sessionPublicId);
@@ -338,6 +510,7 @@ export class SessionStatisticsService {
         cross join monitoring_channel_families
        order by groups.sort_order`);
 
+    // 첫 행에서 전체·경로별 값, 모든 행에서 단위별 값 조립
     const first = rows[0];
     if (first === undefined) this.fail(500, "SESSION_STATISTICS_UNAVAILABLE");
     return {
@@ -398,7 +571,11 @@ export class SessionStatisticsService {
     };
   }
 
-  /** 회차의 내부 ID·범위·지점을 조회하며 공개 ID가 없으면 404를 던진다. */
+  /**
+   * 회차 내부 ID·범위·지점 조회
+   *
+   * @throws {DomainError} 404 SEMINAR_SESSION_NOT_FOUND
+   */
   private async session(publicId: string) {
     const session = await this.prisma.seminarSession.findUnique({
       where: { publicId },
@@ -408,7 +585,11 @@ export class SessionStatisticsService {
     return session;
   }
 
-  /** 지정한 상태와 코드의 {@link DomainError}를 던지며 정상 반환하지 않는다. */
+  /**
+   * 통계 조회 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The session statistics could not be loaded.");
   }

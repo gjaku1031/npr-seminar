@@ -13,49 +13,189 @@ import {
 import type { BranchCode, StagedSnapshotRow } from "./offline-snapshot.types.js";
 import type { TongBranchSnapshot, TongSourceAssignment } from "./tongtontong.gateway.js";
 
+/**
+ * 실시간 동기화 원천 충돌
+ */
 export interface LiveSyncConflict {
+  /**
+   * 충돌 종류. 같은 등록 키 중복, 같은 학번의 신원 불일치, 여러 지점에 같은 학번
+   */
   readonly type: "DUPLICATE_STUDENT_ASSIGNMENT_KEY" | "STUDENT_IDENTITY_MISMATCH" | "CROSS_BRANCH_STUDENT_NO";
+
+  /**
+   * 지점. 여러 지점 충돌이면 null
+   */
   readonly branch: BranchCode | null;
+
+  /**
+   * 학번
+   */
   readonly sourceStudentNo: string;
+
+  /**
+   * 등록 키 다이제스트. 등록 키 중복일 때만
+   */
   readonly sourceAssignmentKeyDigest: string | null;
+
+  /**
+   * 개인정보 없는 설명
+   */
   readonly detail: string;
 }
 
+/**
+ * 동기화 건수 요약
+ */
 export interface LiveSyncCounts {
+  /**
+   * 조회한 수강 등록 수
+   */
   readonly fetchedAssignmentCount: number;
+
+  /**
+   * 대괄호 반으로 제외한 수
+   */
   readonly bracketExcludedAssignmentCount: number;
+
+  /**
+   * 포함 수강 등록 수
+   */
   readonly includedAssignmentCount: number;
+
+  /**
+   * 고유 학생 수
+   */
   readonly uniqueStudentCount: number;
+
+  /**
+   * 수강 등록이 여러 개인 학생 수
+   */
   readonly multiAssignmentStudentCount: number;
+
+  /**
+   * 정규 반 하나로 대표 반 확정한 학생 수
+   */
   readonly regularRepresentativeCount: number;
+
+  /**
+   * 과학 반만으로 대표 반 정한 학생 수
+   */
   readonly scienceAliasRepresentativeCount: number;
+
+  /**
+   * 정규 반 여러 개로 판정 불가한 학생 수
+   */
   readonly multipleRegularAmbiguousCount: number;
+
+  /**
+   * 반 없음으로 판정 불가한 학생 수
+   */
   readonly noClassAmbiguousCount: number;
+
+  /**
+   * 판정 불가 학생 수 합계
+   */
   readonly ambiguousStudentCount: number;
+
+  /**
+   * 새로 추가한 학생 수
+   */
   readonly insertedStudentCount: number;
+
+  /**
+   * 변경한 학생 수
+   */
   readonly updatedStudentCount: number;
+
+  /**
+   * 비활성화한 학생 수
+   */
   readonly inactivatedStudentCount: number;
+
+  /**
+   * 새로 추가한 수강 등록 수
+   */
   readonly insertedAssignmentCount: number;
+
+  /**
+   * 변경한 수강 등록 수
+   */
   readonly updatedAssignmentCount: number;
+
+  /**
+   * 비활성화한 수강 등록 수
+   */
   readonly inactivatedAssignmentCount: number;
 }
 
+/**
+ * 정규화한 실시간 스냅샷
+ */
 export interface NormalizedLiveSnapshot {
+  /**
+   * 스테이징 행
+   */
   readonly rows: readonly StagedSnapshotRow[];
+
+  /**
+   * 원천 충돌
+   */
   readonly conflicts: readonly LiveSyncConflict[];
+
+  /**
+   * 전체 건수. 반영 건수는 0으로 채워 반환하고 반영 단계에서 갱신
+   */
   readonly counts: LiveSyncCounts;
+
+  /**
+   * 지점별 건수
+   */
   readonly branchCounts: Readonly<Record<BranchCode, LiveSyncCounts>>;
+
+  /**
+   * 지점별 원천 해시를 묶은 스냅샷 해시
+   */
   readonly snapshotHash: Buffer;
+
+  /**
+   * 스테이징 행 해시. 반영 직전 재확인용
+   */
   readonly stagingHash: Buffer;
 }
 
+/**
+ * 지점 처리 순서
+ */
 const BRANCH_ORDER: readonly BranchCode[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
+
+/**
+ * 대표 반 판정 전 스테이징 행
+ */
 type MutableRow = Omit<StagedSnapshotRow, "primaryCandidate" | "primarySelected" | "classResolutionStatus" | "classResolutionReason">;
 
+/**
+ * 통통통 지점별 조회 결과를 스테이징 행으로 정규화
+ *
+ * 연락처 암호화, 포함·제외 분류, 학생별 대표 반 선택, 충돌 탐지, 건수·해시 계산
+ */
 @Injectable()
 export class StudentNormalizerService {
+  /**
+   * 연락처 암호화 주입
+   */
   public constructor(private readonly phoneProtector: PhoneProtector) {}
 
+  /**
+   * 세 지점 조회 결과 정규화
+   *
+   * 1. A·B·C 순서와 지점별 비어 있지 않음 확인
+   * 2. 원천 순서대로 행 정규화(전 지점 연속 순번)
+   * 3. 지점마다 포함 행이 하나 이상인지 확인
+   * 4. 학번별 대표 반 선택: 정규 반 > 과학 반 > 전체 등록 중 정렬 첫 번째
+   * 5. 충돌·건수·해시 계산
+   *
+   * @throws {DomainError} 422 지점 순서·빈 스냅샷·필수 값 누락
+   */
   public normalize(snapshots: readonly TongBranchSnapshot[]): NormalizedLiveSnapshot {
     if (snapshots.length !== BRANCH_ORDER.length || snapshots.some((snapshot, index) => snapshot.branch !== BRANCH_ORDER[index])) {
       this.fail("TONG_BRANCH_ORDER_INVALID");
@@ -73,6 +213,7 @@ export class StudentNormalizerService {
       this.fail("TONG_EMPTY_ACTIVE_SNAPSHOT");
     }
 
+    // 포함 행을 학번별로 묶어 대표 반 선택
     const conflicts = this.conflicts(mutable);
     const groups = new Map<string, MutableRow[]>();
     for (const row of mutable.filter((candidate) => candidate.included)) {
@@ -85,6 +226,7 @@ export class StudentNormalizerService {
       readonly reason: StagedSnapshotRow["classResolutionReason"];
     }>();
     for (const [studentNo, assignments] of groups) {
+      // 기본 반 이름이 같은 대표 반 후보는 하나만 남김
       const uniqueCandidates = new Map<string, MutableRow>();
       for (const assignment of [...assignments].filter((row) => isRepresentativeStudentClass(row.className)).sort(this.assignmentOrder)) {
         const key = studentClassBaseName(assignment.className);
@@ -98,13 +240,14 @@ export class StudentNormalizerService {
       if (regular.length === 1) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "ONE_REGULAR", reason: null });
       else if (regular.length === 0 && science.length > 0) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "SCIENCE_ONLY", reason: null });
       else if (regular.length > 1) selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "MULTIPLE_REGULAR" });
-      // 다음 학기 반만 가진 학생과 아예 반이 없는 학생을 구분한다. 전자는 방금 등록해
-      // 개강 전인 재원생이고, 그 사실을 '미분류'로 뭉뚱그리면 원인을 다시 찾게 된다.
+      // 다음 학기 반만 가진 학생과 반이 아예 없는 학생을 구분
+      // 전자는 방금 등록해 개강 전인 재원생이라, 미분류로 묶으면 원인을 다시 찾아야 함
       else if (assignments.some((row) => isFutureTermStudentClass(row.className))) {
         selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "FUTURE_TERM_ONLY" });
       }
       else selections.set(studentNo, { selectedOrdinal: selected.sourceOrdinal, status: "AMBIGUOUS_FALLBACK", reason: "NO_CLASS" });
     }
+    // 대표 반 판정 결과를 행에 반영. 제외 행은 판정 없음
     const rows: StagedSnapshotRow[] = mutable.map((row) => {
       const selection = row.included ? selections.get(row.sourceStudentNo) : undefined;
       return {
@@ -128,6 +271,14 @@ export class StudentNormalizerService {
     };
   }
 
+  /**
+   * 원천 행 1개 정규화
+   *
+   * 포함 행은 필수 값이 비면 실패, 제외 행은 빈 값을 순번 기반 자리 값으로 채움
+   * 연락처는 포함 행만 암호화. 아버지 연락처는 열이 있을 때만 관찰한 것으로 기록
+   *
+   * @throws {DomainError} 422 재원생인데 반 이름·필수 값 누락
+   */
   private row(branch: BranchCode, ordinal: number, source: TongSourceAssignment): MutableRow {
     if (source.sourceStatus.normalize("NFKC").trim() === "재원생"
       && source.className.normalize("NFKC").trim() === "") {
@@ -154,6 +305,7 @@ export class StudentNormalizerService {
     const optional = (value: string): string | null => {
       const normalized = value.normalize("NFKC").trim(); return normalized === "" ? null : normalized;
     };
+    // 행 해시: 포함 행은 정규화 값 전체, 제외 행은 지점·순번·사유만
     const canonical = included ? [branch, studentNo, sourceUniqueNo, classRegistrationNo, name, className, source.schoolName, source.grade,
       source.teacherName, source.unitName, source.sourceStatus, phone?.digest.toString("base64") ?? "",
       fatherPhoneObserved ? fatherPhone?.digest.toString("base64") ?? "OBSERVED_EMPTY" : "NOT_OBSERVED",
@@ -172,6 +324,11 @@ export class StudentNormalizerService {
     };
   }
 
+  /**
+   * 원천 충돌 탐지
+   *
+   * 지점 안 같은 등록 키 중복, 같은 학번의 여러 지점 등장, 같은 학번의 이름·학교·학년·어머니 연락처 불일치
+   */
   private conflicts(rows: readonly MutableRow[]): LiveSyncConflict[] {
     const result: LiveSyncConflict[] = [];
     const assignmentKeys = new Set<string>();
@@ -204,6 +361,9 @@ export class StudentNormalizerService {
     return result;
   }
 
+  /**
+   * 행 목록 건수 요약. 반영 건수 제외
+   */
   private counts(rows: readonly StagedSnapshotRow[]): Omit<LiveSyncCounts,
     "insertedStudentCount" | "updatedStudentCount" | "inactivatedStudentCount" |
     "insertedAssignmentCount" | "updatedAssignmentCount" | "inactivatedAssignmentCount"> {
@@ -225,13 +385,26 @@ export class StudentNormalizerService {
     };
   }
 
+  /**
+   * 순번·행 해시·포함·대표 선택 여부로 계산한 스테이징 해시
+   */
   private stagingHash(rows: readonly StagedSnapshotRow[]): Buffer {
     const hash = createHash("sha256");
     for (const row of rows) hash.update(`${row.sourceOrdinal}\u0000${row.rowHash.toString("base64url")}\u0000${Number(row.included)}\u0000${Number(row.primarySelected)}\n`);
     return hash.digest();
   }
+
+  /**
+   * 수강 등록 정렬. 반 이름(한국어) → 원천 고유 번호 → 등록 번호 → 순번
+   */
   private readonly assignmentOrder = (left: MutableRow, right: MutableRow): number => left.className.localeCompare(right.className, "ko")
     || left.sourceUniqueNo.localeCompare(right.sourceUniqueNo)
     || left.classRegistrationNo.localeCompare(right.classRegistrationNo) || left.sourceOrdinal - right.sourceOrdinal;
+
+  /**
+   * 실시간 스냅샷 검증 오류 발생
+   *
+   * @throws {DomainError} 422 지정 코드
+   */
   private fail(code: string): never { throw new DomainError(422, code, "The live student snapshot failed validation."); }
 }

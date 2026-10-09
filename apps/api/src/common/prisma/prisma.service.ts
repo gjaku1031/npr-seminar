@@ -4,26 +4,32 @@ import { PrismaClient } from "../../generated/prisma/client.js";
 import { type AppEnvironment } from "../config/environment.js";
 
 /**
- * 연결 풀 상한을 **명시한다.**
+ * 연결 풀 상한
  *
- * 왜 중요한가: `npr_worker` 역할에는 서버 쪽 연결 한도가 걸려 있다(배포 스크립트가
- * 관리한다). pg.Pool 의 기본 상한은 10 인데 역할 한도가 그보다 낮으면, 부하가 올라간
- * 순간 풀이 한도를 넘겨 붙으려 하고 PostgreSQL 이 53300 으로 끊는다. 그 오류가 워커
- * 부팅을 죽여 재시작 루프가 된다.
- *
- * **상한이 있는 풀은 기다리고, 없는 풀은 터진다.** 그래서 값을 코드에 적어 두고 역할
- * 한도를 그보다 넉넉히 잡는다. 두 수는 함께 움직여야 하므로 서로를 가리켜 둔다:
- * ops/pve-release/deploy-nest-release.sh 의 `CONNECTION LIMIT`.
- *
- * 실제로 겪은 일: 문자 325건을 한 번에 넣자 워커가 10개를 동시에 처리하려 했고,
- * 역할 한도 8을 넘겨 33회 재시작하며 77건이 발송 여부 불명으로 남았다.
+ * npr_worker 역할에는 서버 쪽 연결 한도(ops/pve-release/deploy-nest-release.sh의 CONNECTION LIMIT)가 있음
+ * pg.Pool 기본 상한(10)이 역할 한도보다 높으면 부하 시 PostgreSQL이 53300으로 연결을 끊고 워커가 재시작 루프에 빠짐
+ * 상한이 있는 풀은 대기하고 없는 풀은 실패하므로 값을 코드에 고정하고, 역할 한도는 이보다 넉넉히 잡음. 두 값은 함께 조정
+ * 사례: 문자 325건 일괄 등록 시 역할 한도 8 초과로 워커 33회 재시작, 77건 발송 여부 불명
  */
 const POOL_MAX_CONNECTIONS = 16;
 
+/**
+ * 프로세스 역할별 DB 연결을 쓰는 Prisma 클라이언트
+ *
+ * API는 DATABASE_URL, 워커는 WORKER_DATABASE_URL 사용
+ */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
+  /**
+   * 연결 URL 설정 여부. false면 접속 불가 주소로 생성되어 쿼리가 실패함
+   */
   public readonly configured: boolean;
 
+  /**
+   * 역할에 맞는 연결 URL과 풀 상한으로 클라이언트 생성
+   *
+   * URL이 없으면 기동은 허용하고 접속 불가 주소 사용. 헬스 체크가 configured로 미설정 상태를 보고함
+   */
   public constructor(@Inject("APP_ENVIRONMENT") environment: AppEnvironment) {
     const configuredUrl = environment.processRole === "worker"
       ? environment.workerDatabaseUrl
@@ -34,6 +40,9 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     this.configured = configuredUrl !== undefined;
   }
 
+  /**
+   * 모듈 종료 시 연결 해제
+   */
   public async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }

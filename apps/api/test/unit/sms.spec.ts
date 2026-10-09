@@ -5,6 +5,11 @@ import { AligoGateway } from "../../src/modules/sms/aligo.gateway.js";
 import { SmsMessagePolicy } from "../../src/modules/sms/sms-message-policy.service.js";
 import { SmsTemplateRenderer } from "../../src/modules/sms/sms-template-renderer.service.js";
 
+/**
+ * 문자 발송이 켜진 테스트 실행 환경
+ *
+ * @param overrides 덮어쓸 값
+ */
 function environment(overrides: Partial<AppEnvironment> = {}): AppEnvironment {
   return {
     appEnv: "test", processRole: "api", port: 4000, trustProxy: 0, tongSyncEnabled: false,
@@ -18,21 +23,29 @@ function environment(overrides: Partial<AppEnvironment> = {}): AppEnvironment {
   };
 }
 
+// EUC-KR 문자 길이 정책
 describe("SMS EUC-KR policy", () => {
+  // 길이 정책
   const policy = new SmsMessagePolicy();
 
+  // 90바이트 경계로 SMS·LMS 결정
   it("uses the 90 byte boundary authoritatively", () => {
     expect(policy.classify("가".repeat(45))).toMatchObject({ messageType: "SMS", messageBytes: 90 });
     expect(policy.classify("가".repeat(46))).toMatchObject({ messageType: "LMS", messageBytes: 92 });
   });
 
+  // EUC-KR로 표현할 수 없는 문자는 대체하지 않고 거부
   it("rejects unrepresentable characters instead of replacing them", () => {
     expect(() => policy.classify("예약 완료 😀")).toThrowError(DomainError);
   });
 });
 
+// 문자 템플릿 변수
 describe("SMS template variables", () => {
+  // 템플릿 렌더러
   const renderer = new SmsTemplateRenderer();
+
+  // 치환 값
   const context = {
     studentName: "김나래",
     seminarTitle: "입시 설명회",
@@ -42,6 +55,7 @@ describe("SMS template variables", () => {
     inquiryPhone: "02-000-0001",
   };
 
+  // 허용 변수를 모두 치환하고 관리 링크 토큰은 노출하지 않음
   it("renders every allowed variable without exposing a bearer token", () => {
     const rendered = renderer.render(
       "{학생명}|{설명회명}|{일시}|{장소}|{QR링크}|{문의전화}",
@@ -52,6 +66,7 @@ describe("SMS template variables", () => {
     expect(rendered).not.toContain("token");
   });
 
+  // 알 수 없는 변수·형식 오류·값 없는 변수 거부
   it("rejects unknown, malformed, and unresolved variables", () => {
     expect(() => renderer.render("{학부모명}", context)).toThrowError(DomainError);
     expect(() => renderer.render("{학생명", context)).toThrowError(DomainError);
@@ -59,9 +74,12 @@ describe("SMS template variables", () => {
   });
 });
 
+// 알리고 게이트웨이 안전장치
 describe("Aligo gateway safety", () => {
+  // 전역 fetch 복원
   afterEach(() => vi.unstubAllGlobals());
 
+  // 비활성·허용 목록 차단은 HTTP 호출 없이 결과로 기록
   it("records disabled and allowlist blocks without an HTTP call", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -71,6 +89,7 @@ describe("Aligo gateway safety", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // 테스트 모드를 강제하고 양수 결과 코드만 접수 성공으로 판정
   it("forces test mode and accepts only a positive provider result", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ result_code: 1, msg_id: 123, msg_type: "SMS", success_cnt: 1, error_cnt: 0 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -81,6 +100,7 @@ describe("Aligo gateway safety", () => {
     expect(String(options.body)).toContain("sender=0222222222");
   });
 
+  // 허용 목록을 끄면 테스트 목록 밖 번호도 발송
   it("allows a valid recipient outside the test list when the allowlist is disabled", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       result_code: 1,
@@ -106,6 +126,7 @@ describe("Aligo gateway safety", () => {
     expect(String((fetchMock.mock.calls[0]![1] as RequestInit).body)).toContain("receiver=01099999999");
   });
 
+  // 연결 전 확정 실패(재시도 가능)와 접수 여부 불명을 구분
   it("distinguishes definite pre-connect failure from unknown acceptance", async () => {
     const preConnect = Object.assign(new TypeError("connect"), { cause: { code: "ENOTFOUND" } });
     const fetchMock = vi.fn().mockRejectedValueOnce(preConnect).mockRejectedValueOnce(new DOMException("timeout", "AbortError"));

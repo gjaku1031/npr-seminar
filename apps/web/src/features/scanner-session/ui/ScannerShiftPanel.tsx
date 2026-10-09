@@ -2,10 +2,10 @@
 
 /**
  * 회차 선택/잠금 — 계약 GET·POST /api/v1/scanner/shifts/current,
- * 목록은 GET /api/v1/scanner/check-in/sessions.
+ * 목록은 GET /api/v1/scanner/check-in/sessions
  *
- * 기기·지점·게이트는 서버가 세션에서 파생한다 — 화면은 회차만 고른다.
- * 잠금 없이는 계약상 QR·수동 체크인이 모두 거부되므로 스캔 화면을 열지 않는다.
+ * 기기·지점·게이트는 서버가 세션에서 파생함 — 화면은 회차만 고름
+ * 잠금 없이는 계약상 QR·수동 체크인이 모두 거부되므로 스캔 화면을 열지 않음
  */
 
 import { useCallback, useEffect, useId, useState } from "react";
@@ -23,28 +23,34 @@ import {
 import { fmtDateTime } from "@/shared/lib/format";
 import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 
+/**
+ * 회차 선택·잠금 패널 속성
+ */
 export interface ScannerShiftPanelProps {
+  /**
+   * 회차 잠금 성공 시 잠금 상태 전달
+   */
   onLocked: (shift: ScannerShiftState) => void;
   /**
-   * 잠금 요청을 보내기 **직전**, 실제 클릭 제스처의 콜스택 안에서 동기로 불린다.
-   * iPad/Safari 는 AudioContext 를 사용자 제스처 안에서 풀어야 하므로 여기서 결과음을 잠금 해제한다.
-   * await 이전에 호출해야 제스처 컨텍스트가 유지된다.
+   * 잠금 요청을 보내기 직전, 실제 클릭 제스처의 콜스택 안에서 동기로 불림
+   * iPad/Safari 는 AudioContext 를 사용자 제스처 안에서 풀어야 하므로 여기서 결과음을 잠금 해제함
+   * await 이전에 호출해야 제스처 컨텍스트가 유지됨
    */
   onBeforeLock?: () => void;
 }
 
+/**
+ * 스캔할 회차를 골라 잠그는 패널
+ */
 export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelProps) {
   const [sessions, setSessions] = useState<PublicSeminarSession[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
   const [locking, setLocking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /**
-   * 결과가 확정되지 않은 잠금 요청의 **정확한 첫 페이로드**(seminarSessionId).
-   *
-   * 계약상 "같은 Idempotency-Key + 다른 본문" 은 409 다. 미상 구간에서 키만 유지한 채
-   * 회차를 바꿔 재시도하면 그 조합이 나가므로, 키와 회차를 한 묶음으로 붙잡는다.
-   */
+  // 결과가 확정되지 않은 잠금 요청의 정확한 첫 페이로드(seminarSessionId)
+  // 계약상 "같은 Idempotency-Key + 다른 본문" 은 409 임. 미상 구간에서 키만 유지한 채
+  // 회차를 바꿔 재시도하면 그 조합이 나가므로, 키와 회차를 한 묶음으로 붙잡음
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const selectId = useId();
   const lockKey = useOperationKey();
@@ -70,10 +76,10 @@ export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelP
   }, []);
 
   const lock = useCallback(async () => {
-    // 실제 클릭 제스처 안에서(await 이전) 결과음 AudioContext 를 먼저 푼다 — iPad/Safari 대응.
+    // 실제 클릭 제스처 안에서(await 이전) 결과음 AudioContext 를 먼저 품 — iPad/Safari 대응
     onBeforeLock?.();
 
-    // 미확정 조작이 남아 있으면 그 회차가 유일한 진실이다 — 선택값이 아니라 첫 시도의 본문을 다시 보낸다.
+    // 미확정 조작이 남아 있으면 그 회차가 유일한 진실임 — 선택값이 아니라 첫 시도의 본문을 다시 보냄
     const sessionId = pendingSessionId ?? selectedId;
     if (!sessionId) return;
 
@@ -87,7 +93,7 @@ export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelP
       onLocked(shift);
     } catch (caught) {
       if (isDefinitiveFailure(caught)) {
-        // 서버가 확정적으로 거절했다 — 키를 버리고 선택을 풀어 다른 회차를 고를 수 있게 한다.
+        // 서버가 확정적으로 거절했음 — 키를 버리고 선택을 풀어 다른 회차를 고를 수 있게 함
         lockKey.settle(caught);
         setPendingSessionId(null);
         setError(
@@ -100,8 +106,8 @@ export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelP
         return;
       }
 
-      // 결과 미상(네트워크·5xx) — 서버가 이미 잠갔을 수 있다. 키를 유지하고(settle 은 미상에서
-      // 키를 남긴다) 회차를 고정해 완전히 같은 요청만 재시도한다.
+      // 결과 미상(네트워크·5xx) — 서버가 이미 잠갔을 수 있음. 키를 유지하고(settle 은 미상에서
+      // 키를 남김) 회차를 고정해 완전히 같은 요청만 재시도함
       lockKey.settle(caught);
       setPendingSessionId(sessionId);
       setError(
@@ -137,9 +143,9 @@ export function ScannerShiftPanel({ onLocked, onBeforeLock }: ScannerShiftPanelP
           </label>
           <select
             id={selectId}
-            /* 미상 구간에는 첫 시도의 회차를 그대로 보여준다 */
+            /* 미상 구간에는 첫 시도의 회차를 그대로 보여줌 */
             value={pendingSessionId ?? selectedId}
-            /* 미상 구간에는 회차를 못 바꾼다 — 본문이 바뀌면 같은 키를 쓸 수 없다 */
+            /* 미상 구간에는 회차를 못 바꿈 — 본문이 바뀌면 같은 키를 쓸 수 없음 */
             disabled={locking || pendingSessionId !== null}
             aria-describedby={`${selectId}-hint`}
             onChange={(event) => setSelectedId(event.target.value)}

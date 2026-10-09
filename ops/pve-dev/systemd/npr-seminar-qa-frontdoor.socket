@@ -1,3 +1,4 @@
+# QA 진입 소켓. 127.0.0.1:3000 으로 받은 연결을 frontdoor 프록시가 web(3100)으로 중계함
 [Unit]
 Description=NPR Seminar QA front door socket on 3000
 

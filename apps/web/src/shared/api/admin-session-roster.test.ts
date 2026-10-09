@@ -1,11 +1,11 @@
 /**
- * 회차 예약 명단 어댑터 테스트 (node:test + tsx).
+ * 회차 예약 명단 어댑터 테스트 (node:test + tsx)
  *
- * 여기서 지키려는 것은 두 가지다:
- *   1. 요청이 계약 그대로 나가는가 (fetch 를 가짜로 세워 URL 만 본다 — 진짜 서버는 없다).
- *   2. 상태 파생이 **서버 상태에서만** 나오는가 (나머지는 전부 순수 함수다).
+ * 여기서 지키려는 것은 두 가지임:
+ *   1. 요청이 계약 그대로 나가는가 (fetch 를 가짜로 세워 URL 만 봄 — 진짜 서버는 없음)
+ *   2. 상태 파생이 서버 상태에서만 나오는가 (나머지는 전부 순수 함수임)
  *
- * 픽스처는 계약(openapi.yaml SessionRoster*)의 필수 필드를 전부 채운 실제 응답 모양이다.
+ * 픽스처는 계약(openapi.yaml SessionRoster*)의 필수 필드를 전부 채운 실제 응답 모양임
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -46,11 +46,24 @@ import type {
 
 /* ── 픽스처 ──────────────────────────────────────────────────────────────── */
 
+/**
+ * 테스트 회차 ID
+ */
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
+
+/**
+ * 테스트 예약 ID
+ */
 const BOOKING_ID = "22222222-2222-4222-8222-222222222222";
+
+/**
+ * 취소된 이전 예약 ID
+ */
 const OLD_BOOKING_ID = "33333333-3333-4333-8333-333333333333";
 
-/** 계약 SessionRosterRow 필수 필드 전부 — 기본은 "예약 없는 재원생". */
+/**
+ * 계약 SessionRosterRow 필수 필드 전부 — 기본은 "예약 없는 재원생"
+ */
 const row = (overrides: Partial<SessionRosterRow> = {}): SessionRosterRow => ({
   rosterEntryId: "44444444-4444-4444-8444-444444444444",
   participantType: "ENROLLED",
@@ -75,6 +88,9 @@ const row = (overrides: Partial<SessionRosterRow> = {}): SessionRosterRow => ({
   ...overrides,
 });
 
+/**
+ * 테스트 명단 예약 투영 생성
+ */
 const booking = (
   status: FamilyBookingStatus,
   attendanceParty: AttendanceParty = "MOTHER",
@@ -92,6 +108,9 @@ const booking = (
   version: 3,
 });
 
+/**
+ * 테스트 예약 이력 참조 생성
+ */
 const historyRef = (
   overrides: Partial<SessionRosterBookingHistoryReference> = {},
 ): SessionRosterBookingHistoryReference => ({
@@ -104,6 +123,9 @@ const historyRef = (
   ...overrides,
 });
 
+/**
+ * 빈 명단 페이지
+ */
 const emptyPage: SessionRosterPage = {
   items: [],
   page: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
@@ -113,12 +135,17 @@ const emptyPage: SessionRosterPage = {
 
 /* ── 요청 인코딩 ─────────────────────────────────────────────────────────── */
 
+/**
+ * 테스트 후 되돌릴 원래 fetch
+ */
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** 실제 네트워크 대신 URL 만 붙잡는다. */
+/**
+ * 실제 네트워크 대신 URL 만 붙잡음
+ */
 function captureUrl(): { urls: string[] } {
   const captured: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -178,7 +205,9 @@ describe("listAdminSessionRoster 질의 인코딩", () => {
 
 /* ── XLSX 내보내기 ──────────────────────────────────────────────────────── */
 
-/** 실제 네트워크 대신 XLSX 바이너리와 Content-Disposition 을 흉내낸다. */
+/**
+ * 실제 네트워크 대신 XLSX 바이너리와 Content-Disposition 을 흉내냄
+ */
 function serveXlsx(contentDisposition: string | null): { urls: string[] } {
   const urls: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -187,7 +216,7 @@ function serveXlsx(contentDisposition: string | null): { urls: string[] } {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     };
     if (contentDisposition !== null) headers["content-disposition"] = contentDisposition;
-    // XLSX 시그니처(PK\x03\x04) 4바이트 — 내용은 중요치 않고 Blob 로 오는지만 본다.
+    // XLSX 시그니처(PK\x03\x04) 4바이트 — 내용은 중요치 않고 Blob 로 오는지만 봄
     return new Response(new Blob([new Uint8Array([80, 75, 3, 4])]), { status: 200, headers });
   }) as typeof fetch;
   return { urls };
@@ -210,7 +239,7 @@ describe("exportAdminSessionRosterXlsx — 지금 필터 그대로의 전체 명
     assert.equal(url.searchParams.get("unitGroup"), "MIDDLE_3");
     assert.equal(url.searchParams.get("teacherName"), "박선생");
     assert.equal(url.searchParams.get("query"), "김수민");
-    // 목록과 달리 전체를 뽑으므로 페이지 파라미터를 보내지 않는다.
+    // 목록과 달리 전체를 뽑으므로 페이지 파라미터를 보내지 않음
     assert.equal(url.searchParams.has("page"), false);
     assert.equal(url.searchParams.has("pageSize"), false);
   });
@@ -304,8 +333,8 @@ describe("단위 그룹 라벨 — 서버 unitName 에서만 낸다", () => {
 
   it("null·모르는 값은 지어내지 않고 — 로 떨어뜨린다", () => {
     assert.equal(rosterUnitGroupLabel(null), "—");
-    assert.equal(rosterUnitGroupLabel("중3"), "—"); // raw 학년 문자열은 단위명이 아니다
-    assert.equal(rosterUnitGroupLabel("중3 A반"), "—"); // 반명도 아니다
+    assert.equal(rosterUnitGroupLabel("중3"), "—"); // raw 학년 문자열은 단위명이 아님
+    assert.equal(rosterUnitGroupLabel("중3 A반"), "—"); // 반명도 아님
     assert.equal(rosterUnitGroupLabel(""), "—");
   });
 });
@@ -321,7 +350,14 @@ describe("분원 열 노출", () => {
 
 /* ── 예약 칸 상태 ───────────────────────────────────────────────────────── */
 
+/**
+ * 드롭다운 선택지 문구 목록
+ */
 const labelsOf = (control: ReturnType<typeof rosterBookingControl>) => control.options.map((o) => o.label);
+
+/**
+ * 드롭다운에서 선택된 문구
+ */
 const selected = (control: ReturnType<typeof rosterBookingControl>) =>
   control.options.find((o) => o.value === control.value)?.label ?? control.readOnlyLabel;
 
@@ -335,7 +371,7 @@ describe("예약 칸 상태 파생", () => {
   });
 
   it("예약 없는 행의 참석 선택은 PATCH 가 아니다 — 바꿀 활성 집계가 없다", () => {
-    // 이 술어가 곧 "드랍다운이 API 를 부르는가, 대화상자를 여는가"의 갈림길이다.
+    // 이 술어가 곧 "드랍다운이 API 를 부르는가, 대화상자를 여는가"의 갈림길임
     assert.equal(rosterHasActiveBooking(row()), false);
     assert.equal(rosterHasActiveBooking(row({ booking: booking("CANCELLED") })), false);
     assert.equal(rosterHasActiveBooking(row({ booking: booking("CHECKED_IN") })), false);
@@ -362,7 +398,7 @@ describe("예약 칸 상태 파생", () => {
     assert.equal(control.readOnly, true);
     assert.equal(control.readOnlyLabel, ROSTER_BOOKING_LABELS.checkedIn);
     assert.deepEqual(control.options, []);
-    // 서버가 막을 전이를 화면에서 만들어 낼 방법 자체가 없어야 한다.
+    // 서버가 막을 전이를 화면에서 만들어 낼 방법 자체가 없어야 함
     assert.equal(rosterBookingActionOf(control, "cancel"), null);
     assert.equal(rosterBookingActionOf(control, "party:BOTH"), null);
   });
@@ -381,7 +417,7 @@ describe("예약 칸 상태 파생", () => {
     assert.equal(control.cancelled, true);
     assert.deepEqual(labelsOf(control), ["예약취소", "예약 (모)", "예약 (부)", "예약 (모/부)", "수동 예약"]);
     assert.deepEqual(rosterBookingActionOf(control, "manual"), { kind: "manual" });
-    // 참석을 골라도 옛 집계를 되살리는 조작은 없다 — 새 집계를 만드는 대화상자로 간다.
+    // 참석을 골라도 옛 집계를 되살리는 조작은 없음 — 새 집계를 만드는 대화상자로 감
     assert.equal(rosterHasActiveBooking(row({ booking: booking("CANCELLED") })), false);
   });
 
@@ -402,7 +438,7 @@ describe("예약 칸 상태 파생", () => {
 
     assert.equal(control.readOnly, true);
     assert.deepEqual(control.options, []);
-    // 값을 지어내 보내는 대신 왜 못 하는지 말한다.
+    // 값을 지어내 보내는 대신 왜 못 하는지 말함
     assert.ok(control.blockedReason !== null && control.blockedReason.includes("연락처"));
   });
 
@@ -432,6 +468,9 @@ describe("예약 칸 상태 파생", () => {
 
 /* ── 비재원생 재예약 밑값 ───────────────────────────────────────────────── */
 
+/**
+ * 테스트 비재원생 명단 행 생성
+ */
 const guestRow = (overrides: Partial<SessionRosterRow> = {}) =>
   row({
     participantType: "GUEST",
@@ -541,8 +580,8 @@ describe("이력 계보 대상", () => {
   });
 
   it("서버가 현재 집계를 먼저 주더라도 오래된 순으로 바로잡는다", () => {
-    // 모달의 `예약 1`·`예약 2` 번호와 아래 시간순 계보가 여기서 갈라지면 안 된다 —
-    // 그래서 표시용 번호도 이 정렬에서 매긴다.
+    // 모달의 `예약 1`·`예약 2` 번호와 아래 시간순 계보가 여기서 갈라지면 안 됨 —
+    // 그래서 표시용 번호도 이 정렬에서 매김
     const targets = rosterHistoryTargets([
       historyRef({ familyBookingId: BOOKING_ID, current: true, createdAt: "2026-07-16T02:00:00.000Z" }),
       historyRef({
@@ -557,7 +596,7 @@ describe("이력 계보 대상", () => {
       targets.map((t) => t.familyBookingId),
       [OLD_BOOKING_ID, BOOKING_ID],
     );
-    // 즉 `예약 1` 은 취소된 옛 예약, `예약 2` 가 현재 예약이다.
+    // 즉 `예약 1` 은 취소된 옛 예약, `예약 2` 가 현재 예약임
     assert.equal(targets[0]!.current, false);
     assert.equal(targets[1]!.current, true);
   });
@@ -590,6 +629,9 @@ describe("이력 문구", () => {
   });
 });
 
+/**
+ * 테스트 예약 이력 이벤트 생성
+ */
 const event = (id: string, familyBookingId: string, occurredAt: string, sequence: string) => ({
   eventId: id,
   sequence,
@@ -630,7 +672,7 @@ describe("이력 계보 병합", () => {
       ],
     ]);
 
-    // Number 로 바꿨다면 두 값이 같아져 순서가 무너진다.
+    // Number 로 바꿨다면 두 값이 같아져 순서가 무너짐
     assert.deepEqual(merged.map((e) => e.eventId), ["early", "late"]);
   });
 
@@ -697,7 +739,7 @@ describe("cancelledFamilyRebookStudentIds — 취소된 가족의 재원생 전�
   });
 
   it("명단에 안 보이는 형제까지 재원생 전원을 담고, 선택한 행을 맨 앞에 둔다", () => {
-    // B 가 선택된 행 — 결과의 첫 원소여야 한다(idempotency 대상 = studentIds[0]).
+    // B 가 선택된 행 — 결과의 첫 원소여야 함(idempotency 대상 = studentIds[0])
     const result = cancelledFamilyRebookStudentIds(
       aggregate("CANCELLED", [link(STUDENT_A), link(STUDENT_B), link(STUDENT_C)]),
       STUDENT_B,

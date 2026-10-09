@@ -1,7 +1,7 @@
 /**
- * 하드 삭제 되묻기의 **순수한 판정**만 직접 본다 (node:test + tsx).
+ * 하드 삭제 되묻기의 순수한 판정만 직접 봄 (node:test + tsx)
  * fetch 를 타는 deleteScannerDevice/reconcileScannerDelete 는 훅·통합에서 다루고,
- * 여기서는 "GET 404 만 삭제됨" 규칙만 값으로 확인한다.
+ * 여기서는 "GET 404 만 삭제됨" 규칙만 값으로 확인함
  *
  * 실행: npm --prefix apps/web test
  */

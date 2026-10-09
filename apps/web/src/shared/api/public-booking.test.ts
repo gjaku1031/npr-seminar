@@ -1,15 +1,15 @@
 /**
- * 공개 예약 어댑터 테스트 (node:test + tsx). 진짜 서버 없이 fetch 를 가로채 요청을 검증한다.
+ * 공개 예약 어댑터 테스트 (node:test + tsx). 진짜 서버 없이 fetch 를 가로채 요청을 검증함
  *
  * 지키려는 것(계약 경계):
  * - lookup 은 정확히 `{contact}` 만 본문에 싣고 X-Booking-Proof·Idempotency-Key 를 붙이지 않으며,
- *   전체 연락처를 URL/쿼리에 노출하지 않는다. 매칭이 없으면 빈 목록이다.
- * - GET·QR 복구는 관리 세션이면 proof 헤더가 없고, proof 모드면 X-Booking-Proof 를 싣는다(마스킹 DTO).
- * - update·cancel 은 언제나 X-Booking-Proof + 안정적인 Idempotency-Key 를 싣고 마스킹 DTO 를 받는다.
- * - booking access 교환은 token 을 **본문에만** 싣고 응답 CSRF 를 채택한다.
+ *   전체 연락처를 URL/쿼리에 노출하지 않음. 매칭이 없으면 빈 목록임
+ * - GET·QR 복구는 관리 세션이면 proof 헤더가 없고, proof 모드면 X-Booking-Proof 를 실음(마스킹 DTO)
+ * - update·cancel 은 언제나 X-Booking-Proof + 안정적인 Idempotency-Key 를 싣고 마스킹 DTO 를 받음
+ * - booking access 교환은 token 을 본문에만 싣고 응답 CSRF 를 채택함
  * - 연락처 읽기 세션(read-session)은 `{contact}` 만 본문에 싣고 CSRF·credentials·멱등키를 싣고,
- *   응답 CSRF 를 채택한 뒤 관리 세션 쿠키로 상세·QR 을 GET 하며, 변경은 언제나 proof 로만 나간다.
- * - ENROLLED 생성 본문에 studentIds/contact 가 없고, GUEST 는 4필드를 싣는다(생성 응답은 전체 예약).
+ *   응답 CSRF 를 채택한 뒤 관리 세션 쿠키로 상세·QR 을 GET 하며, 변경은 언제나 proof 로만 나감
+ * - ENROLLED 생성 본문에 studentIds/contact 가 없고, GUEST 는 4필드를 실음(생성 응답은 전체 예약)
  *
  * 실행: node --import tsx --test src/shared/api/public-booking.test.ts
  */
@@ -36,26 +36,63 @@ import type {
   QrRecoveryResult,
 } from "./contract";
 
+/**
+ * 테스트 예약 ID
+ */
 const BOOKING_ID = "11111111-1111-4111-8111-111111111111";
+
+/**
+ * 테스트 예약 관리 링크 토큰
+ */
 const TOKEN = "abcDEF012345678901234567890123456789012_-XY"; // 43자
 
+/**
+ * 테스트 후 되돌릴 원래 fetch
+ */
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   resetCsrfToken();
 });
 
+/**
+ * 가로챈 fetch 요청
+ */
 interface Captured {
+  /**
+   * 요청 URL
+   */
   url: string;
+
+  /**
+   * HTTP 메서드
+   */
   method: string;
+
+  /**
+   * 요청 본문
+   */
   body: string | null;
+
+  /**
+   * 요청 헤더
+   */
   headers: Headers;
+
+  /**
+   * 쿠키 전송 방식
+   */
   credentials: RequestCredentials | undefined;
 }
 
+/**
+ * CSRF 토큰 발급 요청 횟수
+ */
 let csrfBootstrapCount = 0;
 
-/** 요청을 붙잡으며 순서대로 응답을 내준다. /auth/csrf 는 항상 부트스트랩 토큰을 준다. */
+/**
+ * 요청을 붙잡으며 순서대로 응답을 내줌. /auth/csrf 는 항상 부트스트랩 토큰을 줌
+ */
 function serve(responses: unknown[], csrfToken = "boot"): Captured[] {
   const calls: Captured[] = [];
   let index = 0;
@@ -82,7 +119,9 @@ function serve(responses: unknown[], csrfToken = "boot"): Captured[] {
   return calls;
 }
 
-/** 생성 응답은 여전히 **전체** 예약을 준다(본인이 방금 만든 예약이므로). */
+/**
+ * 생성 응답은 여전히 전체 예약을 줌(본인이 방금 만든 예약이므로)
+ */
 const booking: FamilyBooking = {
   familyBookingId: BOOKING_ID,
   seminarSessionId: "sess-1",
@@ -103,7 +142,9 @@ const booking: FamilyBooking = {
   cancelledAt: null,
 };
 
-/** 조회·상세·변경·취소 경로가 다루는 **마스킹** DTO. */
+/**
+ * 조회·상세·변경·취소 경로가 다루는 마스킹 DTO
+ */
 const maskedBooking: PublicMaskedFamilyBooking = {
   familyBookingId: BOOKING_ID,
   seminarSessionId: "sess-1",
@@ -121,6 +162,9 @@ const maskedBooking: PublicMaskedFamilyBooking = {
   cancelledAt: null,
 };
 
+/**
+ * 테스트 예약 변경 응답
+ */
 const mutationResult: FamilyBookingMutationResult = {
   booking,
   replayed: false,
@@ -128,6 +172,9 @@ const mutationResult: FamilyBookingMutationResult = {
   qrExpiresAt: "2999-01-01T00:00:00.000Z",
 };
 
+/**
+ * 테스트 QR 복구 응답
+ */
 const qrResult: QrRecoveryResult = {
   familyBookingId: BOOKING_ID,
   version: 1,
@@ -144,7 +191,7 @@ describe("lookupPublicFamilyBookings — 연락처 조회 본문·헤더 경계"
     const call = calls[0]!;
     assert.equal(call.method, "POST");
     assert.equal(call.url.endsWith("/public/family-bookings/lookup"), true);
-    // 전체 연락처가 URL·쿼리에 새지 않는다(그래서 GET 이 아니라 POST 본문이다).
+    // 전체 연락처가 URL·쿼리에 새지 않음(그래서 GET 이 아니라 POST 본문임)
     assert.equal(call.url.includes("01000000000"), false);
     assert.equal(call.url.includes("?"), false);
     const body = JSON.parse(call.body!) as Record<string, unknown>;
@@ -154,7 +201,7 @@ describe("lookupPublicFamilyBookings — 연락처 조회 본문·헤더 경계"
     assert.equal(call.headers.has("X-CSRF-Token"), false);
     assert.equal(call.headers.has("X-Booking-Proof"), false);
     assert.equal(call.headers.has("Idempotency-Key"), false);
-    // 마스킹 목록을 그대로 돌려준다.
+    // 마스킹 목록을 그대로 돌려줌
     assert.equal(result.items[0]!.participants[0]!.maskedName, "홍*동");
     assert.equal(result.items[0]!.maskedContact, "010-****-0000");
   });
@@ -172,7 +219,7 @@ describe("getPublicFamilyBooking · QR 복구 — 읽기 인증 모드(마스킹
     const result = await getPublicFamilyBooking(BOOKING_ID, { session: "management" });
     assert.equal(calls[0]!.method, "GET");
     assert.equal(calls[0]!.headers.has("X-Booking-Proof"), false);
-    // 결과가 마스킹 DTO 다(마스킹 참가자·연락처).
+    // 결과가 마스킹 DTO 임(마스킹 참가자·연락처)
     assert.equal(result.participants[0]!.maskedName, "홍*동");
     assert.equal(result.maskedContact, "010-****-0000");
   });
@@ -211,10 +258,10 @@ describe("updatePublicFamilyBooking · cancelPublicFamilyBooking — 언제나 p
     assert.equal(call.url.endsWith(`/public/family-bookings/${BOOKING_ID}`), true);
     assert.equal(call.headers.get("X-Booking-Proof"), "proof-u");
     assert.equal(call.headers.get("Idempotency-Key"), "op-u");
-    // 공개 자기관리 본문에는 학생 변경 필드가 없다(회차/참석 + expectedVersion 만).
+    // 공개 자기관리 본문에는 학생 변경 필드가 없음(회차/참석 + expectedVersion 만)
     const body = JSON.parse(call.body!) as Record<string, unknown>;
     assert.deepEqual(body, { attendanceParty: "BOTH", expectedVersion: 1 });
-    // 결과가 마스킹 DTO 다.
+    // 결과가 마스킹 DTO 임
     assert.equal(result.participants[0]!.maskedName, "홍*동");
     assert.equal(result.maskedContact, "010-****-0000");
   });
@@ -244,7 +291,7 @@ describe("createPublicFamilyBooking — 본문 형태(생성 응답은 전체 �
     const body = JSON.parse(calls[0]!.body!) as Record<string, unknown>;
     assert.equal(body.participantType, "ENROLLED");
     assert.equal("studentIds" in body, false);
-    // 검증된 연락처는 proof 헤더로만 온다 — 본문에 넣지 않는다.
+    // 검증된 연락처는 proof 헤더로만 옴 — 본문에 넣지 않음
     assert.equal("contact" in body, false);
     assert.equal(calls[0]!.headers.get("X-Booking-Proof"), "proof-x");
   });
@@ -280,7 +327,7 @@ describe("exchangeBookingAccessToken — 토큰 경계 + CSRF 채택", () => {
     assert.equal(call.url.endsWith("/public/booking-access/session"), true);
     assert.equal(call.url.includes(TOKEN), false);
     assert.equal(call.url.includes("?"), false);
-    // 어떤 헤더에도 토큰이 새지 않는다.
+    // 어떤 헤더에도 토큰이 새지 않음
     for (const [, value] of call.headers.entries()) assert.equal(value.includes(TOKEN), false);
     const body = JSON.parse(call.body!) as Record<string, unknown>;
     assert.equal(body.accessToken, TOKEN);
@@ -288,16 +335,16 @@ describe("exchangeBookingAccessToken — 토큰 경계 + CSRF 채택", () => {
   });
 
   it("응답 csrfToken 을 즉시 채택한다 — 이어지는 변경(proof)이 새 토큰을 쓴다", async () => {
-    // 교환은 booking response 를 반환하고, 이어지는 취소는 **새 proof** 로 나간다(세션은 변경 인증 불가).
+    // 교환은 booking response 를 반환하고, 이어지는 취소는 새 proof 로 나감(세션은 변경 인증 불가)
     const calls = serve([exchangeResult, { ...maskedBooking, status: "CANCELLED" }], "boot");
     await exchangeBookingAccessToken({ accessToken: TOKEN, contact: "01000000000" }, { idempotencyKey: "op-x2" });
-    // 교환 POST 자체는 부트스트랩 토큰으로 나갔다.
+    // 교환 POST 자체는 부트스트랩 토큰으로 나갔음
     assert.equal(calls[0]!.headers.get("X-CSRF-Token"), "boot");
 
     await cancelPublicFamilyBooking(BOOKING_ID, 1, { bookingProof: "proof-c", idempotencyKey: "op-cancel" });
-    // 채택된 새 토큰을 쓴다(부트스트랩으로 되돌아가지 않는다).
+    // 채택된 새 토큰을 씀(부트스트랩으로 되돌아가지 않음)
     assert.equal(calls[1]!.headers.get("X-CSRF-Token"), "freshtoken");
-    // 변경은 언제나 proof 를 싣는다.
+    // 변경은 언제나 proof 를 실음
     assert.equal(calls[1]!.headers.get("X-Booking-Proof"), "proof-c");
   });
 });
@@ -318,17 +365,17 @@ describe("establishFamilyBookingContactReadSession — 연락처 읽기 세션 �
     const call = calls[0]!;
     assert.equal(call.method, "POST");
     assert.equal(call.url.endsWith(`/public/family-bookings/${BOOKING_ID}/read-session`), true);
-    // 전체 연락처가 URL·쿼리에 새지 않는다(그래서 GET 이 아니라 POST 본문이다).
+    // 전체 연락처가 URL·쿼리에 새지 않음(그래서 GET 이 아니라 POST 본문임)
     assert.equal(call.url.includes("01000000000"), false);
     assert.equal(call.url.includes("?"), false);
     const body = JSON.parse(call.body!) as Record<string, unknown>;
     assert.deepEqual(body, { contact: "01000000000" });
-    // 상태 변경(durable) 이라 lookup 과 달리 CSRF·세션 쿠키·멱등키를 싣는다.
+    // 상태 변경(durable) 이라 lookup 과 달리 CSRF·세션 쿠키·멱등키를 실음
     assert.equal(call.credentials, "include");
     assert.equal(call.headers.get("X-CSRF-Token"), "boot");
     assert.equal(call.headers.get("Idempotency-Key"), "op-read");
     assert.equal(csrfBootstrapCount, 1);
-    // 읽기 세션 수립 자체는 proof 를 쓰지 않는다.
+    // 읽기 세션 수립 자체는 proof 를 쓰지 않음
     assert.equal(call.headers.has("X-Booking-Proof"), false);
     assert.equal(result.familyBookingId, BOOKING_ID);
   });
@@ -344,11 +391,11 @@ describe("establishFamilyBookingContactReadSession — 연락처 읽기 세션 �
       "boot",
     );
 
-    // 1) 읽기 세션 수립 — 부트스트랩 CSRF 로 나간다.
+    // 1) 읽기 세션 수립 — 부트스트랩 CSRF 로 나감
     await establishFamilyBookingContactReadSession(BOOKING_ID, "01000000000", { idempotencyKey: "op-read2" });
     assert.equal(calls[0]!.headers.get("X-CSRF-Token"), "boot");
 
-    // 2) 같은 마스킹 상세 GET — 관리 세션 쿠키만 쓰고 proof 헤더가 없다.
+    // 2) 같은 마스킹 상세 GET — 관리 세션 쿠키만 쓰고 proof 헤더가 없음
     const detail = await getPublicFamilyBooking(BOOKING_ID, { session: "management" });
     assert.equal(calls[1]!.method, "GET");
     assert.equal(calls[1]!.url.endsWith(`/public/family-bookings/${BOOKING_ID}`), true);
@@ -356,13 +403,13 @@ describe("establishFamilyBookingContactReadSession — 연락처 읽기 세션 �
     assert.equal(calls[1]!.credentials, "include");
     assert.equal(detail.maskedContact, "010-****-0000");
 
-    // 3) 현재 QR 복구 GET — 마찬가지로 proof 없이 쿠키 세션만 쓴다.
+    // 3) 현재 QR 복구 GET — 마찬가지로 proof 없이 쿠키 세션만 씀
     await recoverOwnedFamilyBookingQr(BOOKING_ID, { session: "management" });
     assert.equal(calls[2]!.method, "GET");
     assert.equal(calls[2]!.url.endsWith(`/public/family-bookings/${BOOKING_ID}/qr`), true);
     assert.equal(calls[2]!.headers.has("X-Booking-Proof"), false);
 
-    // 4) 변경은 세션으로 인증하지 않는다 — 언제나 새 proof + 채택된 새 CSRF 를 싣는다.
+    // 4) 변경은 세션으로 인증하지 않음 — 언제나 새 proof + 채택된 새 CSRF 를 실음
     await updatePublicFamilyBooking(
       BOOKING_ID,
       { attendanceParty: "BOTH", expectedVersion: 1 },
@@ -370,7 +417,7 @@ describe("establishFamilyBookingContactReadSession — 연락처 읽기 세션 �
     );
     assert.equal(calls[3]!.method, "PATCH");
     assert.equal(calls[3]!.headers.get("X-Booking-Proof"), "proof-m");
-    // 채택된 새 토큰을 쓴다(부트스트랩으로 되돌아가지 않는다) → 추가 부트스트랩이 없다.
+    // 채택된 새 토큰을 씀(부트스트랩으로 되돌아가지 않음) → 추가 부트스트랩이 없음
     assert.equal(calls[3]!.headers.get("X-CSRF-Token"), "freshtoken");
     assert.equal(csrfBootstrapCount, 1);
   });

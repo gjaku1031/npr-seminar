@@ -1,19 +1,12 @@
 "use client";
 
 /**
- * 설명회 운영 (명세 §6, flows ADMIN-F4) — 와이어프레임 SessionsScreen 이식(POC 복원).
+ * 설명회 운영 화면. 좌측 회차 목록과 선택 회차의 운영 현황·포스터·실시간 입장 로그
  *
- * ★ POC 의 화면 구성(4개 카드)을 그대로 되살린다. 다만 **조작은 붙이지
- *   않는다**: 새 설명회·엑셀 저장은 계약에 아직 없어서, 눌러도 성공한 척
- *   보여 주느니 **비활성(disabled)** 으로 원래 자리에 두고 "API 연결 전"을 스크린리더까지 알린다.
- *   가짜 성공을 만들지 않는다.
- *
- * ★ 4개 카드(총 예약·입장 완료·입장인원·취소)와 좌측 모든 회차의 숫자는 회차 목록이 함께 주는
- *   `operationsSummary` 실집계다. 정원·예약률·좌석 원장은 운영 화면에 노출하지 않는다.
- *
-
- *   학생·반·담임·학부모 연락처)까지 와서 POC 의 8열(캠퍼스·단위명·학생명·반명·담임명·학부모HP·
- *   별점·후기)을 그대로 채운다. 보내기 카드의 문구·변수·바이트는 **미리보기(예시)** 이며 편집 불가다.
+ * - 화면 구성(4개 카드)은 와이어프레임을 따름. 새 설명회·엑셀 저장은 계약에 없어 비활성으로
+ *   원래 자리에 두고 "API 연결 전"을 스크린리더까지 알림. 성공한 척하지 않음
+ * - 4개 카드(총 예약·입장 완료·입장인원·취소)와 좌측 회차 숫자는 회차 목록이 함께 주는
+ *   `operationsSummary` 실집계. 정원·예약률·좌석 원장은 운영 화면에 노출하지 않음
  */
 
 import { useMemo, useState } from "react";
@@ -35,6 +28,9 @@ import { fmtDateTimeShort, fmtSessionDate } from "@/shared/lib/format";
 import { SEMINAR_LOCATION } from "@/shared/lib/seminar";
 import { Badge, Button, Card, Icons, StatCard, Switch } from "@/shared/ui";
 
+/**
+ * 회차 상태 표시 문구
+ */
 const STATUS_LABELS: Record<SeminarSessionStatus, string> = {
   DRAFT: "작성 중",
   OPEN: "예약 열림",
@@ -43,6 +39,9 @@ const STATUS_LABELS: Record<SeminarSessionStatus, string> = {
   ARCHIVED: "보관됨",
 };
 
+/**
+ * 회차 상태 배지 색조
+ */
 const STATUS_TONES: Record<SeminarSessionStatus, "neutral" | "brand" | "accent" | "danger"> = {
   DRAFT: "neutral",
   OPEN: "brand",
@@ -51,10 +50,14 @@ const STATUS_TONES: Record<SeminarSessionStatus, "neutral" | "brand" | "accent" 
   ARCHIVED: "neutral",
 };
 
-/** 조작이 계약에 붙기 전이라는 사실을 스크린리더까지 알리는 공통 꼬리표. */
+/**
+ * 조작이 계약에 붙기 전이라는 사실을 스크린리더까지 알리는 공통 꼬리표
+ */
 const PENDING = "API 연결 전";
 
-/** 시각적으로 숨기고 스크린리더에만 읽히는 텍스트 — DS Button 은 aria-label 을 받지 않아, 비활성 사유를 접근名에 보탠다. */
+/**
+ * 시각적으로 숨기고 스크린리더에만 읽히는 텍스트 — DS Button 은 aria-label 을 받지 않아, 비활성 사유를 접근名에 보탬
+ */
 const SR_ONLY: React.CSSProperties = {
   position: "absolute",
   width: 1,
@@ -67,14 +70,17 @@ const SR_ONLY: React.CSSProperties = {
   border: 0,
 };
 
+/**
+ * 설명회 운영 화면
+ */
 export function SessionsView() {
   const sessions = useSeminarSessions();
   const lifecycle = useSessionLifecycle(sessions.reload);
-  /** 열려 있는 확인 창 — null 이면 닫혀 있다. */
+  // 열려 있는 확인 창 — null 이면 닫혀 있음
   const [lifecycleAction, setLifecycleAction] = useState<SessionLifecycleAction | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  /* 좌측 사이드바 폭 드래그 조절 (명세 §6.1: 190~460px) */
+  // 좌측 사이드바 폭 드래그 조절. 190~460px
   const [sideW, setSideW] = useState(300);
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -94,7 +100,7 @@ export function SessionsView() {
     [sessions.options, selectedId],
   );
 
-  // 회차별 비재원생 예약 허용 토글 — 계약 PATCH 가 있는 **활성** 조작이다(POC 비활성 링크와 다르다).
+  // 회차별 비재원생 예약 허용 토글 — 계약 PATCH 가 있는 실제 조작임
   const guestToggle = useGuestBookingToggle(sessions.reload);
 
 
@@ -131,7 +137,7 @@ export function SessionsView() {
   }
 
   const session = selected.session;
-  /** 회차 목록이 항목마다 함께 준 실집계 — 별도 요청 없이 바로 읽는다(근사·로딩 없음). */
+  // 회차 목록이 항목마다 함께 준 실집계 — 별도 요청 없이 바로 읽음(근사·로딩 없음)
   const summary = session.operationsSummary;
   const scope = session.branch === null ? "전체" : BRANCH_LABELS[session.branch];
 
@@ -142,19 +148,19 @@ export function SessionsView() {
           <div style={{ fontSize: 12, letterSpacing: "var(--tracking-caps)", fontWeight: 700, color: "var(--text-accent)", marginBottom: 6 }}>QR OPERATIONS</div>
           <h1 style={{ fontSize: "var(--text-h1)", fontWeight: 800 }}>설명회 운영</h1>
         </div>
-        {/* POC 위치(우상단)에 '새 설명회'를 되살리되, 생성 계약이 붙기 전이라 비활성이다. */}
+        {/* 우상단 '새 설명회'. 생성 계약이 없어 비활성 */}
         <Button icon={<Icons.plus size={16} />} disabled>
           새 설명회<span style={SR_ONLY}> 만들기 — {PENDING}</span>
         </Button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: `${sideW}px 14px 1fr`, marginTop: 20, alignItems: "start" }}>
-        {/* 회차 목록 (명세 §6.1) */}
+        {/* 회차 목록 */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {sessions.options.map((option, i) => {
             const item = option.session;
             const sel = item.seminarSessionId === session.seminarSessionId;
-            // 목록이 항목마다 operationsSummary 를 함께 주므로 모든 행이 자기 실집계를 쓴다.
+            // 목록이 항목마다 operationsSummary 를 함께 주므로 모든 행이 자기 실집계를 씀
             const rowActive = item.operationsSummary.activeCount;
             const rowCheckedIn = item.operationsSummary.checkedInCount;
             return (
@@ -184,7 +190,7 @@ export function SessionsView() {
           })}
         </div>
 
-        {/* 폭 조절 핸들 (명세 §6.1) */}
+        {/* 폭 조절 핸들 */}
         <div onMouseDown={startDrag} title="드래그하여 폭 조절" style={{ cursor: "col-resize", alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ width: 4, height: 52, borderRadius: 2, background: "var(--gray-3)" }} />
         </div>
@@ -214,8 +220,8 @@ export function SessionsView() {
                 예약 창구 {fmtDateTimeShort(new Date(session.bookingOpensAt))} ~ {fmtDateTimeShort(new Date(session.bookingClosesAt))}
               </div>
               {/*
-                비재원생 예약 허용 — 계약 PATCH 가 붙은 **운영 가능한** 토글이다. 저장 중에는
-                disabled + "저장 중", 성공/실패는 aria-live 로 짧게 알린다. 결과를 낙관적으로 확정하지 않는다.
+                비재원생 예약 허용 — 계약 PATCH 가 붙은 운영 가능한 토글임. 저장 중에는
+                disabled + "저장 중", 성공/실패는 aria-live 로 짧게 알림. 결과를 낙관적으로 확정하지 않음
               */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 <Switch
@@ -245,8 +251,8 @@ export function SessionsView() {
               </div>
             </div>
             {/*
-              두 조작 모두 되돌리기 어렵다 — 확인 창이 경고문을 보여 주고 문구를 직접
-              입력받은 뒤에야 실행한다. 이미 종료·삭제된 회차에는 종료를 다시 걸지 않는다.
+              두 조작 모두 되돌리기 어려움 — 확인 창이 경고문을 보여 주고 문구를 직접
+              입력받은 뒤에야 실행함. 이미 종료·삭제된 회차에는 종료를 다시 걸지 않음
             */}
             <div style={{ display: "flex", gap: 14 }}>
               <LifecycleLink
@@ -268,14 +274,14 @@ export function SessionsView() {
 
           {/*
             현황 스탯 — 총 예약·입장 완료·입장인원·취소. 목록 항목의 operationsSummary
-            실집계다(노쇼·테스트 예약 제외).
+            실집계임(노쇼·테스트 예약 제외)
 
-            ★ 단위가 섞여 있다. 총 예약·입장 완료·취소는 **가족 예약 건수**이고,
-              입장인원만 **사람 수**다. 그래서 suffix 로 건/명을 분명히 갈라 둔다 —
-              한 가족이 두 명 들어오면 입장 완료 1건에 입장인원 2명이다.
+            단위가 섞여 있음. 총 예약·입장 완료·취소는 가족 예약 건수이고,
+              입장인원만 사람 수임. 그래서 suffix 로 건/명을 분명히 갈라 둠 —
+              한 가족이 두 명 들어오면 입장 완료 1건에 입장인원 2명임
 
-            미체크(RESERVED 건수)를 뺀 자리다. 운영 중 실제로 묻는 것은 "지금 안에 몇 명
-            있나"이고, 안 온 사람 수는 총 예약에서 빼면 나온다.
+            미체크(RESERVED 건수)를 뺀 자림. 운영 중 실제로 묻는 것은 "지금 안에 몇 명
+            있나"이고, 안 온 사람 수는 총 예약에서 빼면 나옴
           */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <StatCard label="총 예약" value={summary.activeCount} suffix="건" tone="brand" icon={<Icons.ticket size={15} />} delay={0} />
@@ -284,7 +290,7 @@ export function SessionsView() {
             <StatCard label="취소" value={summary.cancelledCount} suffix="건" tone="danger" icon={<Icons.x size={15} />} delay={150} />
           </div>
 
-          {/* 실시간 입장 로그 — 당일 운영 중 "방금 그 가족 처리됐나"를 새로고침 없이 본다. */}
+          {/* 실시간 입장 로그 — 당일 운영 중 "방금 그 가족 처리됐나"를 새로고침 없이 봄 */}
           <Card padding="14px 16px">
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <Icons.monitor size={15} style={{ color: "var(--mint-600)" }} />
@@ -298,8 +304,8 @@ export function SessionsView() {
       </div>
 
       {/*
-        공개 진입면(`/`) 포스터 관리 — 선택 회차에 매이지 않는 **전역** 설정이라, 회차별 대시보드
-        아래 전체 폭 영역에 둔다(예전 허브에 있던 패널을 여기로 옮겼다). 회차 카드가 아니다.
+        공개 진입면(`/`) 포스터 관리 — 선택 회차에 매이지 않는 전역 설정이라, 회차별 대시보드
+        아래 전체 폭 영역에 둠. 회차 카드가 아님
       */}
       <div style={{ marginTop: 28, paddingTop: 24, borderTop: "1px solid var(--border-hairline)", animation: "ds-fade-up var(--dur-slow) var(--ease-out) 120ms both" }}>
         <PosterAdminPanel />
@@ -313,7 +319,7 @@ export function SessionsView() {
         onCancel={() => { setLifecycleAction(null); lifecycle.clear(); }}
         onConfirm={() => {
           if (lifecycleAction === null) return;
-          // 창은 성공했을 때만 닫는다 — 실패하면 그 자리에서 사유를 보여 주고 다시 시도한다.
+          // 창은 성공했을 때만 닫음 — 실패하면 그 자리에서 사유를 보여 주고 다시 시도함
           void lifecycle.run(session, lifecycleAction).then((done) => {
             if (done) setLifecycleAction(null);
           });
@@ -324,9 +330,9 @@ export function SessionsView() {
 }
 
 /**
- * 종료·삭제 밑줄 링크. POC 의 자리와 생김새를 그대로 쓰되 이제 실제로 동작한다.
+ * 회차 종료·삭제 밑줄 링크
  *
- * 누르면 곧장 실행되지 않는다 — 확인 창이 열리고, 거기서 문구를 입력해야 실행된다.
+ * 누르면 곧장 실행되지 않음 — 확인 창이 열리고, 거기서 문구를 입력해야 실행됨
  */
 function LifecycleLink(
   { icon, label, tone, disabled, onClick }:

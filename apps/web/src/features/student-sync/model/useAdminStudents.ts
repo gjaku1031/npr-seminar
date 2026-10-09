@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * 관리자 학생 명부 조회 (계약 GET /api/v1/admin/students).
+ * 관리자 학생 명부 조회 (계약 GET /api/v1/admin/students)
  *
- * 필터 상태는 URL 쿼리가 소유한다 — 새로고침·뒤로가기·링크 공유가 같은 화면을 낸다.
+ * 필터 상태는 URL 쿼리가 소유함 — 새로고침·뒤로가기·링크 공유가 같은 화면을 냄
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -12,17 +12,26 @@ import { listAdminStudents } from "@/shared/api";
 import type { AdminStudentReservationPage, Branch, RosterUnitGroup } from "@/shared/api";
 import { defaultErrorMessage, isAborted } from "@/shared/api";
 
+/**
+ * 학생 목록 페이지 크기
+ */
 export const STUDENT_PAGE_SIZE = 10;
 
+/**
+ * 허용 캠퍼스 값
+ */
 const BRANCHES: ReadonlySet<string> = new Set<Branch>(["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"]);
 
+/**
+ * URL 값을 캠퍼스로 해석. 아니면 undefined
+ */
 function parseBranch(raw: string | null): Branch | undefined {
   return raw !== null && BRANCHES.has(raw) ? (raw as Branch) : undefined;
 }
 
 /**
- * 단위 그룹 칩이 URL 로 쓰는 값. 명부 화면에는 비재원생(GUEST) 칩이 없으므로 받지 않는다 —
- * 계약 밖 값이나 GUEST 는 전체로 되돌린다.
+ * 단위 그룹 칩이 URL 로 쓰는 값. 명부 화면에는 비재원생(GUEST) 칩이 없으므로 받지 않음 —
+ * 계약 밖 값이나 GUEST 는 전체로 되돌림
  */
 const UNIT_GROUPS: ReadonlySet<string> = new Set<RosterUnitGroup>([
   "ALL",
@@ -35,54 +44,110 @@ const UNIT_GROUPS: ReadonlySet<string> = new Set<RosterUnitGroup>([
   "SCIENCE",
 ]);
 
+/**
+ * URL 값을 단위 그룹으로 해석. 아니면 ALL
+ */
 function parseUnitGroup(raw: string | null): RosterUnitGroup {
   return raw !== null && UNIT_GROUPS.has(raw) ? (raw as RosterUnitGroup) : "ALL";
 }
 
+/**
+ * URL 값을 1 이상 페이지 번호로 해석
+ */
 function parsePage(raw: string | null): number {
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
+/**
+ * 학생 목록 필터. URL query 와 동기화됨
+ */
 export interface StudentFilters {
+  /**
+   * 검색어
+   */
   query: string;
+
+  /**
+   * 캠퍼스
+   */
   branch: Branch | undefined;
+
+  /**
+   * 단위 그룹
+   */
   unitGroup: RosterUnitGroup;
+
+  /**
+   * 담임 필터
+   */
   teacherName: string;
   /**
    * "예약 여부" 열이 기준으로 삼는 회차. URL(`session`)이 소유하되, 아직 고른 적 없으면
-   * 호출부가 준 fallback(첫 회차)으로 채운다 — 명단 범위는 바꾸지 않고 각 행의 예약 여부만 정한다.
+   * 호출부가 준 fallback(첫 회차)으로 채움 — 명단 범위는 바꾸지 않고 각 행의 예약 여부만 정함
    */
   seminarSessionId: string | undefined;
+
+  /**
+   * 페이지 번호
+   */
   page: number;
 }
 
+/**
+ * 관리자 학생 목록 상태
+ */
 export interface AdminStudentsState {
+  /**
+   * 학생 목록 한 페이지. 아직 없으면 null
+   */
   page: AdminStudentReservationPage | null;
-  /** 첫 로딩에만 skeleton 을 띄운다 — 필터 전환은 이전 결과를 남겨 둔다. */
+  /**
+   * 첫 로딩에만 skeleton 을 띄움 — 필터 전환은 이전 결과를 남겨 둠
+   */
   loading: boolean;
-  /** 필터·페이지 전환으로 다시 읽는 중. */
+  /**
+   * 필터·페이지 전환으로 다시 읽는 중
+   */
   refreshing: boolean;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
+
+  /**
+   * 필터
+   */
   filters: StudentFilters;
-  /** 필터가 하나라도 걸려 있는가 — "결과 없음" 문구를 가르는 기준. */
+  /**
+   * 필터가 하나라도 걸려 있는가 — "결과 없음" 문구를 가르는 기준
+   */
   filtered: boolean;
+
+  /**
+   * 필터 일부 변경
+   */
   setFilters: (next: Partial<StudentFilters>) => void;
+
+  /**
+   * 다시 불러오기
+   */
   reload: () => void;
 }
 
+/**
+ * 관리자 학생 목록을 URL 필터로 불러오는 훅
+ */
 export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  /**
-   * 한 번의 조회 결과를 통째로 들고 있는다 (요청 신원 `key` 포함).
-   *
-   * 이렇게 두면 "다시 읽는 중"을 **파생**할 수 있다 — 지금 그려야 할 요청(`requestKey`)과
-   * 마지막으로 도착한 결과의 key 가 다르면 그게 곧 refreshing 이다. 효과 본문에서
-   * setState 를 때려 렌더를 한 번 더 돌릴 필요가 없다.
-   */
+  // 한 번의 조회 결과를 통째로 들고 있음 (요청 신원 `key` 포함)
+  // 이렇게 두면 "다시 읽는 중"을 파생할 수 있음 — 지금 그려야 할 요청(`requestKey`)과
+  // 마지막으로 도착한 결과의 key 가 다르면 그게 곧 refreshing 임. 효과 본문에서
+  // setState 를 때려 렌더를 한 번 더 돌릴 필요가 없음
   const [result, setResult] = useState<{
     key: string;
     page: AdminStudentReservationPage | null;
@@ -96,7 +161,7 @@ export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState
       branch: parseBranch(searchParams.get("branch")),
       unitGroup: parseUnitGroup(searchParams.get("unit")),
       teacherName: searchParams.get("teacher") ?? "",
-      // URL 이 회차를 지목하지 않았으면 fallback(첫 회차)을 쓰되 URL 은 더럽히지 않는다.
+      // URL 이 회차를 지목하지 않았으면 fallback(첫 회차)을 쓰되 URL 은 더럽히지 않음
       seminarSessionId: searchParams.get("session") ?? fallbackSessionId,
       page: parsePage(searchParams.get("page")),
     }),
@@ -109,10 +174,10 @@ export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState
     filters.unitGroup !== "ALL" ||
     filters.teacherName !== "";
 
-  // useMemo 로 만든 filters 객체를 deps 에 그대로 넣으면 참조가 매번 바뀌므로 값으로 푼다.
+  // useMemo 로 만든 filters 객체를 deps 에 그대로 넣으면 참조가 매번 바뀌므로 값으로 품
   const { query, branch, unitGroup, teacherName, seminarSessionId, page: pageNumber } = filters;
 
-  /** 지금 화면이 요구하는 조회의 신원. 이게 바뀌면 곧 새 요청이다. */
+  // 지금 화면이 요구하는 조회의 신원. 이게 바뀌면 곧 새 요청임
   const requestKey = JSON.stringify([
     query.trim(),
     branch ?? "",
@@ -134,9 +199,9 @@ export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState
             branch,
             unitGroup: unitGroup === "ALL" ? undefined : unitGroup,
             teacherName: teacherName === "" ? undefined : teacherName,
-            // 학생 현황은 재원 명부 화면이다 — 사용자 필터와 무관하게 항상 재원(active)만 본다.
+            // 학생 현황은 재원 명부 화면임 — 사용자 필터와 무관하게 항상 재원(active)만 봄
             sourceActive: true,
-            // 회차를 함께 보내면 서버가 각 행에 예약 여부만 얹는다(명단 범위는 그대로).
+            // 회차를 함께 보내면 서버가 각 행에 예약 여부만 얹음(명단 범위는 그대로)
             seminarSessionId,
             page: pageNumber,
             pageSize: STUDENT_PAGE_SIZE,
@@ -147,7 +212,7 @@ export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState
         setResult({ key: requestKey, page: next, error: null });
       } catch (caught) {
         if (isAborted(caught) || controller.signal.aborted) return;
-        // 이전 결과는 남겨 둔다 — 화면을 비우는 대신 오류 줄만 얹고 재시도를 권한다.
+        // 이전 결과는 남겨 둠 — 화면을 비우는 대신 오류 줄만 얹고 재시도를 권함
         setResult((previous) => ({
           key: requestKey,
           page: previous?.page ?? null,
@@ -173,13 +238,13 @@ export function useAdminStudents(fallbackSessionId?: string): AdminStudentsState
 
       if ("query" in next) write("q", next.query);
       if ("branch" in next) write("branch", next.branch);
-      // ALL 은 기본값이므로 URL 에 남기지 않는다.
+      // ALL 은 기본값이므로 URL 에 남기지 않음
       if ("unitGroup" in next) write("unit", next.unitGroup === "ALL" ? undefined : next.unitGroup);
       if ("teacherName" in next) write("teacher", next.teacherName);
       if ("seminarSessionId" in next) write("session", next.seminarSessionId);
 
-      // 명단 **범위**를 바꾸는 필터가 바뀌면 현재 페이지 번호는 의미를 잃는다 — 1로 돌린다.
-      // 회차(session)만 바꾸면 같은 명단에 예약 여부만 다시 얹으므로 페이지를 그대로 둔다.
+      // 명단 범위를 바꾸는 필터가 바뀌면 현재 페이지 번호는 의미를 잃음 — 1로 돌림
+      // 회차(session)만 바꾸면 같은 명단에 예약 여부만 다시 얹으므로 페이지를 그대로 둠
       const changesMembership =
         "query" in next || "branch" in next || "unitGroup" in next || "teacherName" in next;
       if ("page" in next && next.page !== undefined) write("page", String(next.page));

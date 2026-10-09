@@ -1,7 +1,7 @@
 /**
- * 집계 어댑터의 **순수한 심장**만 직접 본다 (node:test + tsx).
+ * 집계 어댑터의 순수한 심장만 직접 봄 (node:test + tsx)
  * fetch 를 타는 부분(getSessionOperationsSummary/getSessionStatistics)은 훅·통합에서 다루고,
- * 여기서는 서버 응답 매핑·합성 규칙·"엔드포인트 없음" 판정만 값으로 확인한다.
+ * 여기서는 서버 응답 매핑·합성 규칙·"엔드포인트 없음" 판정만 값으로 확인함
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -42,7 +42,7 @@ describe("operationsSummaryFrom — 합성 active 는 NO_SHOW 를 절대 포함�
       { reservedCount: 11, checkedInCount: 7, noShowCount: 3, cancelledCount: 5 },
       "derived",
     );
-    assert.equal(summary.activeCount, 18); // 11 + 7 — 노쇼 3 은 빠진다
+    assert.equal(summary.activeCount, 18); // 11 + 7 — 노쇼 3 은 빠짐
     assert.equal(summary.uncheckedCount, 11);
     assert.equal(summary.checkedInCount, 7);
     assert.equal(summary.cancelledCount, 5);
@@ -174,7 +174,7 @@ describe("statisticsSummaryFrom — 합성 통계는 active 에서 NO_SHOW 를 �
   it("active = reserved + checkedIn, units/channels = null", () => {
     const stats = statisticsSummaryFrom({ reservedCount: 90, checkedInCount: 40, noShowCount: 12, cancelledCount: 7 });
     assert.equal(stats.source, "derived");
-    assert.equal(stats.activeCount, 130); // 90 + 40 — 노쇼 12 는 빠진다
+    assert.equal(stats.activeCount, 130); // 90 + 40 — 노쇼 12 는 빠짐
     assert.equal(stats.checkedInCount, 40);
     assert.equal(stats.reservedCount, 90);
     assert.equal(stats.cancelledCount, 7);

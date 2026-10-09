@@ -1,9 +1,12 @@
 "use client";
 
-/** DS Dialog — 핸드오프 components/feedback/Dialog.jsx 이식. */
+// 디자인 시스템 일반 대화상자
 
 import { useEffect, type ReactNode } from "react";
 
+/**
+ * 일반 대화상자. 배경 클릭·Escape로 닫힘. 포커스 트랩은 없음
+ */
 export function Dialog({
   open = false,
   onClose,
@@ -12,13 +15,37 @@ export function Dialog({
   footer,
   width = 440,
 }: {
+  /**
+   * 열림 여부
+   */
   open?: boolean;
+
+  /**
+   * 닫기 처리. 있으면 닫기 버튼 표시
+   */
   onClose?: () => void;
+
+  /**
+   * 제목
+   */
   title?: ReactNode;
+
+  /**
+   * 본문
+   */
   children?: ReactNode;
+
+  /**
+   * 하단 버튼 영역
+   */
   footer?: ReactNode;
+
+  /**
+   * 패널 너비(px)
+   */
   width?: number;
 }) {
+  // 열려 있는 동안 Escape로 닫기
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

@@ -6,13 +6,12 @@ import { SmsWorkerService } from "../../src/modules/sms/sms-worker.service.js";
 import { WorkerAppModule } from "../../src/worker-app.module.js";
 
 /**
- * 이 테스트가 지우고 복원하는 env 키.
+ * 테스트가 지우고 복원하는 환경 변수
  *
- * ⚠️ ConfigModule 은 NODE_ENV 가 production 이 아닐 때 `apps/api/.env` 를 읽는다(worker-app.module.ts).
- * vitest 의 NODE_ENV 는 test 이므로, 개발자 로컬 `.env` 의 **api 역할** 값이 그대로 새어 들어온다.
- * 그 상태로 worker 를 부팅하면 environmentProvider 의 역할 격리 검사(POSTER_STORAGE_DIR 등)에
- * 걸려 실패한다 — 검사 자체는 정상 동작이고, 테스트가 환경을 충분히 비우지 않은 것이다.
- * 따라서 worker 가 받아서는 안 되는 api 전용 키까지 전부 여기서 지운다.
+ * 주의: ConfigModule은 NODE_ENV가 production이 아니면 `apps/api/.env`를 읽음(worker-app.module.ts)
+ * vitest의 NODE_ENV는 test라 개발자 로컬 `.env`의 API 역할 값이 그대로 들어옴
+ * 그 상태로 워커를 기동하면 environmentProvider의 역할 격리 검사(POSTER_STORAGE_DIR 등)에 걸려 실패함
+ * 검사는 정상이며 환경을 덜 비운 테스트 문제이므로 워커가 받으면 안 되는 API 전용 키까지 모두 지움
  */
 const environmentKeys = [
   "APP_ENV",
@@ -32,7 +31,7 @@ const environmentKeys = [
   "GOOGLE_SHEETS_ENABLED",
   "GOOGLE_SHEETS_SPREADSHEET_ID",
   "GOOGLE_APPLICATION_CREDENTIALS",
-  // ── api 역할 전용 — worker 프로세스에 주입되면 안 되는 값들 ──
+  // API 역할 전용. 워커 프로세스에 주입되면 안 되는 값
   "POSTER_STORAGE_DIR",
   "GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT",
   "REDIS_URL",
@@ -48,10 +47,15 @@ const environmentKeys = [
   "TONG_PASSWORD",
 ] as const;
 
+// 워커 애플리케이션 기동
 describe("WorkerAppModule boot", () => {
+  // 기동한 애플리케이션 컨텍스트
   let context: INestApplicationContext | undefined;
+
+  // 테스트 전 환경 변수 값
   const originalEnvironment = new Map<string, string | undefined>();
 
+  // 컨텍스트 종료와 환경 변수 복원
   afterEach(async () => {
     if (context !== undefined) await context.close();
     context = undefined;
@@ -64,6 +68,7 @@ describe("WorkerAppModule boot", () => {
     vi.restoreAllMocks();
   });
 
+  // 연동을 끈 production 설정으로 기동·종료 성공
   it("boots and closes in production with disabled provider integrations", async () => {
     for (const key of environmentKeys) originalEnvironment.set(key, process.env[key]);
     for (const key of environmentKeys) delete process.env[key];
@@ -81,7 +86,7 @@ describe("WorkerAppModule boot", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     // abortOnError: false — 기본값이면 부팅 실패가 process.abort() 로 vitest worker 를 통째로
-    // 죽여서 원인 메시지가 사라진다. 실패는 이 테스트의 실패로만 드러나야 한다.
+    // 죽여서 원인 메시지가 사라짐. 실패는 이 테스트의 실패로만 드러나야 함
     context = await NestFactory.createApplicationContext(WorkerAppModule, {
       abortOnError: false,
       logger: false,

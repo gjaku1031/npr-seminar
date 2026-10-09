@@ -1,2 +1,2 @@
-// views/booking-detail 공개 API (barrel). (설계 §4.1)
+// views/booking-detail 공개 API (barrel)
 export { BookingDetailView } from "./ui/BookingDetailView";

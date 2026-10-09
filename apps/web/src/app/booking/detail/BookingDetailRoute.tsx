@@ -4,10 +4,19 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BookingDetailView } from "@/views/booking-detail";
 
+/**
+ * `/booking/<id>` 경로 패턴
+ */
 const BOOKING_PATH = /^\/booking\/([^/]+)\/?$/;
+
+/**
+ * 예약 ID(UUID v4) 형식
+ */
 const BOOKING_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** 원래 주소의 단일 예약 UUID를 복원한다. 예약 ID는 권한이 아니며 잘못된 경로는 null이다. */
+/**
+ * 원래 주소의 단일 예약 UUID를 복원함. 예약 ID는 권한이 아니며 잘못된 경로는 null임
+ */
 function bookingIdFromPath(pathname: string): string | null {
   const segment = BOOKING_PATH.exec(pathname)?.[1];
   if (!segment) return null;
@@ -19,7 +28,9 @@ function bookingIdFromPath(pathname: string): string | null {
   }
 }
 
-/** 정적 예약 셸에서 주소창의 ID를 읽어 연락처 확인 화면에만 전달한다. */
+/**
+ * 정적 예약 셸에서 주소창의 ID를 읽어 연락처 확인 화면에만 전달함
+ */
 export function BookingDetailRoute() {
   const bookingId = useSyncExternalStore(
     () => () => {},

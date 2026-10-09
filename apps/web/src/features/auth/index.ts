@@ -1,4 +1,4 @@
-// features/auth 공개 API (barrel). (설계 §4.1)
+// features/auth 공개 API (barrel)
 export { LoginForm } from "./ui/LoginForm";
 export { AvatarMenu } from "./ui/AvatarMenu";
 export { LoginSessionGate, SessionNotice, useSessionCheck } from "./ui/SessionGates";

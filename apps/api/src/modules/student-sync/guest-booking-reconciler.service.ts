@@ -2,29 +2,37 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 
 /**
- * 예약할 때는 비재원생이었는데 그 뒤에 등록한 가정을 재원생 예약으로 잇는다.
+ * 예약 당시 비재원생이었다가 이후 등록한 가정을 재원생 예약으로 연결
  *
- * 왜 필요한가: 학부모는 설명회를 먼저 예약하고 나중에 등록한다. 예약 시점에 학생이
- * 통통통에 없으면 비재원생으로 남고, 등록한 뒤에도 명단에서는 계속 반·단위·담임이 빈
- * 채로 보인다. 운영자가 매번 눈으로 찾아 고칠 일이 아니라 매일 갱신이 알아서 할 일이다.
+ * 학부모는 설명회를 먼저 예약하고 나중에 등록함. 예약 시점에 통통통에 없으면 비재원생으로 남고
+ * 등록 후에도 명단에서 반·단위·담임이 빈 채로 보이므로 정기 동기화가 자동으로 연결함
  *
- * 기준은 **이름과 연락처가 모두 일치**할 때뿐이다. 둘 중 하나만으로는 잇지 않는다 —
- * 번호만 보면 형제에게 붙고(정하준 예약이 정하윤에게), 이름만 보면 동명이인에게 붙는다
- * (같은 캠퍼스 동명이인 37건 중 33건이 다른 학교였다).
+ * 이름과 연락처가 모두 일치할 때만 연결. 한쪽만으로는 연결하지 않음
+ * 번호만 보면 형제에게 붙고, 이름만 보면 동명이인에게 붙음(같은 캠퍼스 동명이인 37건 중 33건이 다른 학교)
  */
 @Injectable()
 export class GuestBookingReconcilerService {
+  /**
+   * 연결 결과 기록용 로거
+   */
   private readonly logger = new Logger(GuestBookingReconcilerService.name);
 
+  /**
+   * DB 클라이언트 주입
+   */
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 지나지 않은 회차의 비재원 예약을 훑어 재원생으로 전환한다.
+   * 지나지 않은 회차의 활성 비재원생 예약을 재원생으로 전환
    *
-   * 전환 자체가 목적이 아니라 명단이 사실과 맞는 것이 목적이므로, 조금이라도 모호하면
-   * 건너뛰고 그 수를 남긴다. 잘못 이은 한 건이 안 이은 열 건보다 나쁘다.
+   * 명단이 사실과 맞는 것이 목적이므로 조금이라도 모호하면 건너뛰고 건수만 남김
+   * 잘못 연결한 한 건이 연결하지 않은 열 건보다 나쁨
+   *
+   * @param actorSubject 예약 이벤트에 남길 처리 주체
+   * @returns 전환·건너뜀 건수
    */
   async reconcile(actorSubject: string): Promise<GuestReconciliationResult> {
+    // 이름(NFKC·공백 제거)과 어머니·아버지 연락처 다이제스트가 같은 활성 학생을 같은 지점·다른 지점으로 나눠 셈
     const candidates = await this.prisma.$queryRaw<CandidateRow[]>`
       with guest_row as (
         select fbs.id, fbs.family_booking_id, fbs.session_id,
@@ -70,10 +78,10 @@ export class GuestBookingReconcilerService {
     const result = { promoted: 0, skippedAmbiguous: 0, skippedCrossBranch: 0, skippedAlreadyBooked: 0 };
 
     for (const candidate of candidates) {
-      // 같은 캠퍼스에서 두 명 이상이 걸리면 어느 쪽인지 알 수 없다. 고르지 않는다.
+      // 같은 캠퍼스에서 두 명 이상 일치하면 어느 쪽인지 알 수 없어 고르지 않음
       if (candidate.match_count > 1n) { result.skippedAmbiguous += 1; continue; }
       if (candidate.student_id === null) { result.skippedCrossBranch += 1; continue; }
-      // 예약한 캠퍼스와 다른 캠퍼스에도 같은 사람이 걸리면 판단을 보류한다.
+      // 예약한 캠퍼스와 다른 캠퍼스에도 같은 사람이 있으면 판단 보류
       if (candidate.cross_branch_count > 0n) { result.skippedAmbiguous += 1; continue; }
 
       const promoted = await this.promote(candidate, actorSubject);
@@ -88,8 +96,11 @@ export class GuestBookingReconcilerService {
   }
 
   /**
-   * 한 건을 전환한다. 이미 그 학생이 같은 회차에 재원생으로 잡혀 있으면 손대지 않는다 —
-   * 한 학생이 두 예약에 걸치면 명단과 집계가 어긋난다.
+   * 예약 학생 1건 전환
+   *
+   * 그 학생이 같은 회차에 이미 재원생으로 예약돼 있으면 변경하지 않음. 한 학생이 두 예약에 걸치면 명단과 집계가 어긋남
+   *
+   * @returns 전환했으면 true, 충돌·이미 변경됨이면 false
    */
   private async promote(candidate: CandidateRow, actorSubject: string): Promise<boolean> {
     const studentId = candidate.student_id!;
@@ -109,7 +120,7 @@ export class GuestBookingReconcilerService {
       if (student === null) return false;
 
       const updated = await transaction.familyBookingStudent.updateMany({
-        // participant_type 조건을 다시 건다 — 그 사이 다른 경로가 이미 바꿨으면 덮지 않는다.
+        // 참여 유형 조건을 다시 확인. 그 사이 다른 경로가 이미 바꿨으면 덮어쓰지 않음
         where: { id: candidate.id, participantType: "GUEST", active: true },
         data: {
           participantType: "ENROLLED",
@@ -125,7 +136,7 @@ export class GuestBookingReconcilerService {
       });
       if (updated.count === 0) return false;
 
-      // 되돌릴 수 있게 바꾸기 전 값을 그대로 남긴다. 자동으로 고친 것일수록 기록이 필요하다.
+      // 되돌릴 수 있도록 변경 전 스냅샷 값을 이벤트에 남김. 자동 수정일수록 기록 필요
       await transaction.bookingEvent.create({
         data: {
           familyBookingId: candidate.family_booking_id,
@@ -150,24 +161,92 @@ export class GuestBookingReconcilerService {
   }
 }
 
+/**
+ * 비재원생 연결 결과
+ */
 export interface GuestReconciliationResult {
+  /**
+   * 재원생으로 전환한 건수
+   */
   readonly promoted: number;
+
+  /**
+   * 같은 지점 다중 일치·다른 지점 동시 일치로 건너뛴 건수
+   */
   readonly skippedAmbiguous: number;
+
+  /**
+   * 다른 지점에서만 일치해 건너뛴 건수
+   */
   readonly skippedCrossBranch: number;
+
+  /**
+   * 같은 회차에 이미 재원생 예약이 있거나 그 사이 바뀌어 건너뛴 건수
+   */
   readonly skippedAlreadyBooked: number;
 }
 
+/**
+ * 연결 후보 조회 행
+ */
 interface CandidateRow {
+  /**
+   * 예약 학생 ID
+   */
   readonly id: bigint;
+
+  /**
+   * 가족 예약 ID
+   */
   readonly family_booking_id: bigint;
+
+  /**
+   * 회차 ID
+   */
   readonly session_id: bigint;
+
+  /**
+   * 예약 학생 이름
+   */
   readonly name: string;
+
+  /**
+   * 예약 당시 반
+   */
   readonly class_name_snapshot: string;
+
+  /**
+   * 예약 당시 학교
+   */
   readonly school_name_snapshot: string | null;
+
+  /**
+   * 예약 당시 학년
+   */
   readonly grade_snapshot: string | null;
+
+  /**
+   * 예약 당시 단위
+   */
   readonly unit_name_snapshot: string | null;
+
+  /**
+   * 예약 당시 담임
+   */
   readonly teacher_name_snapshot: string | null;
+
+  /**
+   * 같은 지점 일치 학생 중 가장 작은 ID. 없으면 null
+   */
   readonly student_id: bigint | null;
+
+  /**
+   * 같은 지점 일치 수
+   */
   readonly match_count: bigint;
+
+  /**
+   * 다른 지점 일치 수
+   */
   readonly cross_branch_count: bigint;
 }

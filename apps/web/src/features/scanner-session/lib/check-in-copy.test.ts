@@ -1,5 +1,5 @@
 /**
- * 체크인 결과 문구 순수 테스트 (node:test + tsx). 클라이언트 컴포넌트를 import 하지 않는다.
+ * 체크인 결과 문구 순수 테스트 (node:test + tsx). 클라이언트 컴포넌트를 import 하지 않음
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -9,6 +9,9 @@ import { describe, it } from "node:test";
 import type { AttendanceParty, CheckInOutcome, CheckInResult } from "../../../shared/api/contract";
 import { checkInTone, formatCheckInOutcome } from "./check-in-copy";
 
+/**
+ * 테스트 체크인 결과 생성
+ */
 function outcome(overrides: Partial<CheckInOutcome> = {}): CheckInOutcome {
   return {
     eventId: "evt-1",
@@ -43,8 +46,8 @@ describe("formatCheckInOutcome — CHECKED_IN 은 예약 인원이 아니라 실
     ["MOTHER", 1, 1, "김수민 학생 학부모(모) 1명 입장 완료"],
     ["FATHER", 1, 1, "김수민 학생 학부모(부) 1명 입장 완료"],
     ["BOTH", 2, 2, "김수민 학생 학부모(모/부) 2명 입장 완료"],
-    // ★ 이 기능의 핵심 — 2명 예약했는데 한 분만 왔다. 예약 인원을 그대로 읽으면
-    //   화면이 오지 않은 사람까지 입장했다고 말한다.
+    // 이 기능의 핵심 — 2명 예약했는데 한 분만 왔음. 예약 인원을 그대로 읽으면
+    //   화면이 오지 않은 사람까지 입장했다고 말함
     ["BOTH", 2, 1, "김수민 학생 학부모(모/부) 1명 입장 완료"],
   ];
 
@@ -67,14 +70,11 @@ describe("formatCheckInOutcome — CHECKED_IN 은 예약 인원이 아니라 실
 });
 
 describe("formatCheckInOutcome — ALREADY_CHECKED_IN", () => {
-  /**
-   * 예전에는 인원을 아예 지웠다("새 입장처럼 N명 줄을 다시 그리지 않는다"). 그 규칙의 목적은
-   * 중복 스캔이 새 입장처럼 읽히지 않게 하는 것이었고, 그 역할은 제목("이미 입장한 QR")과
-   * 본문의 "이미" 가 이미 하고 있다.
-   *
-   * 이제 인원을 함께 보여 준다. 2명 예약에 한 분만 입장한 상태에서 나머지 한 분이 뒤늦게 와
-   * 다시 찍었을 때, 스태프가 알아야 할 사실이 정확히 "지금까지 1명"이기 때문이다.
-   */
+  // 예전에는 인원을 아예 지웠음("새 입장처럼 N명 줄을 다시 그리지 않는다"). 그 규칙의 목적은
+  // 중복 스캔이 새 입장처럼 읽히지 않게 하는 것이었고, 그 역할은 제목("이미 입장한 QR")과
+  // 본문의 "이미" 가 이미 하고 있음
+  // 이제 인원을 함께 보여 줌. 2명 예약에 한 분만 입장한 상태에서 나머지 한 분이 뒤늦게 와
+  // 다시 찍었을 때, 스태프가 알아야 할 사실이 정확히 "지금까지 1명"이기 때문임
   it("이미 입장한 건은 지금까지 기록된 인원을 함께 말한다", () => {
     const copy = formatCheckInOutcome(
       outcome({ result: "ALREADY_CHECKED_IN", attendanceParty: "BOTH", familySeatCount: 2, attendedCount: 1 }),

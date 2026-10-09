@@ -1,93 +1,163 @@
+// Prisma 클라이언트 생성 설정. ESM 클라이언트를 src/generated/prisma에 생성(저장소에 포함하지 않음)
 generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"
   moduleFormat = "esm"
 }
 
+// PostgreSQL. 연결 URL은 prisma.config.ts에서 지정
 datasource db {
   provider = "postgresql"
 }
 
+/// 캠퍼스(지점). A·B·C
 model Branch {
+  /// ID
   id              BigInt           @id @default(autoincrement())
+  /// 공개 ID
   publicId        String           @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 내부 지점 코드 CAMPUS_A·CAMPUS_B·CAMPUS_C
   code            String           @unique @db.VarChar(32)
+  /// 표시 이름
   displayName     String           @map("display_name") @db.VarChar(80)
+  /// 통통통 지점 코드
   sourceCode      String           @unique @map("source_code") @db.VarChar(32)
+  /// 활성 여부
   active          Boolean          @default(true)
+  /// 생성 시각
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 소속 학생
   students        Student[]
+  /// 지점 동기화 실행
   syncBranchRuns  SyncBranchRun[]
+  /// 스테이징 행
   stagingStudents StagingStudent[]
+  /// 스캐너 기기
   scannerDevices  ScannerDevice[]
+  /// 지점 회차
   seminarSessions SeminarSession[]
 
   @@map("branches")
 }
 
+/// 관리자 계정
 model AdminUser {
+  /// ID
   id           BigInt      @id @default(autoincrement())
+  /// 공개 ID
   publicId     String      @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 로그인 ID. 소문자 정규화
   username     String      @unique @db.VarChar(120)
+  /// argon2id 비밀번호 해시
   passwordHash String      @map("password_hash") @db.Text
+  /// 표시 이름
   displayName  String      @map("display_name") @db.VarChar(120)
+  /// 권한 역할
   role         String      @db.VarChar(24)
+  /// 활성 여부
   active       Boolean     @default(true)
+  /// 생성 시각
   createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 인증 감사
   authAudits   AuthAudit[]
 
   @@map("admin_users")
 }
 
+/// 인증·보안 감사 이벤트. 로그인·로그아웃·예약 조회·회로 등
 model AuthAudit {
+  /// ID
   id           BigInt     @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId      String     @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 관리자 계정 ID. 없으면 null
   adminUserId  BigInt?    @map("admin_user_id")
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject String?    @map("actor_subject") @db.VarChar(160)
+  /// 이벤트 종류
   eventType    String     @map("event_type") @db.VarChar(40)
+  /// 결과 코드
   resultCode   String     @map("result_code") @db.VarChar(80)
+  /// 개인정보 없는 부가 정보
   safeMetadata Json       @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt   DateTime   @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 관리자 계정
   adminUser    AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([adminUserId, occurredAt(sort: Desc)], map: "auth_audits_admin_user_id_occurred_at_idx")
   @@map("auth_audits")
 }
 
+/// 학생 동기화 실행
 model SyncRun {
+  /// ID
   id                      BigInt                   @id @default(autoincrement())
+  /// 공개 ID
   publicId                String                   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 실행 유형. 수동·예약·초기 스냅샷
   runType                 String                   @map("run_type") @db.VarChar(32)
+  /// 상태
   status                  String                   @db.VarChar(40)
+  /// 요청 주체
   initiatedBy             String?                  @map("initiated_by") @db.VarChar(160)
+  /// 초기 스냅샷 ID
   snapshotId              String?                  @map("snapshot_id") @db.VarChar(80)
+  /// 원천 스냅샷 해시
   snapshotHash            Bytes?                   @map("snapshot_hash") @db.ByteA
+  /// 스테이징 무결성 해시. 반영 직전 재확인
   stagingHash             Bytes?                   @map("staging_hash") @db.ByteA
+  /// 반영 가능 여부
   publishable             Boolean                  @default(false)
+  /// 원천 로그인 시도 표식. 결과 불명 판단 기준
   loginAttempted          Boolean                  @default(false) @map("login_attempted")
+  /// 대표 반 판정 불가 학생 수
   ambiguityCount          Int                      @default(0) @map("ambiguity_count")
+  /// 원천 행 수
   rawRowCount             Int                      @default(0) @map("raw_row_count")
+  /// 포함 수강 등록 수
   includedAssignmentCount Int                      @default(0) @map("included_assignment_count")
+  /// 고유 학생 수
   uniqueStudentCount      Int                      @default(0) @map("unique_student_count")
+  /// 제외 행 수
   excludedCount           Int                      @default(0) @map("excluded_count")
+  /// 시작 시각
   startedAt               DateTime                 @default(now()) @map("started_at") @db.Timestamptz(6)
+  /// 종료 시각
   finishedAt              DateTime?                @map("finished_at") @db.Timestamptz(6)
+  /// 반영 시각
   publishedAt             DateTime?                @map("published_at") @db.Timestamptz(6)
+  /// 반영 주체
   publishedBy             String?                  @map("published_by") @db.VarChar(160)
+  /// 오류 코드
   errorCode               String?                  @map("error_code") @db.VarChar(100)
+  /// 지표 JSON
   metrics                 Json                     @default("{}") @db.JsonB
+  /// 지점별 실행
   branchRuns              SyncBranchRun[]
+  /// 스테이징 행
   stagingStudents         StagingStudent[]
+  /// 원천 충돌
   conflicts               SyncConflict[]
+  /// 처음 확인한 학생
   studentFirstSeen        Student[]                @relation("student_first_seen")
+  /// 마지막으로 확인한 학생
   studentLastSeen         Student[]                @relation("student_last_seen")
+  /// 처음 확인한 수강 등록
   assignmentFirstSeen     StudentClassAssignment[] @relation("assignment_first_seen")
+  /// 마지막으로 확인한 수강 등록
   assignmentLastSeen      StudentClassAssignment[] @relation("assignment_last_seen")
+  /// 학생 변경 이력
   studentHistory          StudentHistory[]
+  /// 회로 감사
   circuitAudits           TongAuthCircuitAudit[]
+  /// 이 실행이 연 회로
   openedCircuits          TongAuthCircuit[]
+  /// 실행 감사 이벤트
   syncAuditEvents         SyncAuditEvent[]
 
   @@index([startedAt(sort: Desc), id(sort: Desc)], map: "sync_runs_started_at_idx")
@@ -95,17 +165,29 @@ model SyncRun {
   @@map("sync_runs")
 }
 
+/// 동기화 실행 감사 이벤트
 model SyncAuditEvent {
+  /// ID
   id           BigInt   @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId      String   @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 동기화 실행 ID
   syncRunId    BigInt   @map("sync_run_id")
+  /// 지점 코드. 실행 전체 이벤트는 null
   branchCode   String?  @map("branch_code") @db.VarChar(32)
+  /// 이벤트 종류
   eventType    String   @map("event_type") @db.VarChar(40)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject String   @map("actor_subject") @db.VarChar(160)
+  /// 건수 JSON
   counts       Json?    @db.JsonB
+  /// 오류 코드
   errorCode    String?  @map("error_code") @db.VarChar(100)
+  /// 개인정보 없는 부가 정보
   safeMetadata Json     @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 동기화 실행
   syncRun      SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([syncRunId, id], map: "sync_audit_events_run_sequence_idx")
@@ -113,25 +195,45 @@ model SyncAuditEvent {
   @@map("sync_audit_events")
 }
 
+/// 지점별 동기화 실행
 model SyncBranchRun {
+  /// ID
   id               BigInt    @id @default(autoincrement())
+  /// 공개 ID
   publicId         String    @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 동기화 실행 ID
   syncRunId        BigInt    @map("sync_run_id")
+  /// 지점 ID
   branchId         BigInt    @map("branch_id")
+  /// 처리 순서. A 1·B 2·C 3
   sequenceNo       Int       @map("sequence_no") @db.SmallInt
+  /// 상태
   status           String    @db.VarChar(32)
+  /// 조회 행 수
   fetchedCount     Int       @default(0) @map("fetched_count")
+  /// 스테이징 행 수
   stagedCount      Int       @default(0) @map("staged_count")
+  /// 포함 행 수
   includedCount    Int       @default(0) @map("included_count")
+  /// 제외 행 수
   excludedCount    Int       @default(0) @map("excluded_count")
+  /// 추가 학생 수
   insertedCount    Int       @default(0) @map("inserted_count")
+  /// 변경 학생 수
   updatedCount     Int       @default(0) @map("updated_count")
+  /// 비활성화 학생 수
   inactivatedCount Int       @default(0) @map("inactivated_count")
+  /// 원천 스냅샷 해시
   snapshotHash     Bytes?    @map("snapshot_hash") @db.ByteA
+  /// 오류 코드
   errorCode        String?   @map("error_code") @db.VarChar(100)
+  /// 시작 시각
   startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  /// 종료 시각
   finishedAt       DateTime? @map("finished_at") @db.Timestamptz(6)
+  /// 동기화 실행
   syncRun          SyncRun   @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// 지점
   branch           Branch    @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([syncRunId, branchId], map: "sync_branch_runs_run_branch_unique")
@@ -140,37 +242,69 @@ model SyncBranchRun {
   @@map("sync_branch_runs")
 }
 
+/// 동기화 스테이징 행. 반영 후 정리
 model StagingStudent {
+  /// ID
   id                    BigInt   @id @default(autoincrement())
+  /// 동기화 실행 ID
   syncRunId             BigInt   @map("sync_run_id")
+  /// 지점 ID
   branchId              BigInt   @map("branch_id")
+  /// 원천 순번
   sourceOrdinal         Int      @map("source_ordinal")
+  /// 원천 고유 번호
   sourceUniqueNo        String   @map("source_unique_no") @db.VarChar(160)
+  /// 수강 등록 번호
   classRegistrationNo   String   @map("class_registration_no") @db.VarChar(160)
+  /// 원천 학번. 제외 행은 null
   sourceStudentNo       String?  @map("source_student_no") @db.VarChar(160)
+  /// 이름. 제외 행은 null
   name                  String?  @db.VarChar(300)
+  /// 반 이름
   className             String?  @map("class_name") @db.VarChar(300)
+  /// 학교
   schoolName            String?  @map("school_name") @db.VarChar(300)
+  /// 학년
   grade                 String?  @db.VarChar(100)
+  /// 담임
   teacherName           String?  @map("teacher_name") @db.VarChar(300)
+  /// 단위
   unitName              String?  @map("unit_name") @db.VarChar(160)
+  /// 어머니 연락처 암호문
   motherPhoneCiphertext Bytes?   @map("mother_phone_ciphertext") @db.ByteA
+  /// 어머니 연락처 다이제스트
   motherPhoneDigest     Bytes?   @map("mother_phone_digest") @db.ByteA
+  /// 어머니 연락처 끝 4자리
   motherPhoneLast4      String?  @map("mother_phone_last4") @db.Char(4)
+  /// 아버지 연락처 암호문
   fatherPhoneCiphertext Bytes?   @map("father_phone_ciphertext") @db.ByteA
+  /// 아버지 연락처 다이제스트
   fatherPhoneDigest     Bytes?   @map("father_phone_digest") @db.ByteA
+  /// 아버지 연락처 끝 4자리
   fatherPhoneLast4      String?  @map("father_phone_last4") @db.Char(4)
+  /// 원천에 아버지 연락처 열이 있었는지 여부
   fatherPhoneObserved   Boolean  @default(false) @map("father_phone_observed")
+  /// 원천 재원 상태
   sourceStatus          String?  @map("source_status") @db.VarChar(100)
+  /// 정규화 행 해시
   rowHash               Bytes?   @map("row_hash") @db.ByteA
+  /// 포함 여부
   included              Boolean
+  /// 제외 사유
   exclusionReason       String?  @map("exclusion_reason") @db.VarChar(100)
+  /// 대표 반 후보 여부
   primaryCandidate      Boolean  @default(false) @map("primary_candidate")
+  /// 학생의 대표 수강 등록 여부
   primarySelected       Boolean  @default(false) @map("primary_selected")
+  /// 대표 반 판정 결과
   classResolutionStatus String?  @map("class_resolution_status") @db.VarChar(40)
+  /// 판정 불가 사유
   classResolutionReason String?  @map("class_resolution_reason") @db.VarChar(80)
+  /// 적재 시각
   stagedAt              DateTime @default(now()) @map("staged_at") @db.Timestamptz(6)
+  /// 동기화 실행
   syncRun               SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// 지점
   branch                Branch   @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([syncRunId, branchId, sourceOrdinal], map: "staging_students_run_ordinal_unique")
@@ -181,44 +315,73 @@ model StagingStudent {
   @@map("staging_students")
 }
 
+/// 동기화 원천 충돌
 model SyncConflict {
+  /// ID
   id              BigInt   @id @default(autoincrement())
+  /// 동기화 실행 ID
   syncRunId       BigInt   @map("sync_run_id")
+  /// 충돌 종류
   conflictType    String   @map("conflict_type") @db.VarChar(80)
+  /// 지점 코드. 여러 지점 충돌은 null
   branchCode      String?  @map("branch_code") @db.VarChar(32)
+  /// 원천 학번
   sourceStudentNo String?  @map("source_student_no") @db.VarChar(160)
+  /// 개인정보 없는 상세
   safeDetails     Json     @default("{}") @map("safe_details") @db.JsonB
+  /// 생성 시각
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 동기화 실행
   syncRun         SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([syncRunId, conflictType], map: "sync_conflicts_run_type_idx")
   @@map("sync_conflicts")
 }
 
+/// 통통통 로그인 회로. 단일 행
 model TongAuthCircuit {
+  /// 단일 행 키. 항상 1
   singletonId      Int       @id @map("singleton_id") @db.SmallInt
+  /// CLOSED 정상, OPEN 차단
   status           String    @db.VarChar(16)
+  /// 열린 시각
   openedAt         DateTime? @map("opened_at") @db.Timestamptz(6)
+  /// 연 사유 코드
   openedReasonCode String?   @map("opened_reason_code") @db.VarChar(100)
+  /// 회로를 연 실행 ID
   openedRunId      BigInt?   @map("opened_run_id")
+  /// 마지막 초기화 시각
   lastResetAt      DateTime? @map("last_reset_at") @db.Timestamptz(6)
+  /// 마지막 초기화 주체
   lastResetBy      String?   @map("last_reset_by") @db.VarChar(160)
+  /// 낙관적 잠금 버전
   version          BigInt    @default(0)
+  /// 회로를 연 실행
   openedRun        SyncRun?  @relation(fields: [openedRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([openedRunId], map: "tong_auth_circuit_opened_run_fk_idx")
   @@map("tong_auth_circuit")
 }
 
+/// 로그인 회로 감사 이벤트
 model TongAuthCircuitAudit {
+  /// ID
   id           BigInt   @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId      String   @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 관련 실행 ID
   syncRunId    BigInt?  @map("sync_run_id")
+  /// OPENED·RESET 등
   eventType    String   @map("event_type") @db.VarChar(24)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject String   @map("actor_subject") @db.VarChar(160)
+  /// 사유 코드
   reasonCode   String   @map("reason_code") @db.VarChar(100)
+  /// 운영자 입력 사유
   reason       String?  @db.Text
+  /// 발생 시각
   occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 동기화 실행
   syncRun      SyncRun? @relation(fields: [syncRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([syncRunId], map: "tong_auth_circuit_audits_run_idx")
@@ -226,47 +389,85 @@ model TongAuthCircuitAudit {
   @@map("tong_auth_circuit_audits")
 }
 
+/// 동기화 실행 lease. 동시 실행 방지
 model SyncLease {
+  /// lease 이름
   lockName          String    @id @map("lock_name") @db.VarChar(100)
+  /// 보유 실행 공개 ID. 없으면 null
   holderRunPublicId String?   @map("holder_run_public_id") @db.Uuid
+  /// 만료 시각
   lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   @@map("sync_leases")
 }
 
+/// 학생 원장. 통통통 동기화로 갱신
 model Student {
+  /// ID
   id                    BigInt                   @id @default(autoincrement())
+  /// 공개 ID
   publicId              String                   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 원천 학번. 전체 지점에서 유일
   sourceStudentNo       String                   @unique @map("source_student_no") @db.VarChar(160)
+  /// 지점 ID
   branchId              BigInt                   @map("branch_id")
+  /// 이름
   name                  String                   @db.VarChar(300)
+  /// 대표 반 표시. 과학 반만이면 `과학`, 반 없음은 `미분류`, 다음 학기 반만이면 `비재원생`
   className             String                   @map("class_name") @db.VarChar(300)
+  /// 학교
   schoolName            String?                  @map("school_name") @db.VarChar(300)
+  /// 학년
   grade                 String?                  @db.VarChar(100)
+  /// 대표 담임
   teacherName           String?                  @map("teacher_name") @db.VarChar(300)
+  /// 단위
   unitName              String?                  @map("unit_name") @db.VarChar(160)
+  /// 어머니 연락처 암호문
   motherPhoneCiphertext Bytes?                   @map("mother_phone_ciphertext") @db.ByteA
+  /// 어머니 연락처 다이제스트
   motherPhoneDigest     Bytes?                   @map("mother_phone_digest") @db.ByteA
+  /// 어머니 연락처 끝 4자리
   motherPhoneLast4      String?                  @map("mother_phone_last4") @db.Char(4)
+  /// 아버지 연락처 암호문
   fatherPhoneCiphertext Bytes?                   @map("father_phone_ciphertext") @db.ByteA
+  /// 아버지 연락처 다이제스트
   fatherPhoneDigest     Bytes?                   @map("father_phone_digest") @db.ByteA
+  /// 아버지 연락처 끝 4자리
   fatherPhoneLast4      String?                  @map("father_phone_last4") @db.Char(4)
+  /// 원천 재원 상태
   sourceStatus          String?                  @map("source_status") @db.VarChar(100)
+  /// 원천에서 현재 활성인지 여부
   sourceActive          Boolean                  @default(true) @map("source_active")
+  /// 정규화 원천 행 해시
   sourceHash            Bytes                    @map("source_hash") @db.ByteA
+  /// 대표 반 판정 결과
   classResolutionStatus String                   @default("ONE_REGULAR") @map("class_resolution_status") @db.VarChar(40)
+  /// 판정 불가 사유
   classResolutionReason String?                  @map("class_resolution_reason") @db.VarChar(80)
+  /// 처음 확인한 동기화 실행 ID
   firstSeenRunId        BigInt                   @map("first_seen_run_id")
+  /// 마지막으로 확인한 동기화 실행 ID
   lastSeenRunId         BigInt                   @map("last_seen_run_id")
+  /// 원천에서 사라져 비활성화된 시각
   sourceInactivatedAt   DateTime?                @map("source_inactivated_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt             DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 지점
   branch                Branch                   @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 처음 확인한 실행
   firstSeenRun          SyncRun                  @relation("student_first_seen", fields: [firstSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 마지막으로 확인한 실행
   lastSeenRun           SyncRun                  @relation("student_last_seen", fields: [lastSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 수강 등록
   assignments           StudentClassAssignment[]
+  /// 변경 이력
   history               StudentHistory[]
+  /// 예약 참가 기록
   bookingLinks          FamilyBookingStudent[]
 
   @@index([branchId, sourceActive, id], map: "students_branch_active_id_idx")
@@ -279,26 +480,47 @@ model Student {
   @@map("students")
 }
 
+/// 학생 수강 등록. 원천 행 단위
 model StudentClassAssignment {
+  /// ID
   id                  BigInt    @id @default(autoincrement())
+  /// 공개 ID
   publicId            String    @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 학생 ID
   studentId           BigInt    @map("student_id")
+  /// 원천 고유 번호
   sourceUniqueNo      String    @map("source_unique_no") @db.VarChar(160)
+  /// 수강 등록 번호
   classRegistrationNo String    @map("class_registration_no") @db.VarChar(160)
+  /// 반 이름
   className           String    @map("class_name") @db.VarChar(300)
+  /// 수강 등록 담임. 추적용
   teacherName         String?   @map("teacher_name") @db.VarChar(300)
+  /// 단위
   unitName            String?   @map("unit_name") @db.VarChar(160)
+  /// 학교
   schoolName          String?   @map("school_name") @db.VarChar(300)
+  /// 학년
   grade               String?   @db.VarChar(100)
+  /// 정규화 원천 행 해시
   sourceHash          Bytes     @map("source_hash") @db.ByteA
+  /// 원천에서 현재 활성인지 여부
   sourceActive        Boolean   @default(true) @map("source_active")
+  /// 처음 확인한 동기화 실행 ID
   firstSeenRunId      BigInt    @map("first_seen_run_id")
+  /// 마지막으로 확인한 동기화 실행 ID
   lastSeenRunId       BigInt    @map("last_seen_run_id")
+  /// 원천에서 사라져 비활성화된 시각
   sourceInactivatedAt DateTime? @map("source_inactivated_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 학생
   student             Student   @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 처음 확인한 실행
   firstSeenRun        SyncRun   @relation("assignment_first_seen", fields: [firstSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 마지막으로 확인한 실행
   lastSeenRun         SyncRun   @relation("assignment_last_seen", fields: [lastSeenRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([studentId, sourceUniqueNo, classRegistrationNo], map: "student_assignments_source_unique")
@@ -308,18 +530,31 @@ model StudentClassAssignment {
   @@map("student_class_assignments")
 }
 
+/// 학생 변경 이력
 model StudentHistory {
+  /// ID
   id                    BigInt   @id @default(autoincrement())
+  /// 학생 ID
   studentId             BigInt   @map("student_id")
+  /// 동기화 실행 ID
   syncRunId             BigInt   @map("sync_run_id")
+  /// 변경 종류
   changeType            String   @map("change_type") @db.VarChar(32)
+  /// 변경 전 비식별 스냅샷
   previousSnapshot      Json?    @map("previous_snapshot") @db.JsonB
+  /// 변경 후 비식별 스냅샷
   currentSnapshot       Json?    @map("current_snapshot") @db.JsonB
+  /// 아버지 연락처 암호문 이력
   fatherPhoneCiphertext Bytes?   @map("father_phone_ciphertext") @db.ByteA
+  /// 아버지 연락처 다이제스트 이력
   fatherPhoneDigest     Bytes?   @map("father_phone_digest") @db.ByteA
+  /// 아버지 연락처 끝 4자리 이력
   fatherPhoneLast4      String?  @map("father_phone_last4") @db.Char(4)
+  /// 기록 시각
   recordedAt            DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  /// 학생
   student               Student  @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 동기화 실행
   syncRun               SyncRun  @relation(fields: [syncRunId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([studentId, recordedAt(sort: Desc), id(sort: Desc)], map: "student_history_student_recorded_idx")
@@ -327,42 +562,75 @@ model StudentHistory {
   @@map("student_history")
 }
 
+/// 설명회
 model Seminar {
+  /// ID
   id          BigInt           @id @default(autoincrement())
+  /// 공개 ID
   publicId    String           @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 제목
   title       String           @db.VarChar(300)
+  /// 설명
   description String?          @db.Text
+  /// DRAFT·PUBLISHED·ARCHIVED
   status      String           @default("DRAFT") @db.VarChar(24)
+  /// 낙관적 잠금 버전
   version     BigInt           @default(1)
+  /// 생성 시각
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 회차
   sessions    SeminarSession[]
 
   @@map("seminars")
 }
 
+/// 설명회 회차
 model SeminarSession {
+  /// ID
   id                    BigInt                 @id @default(autoincrement())
+  /// 공개 ID
   publicId              String                 @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 설명회 ID
   seminarId             BigInt                 @map("seminar_id")
+  /// 대상 범위. ALL 전 지점, BRANCH 한 지점
   scope                 String                 @default("ALL") @db.VarChar(16)
+  /// 지점 ID. 전 지점 회차는 null
   branchId              BigInt?                @map("branch_id")
+  /// 제목
   title                 String                 @db.VarChar(300)
+  /// 장소
   place                 String                 @db.VarChar(300)
+  /// 시작 시각
   startsAt              DateTime               @map("starts_at") @db.Timestamptz(6)
+  /// 종료 시각
   endsAt                DateTime               @map("ends_at") @db.Timestamptz(6)
+  /// 예약 시작 시각. 없으면 시작 시각 기준
   bookingOpensAt        DateTime?              @map("booking_opens_at") @db.Timestamptz(6)
+  /// 예약 마감 시각. 없으면 시작 시각 기준
   bookingClosesAt       DateTime?              @map("booking_closes_at") @db.Timestamptz(6)
+  /// 비재원생 예약 허용
   guestBookingEnabled   Boolean                @default(false) @map("guest_booking_enabled")
+  /// DRAFT·OPEN·CLOSED·CANCELLED·ARCHIVED
   status                String                 @default("DRAFT") @db.VarChar(24)
+  /// 낙관적 잠금 버전
   version               BigInt                 @default(1)
+  /// 생성 시각
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 설명회
   seminar               Seminar                @relation(fields: [seminarId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 지점
   branch                Branch?                @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 예약
   familyBookings        FamilyBooking[]
+  /// 예약 참가자
   familyBookingStudents FamilyBookingStudent[]
+  /// 입장 이벤트
   checkInEvents         CheckInEvent[]
+  /// 이 회차를 선택한 스캐너
   scannerDevices        ScannerDevice[]
 
   @@index([seminarId, startsAt], map: "seminar_sessions_seminar_starts_idx")
@@ -371,44 +639,78 @@ model SeminarSession {
   @@map("seminar_sessions")
 }
 
+/// OTP 확인 후 발급한 예약 증명
 model OtpProofAudit {
+  /// ID
   id                 BigInt          @id @default(autoincrement())
+  /// 공개 ID
   publicId           String          @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 증명 원문 SHA-256. 관리자 대리 증명은 null
   proofDigest        Bytes?          @unique @map("proof_digest") @db.ByteA
+  /// FAMILY_BOOKING·BOOKING_MANAGE·ADMIN_OVERRIDE
   purpose            String          @db.VarChar(40)
+  /// 연락처 HMAC 다이제스트
   contactDigest      Bytes           @map("contact_digest") @db.ByteA
+  /// 연락처 암호문
   contactCiphertext  Bytes           @map("contact_ciphertext") @db.ByteA
+  /// 연락처 끝 4자리
   contactLast4       String          @map("contact_last4") @db.Char(4)
+  /// 선택 캠퍼스 코드. 관리 용도는 null
   selectedBranchCode String?         @map("selected_branch_code") @db.VarChar(32)
+  /// VERIFIED 사용 가능, CONSUMED 사용됨
   status             String          @db.VarChar(24)
+  /// 만료 시각
   expiresAt          DateTime        @map("expires_at") @db.Timestamptz(6)
+  /// 확인 시각
   verifiedAt         DateTime?       @map("verified_at") @db.Timestamptz(6)
+  /// 사용 시각
   consumedAt         DateTime?       @map("consumed_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 이 증명으로 만든 예약
   familyBookings     FamilyBooking[]
+  /// 원래 OTP 챌린지
   otpChallenges      OtpChallenge[]
 
   @@index([contactDigest, purpose, status], map: "otp_proof_audits_lookup_idx")
   @@map("otp_proof_audits")
 }
 
+/// OTP 챌린지
 model OtpChallenge {
+  /// ID
   id                 BigInt         @id @default(autoincrement())
+  /// 공개 ID
   publicId           String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 용도
   purpose            String         @db.VarChar(40)
+  /// 연락처 HMAC 다이제스트
   contactDigest      Bytes          @map("contact_digest") @db.ByteA
+  /// 연락처 암호문
   contactCiphertext  Bytes          @map("contact_ciphertext") @db.ByteA
+  /// 연락처 끝 4자리
   contactLast4       String         @map("contact_last4") @db.Char(4)
+  /// 선택 캠퍼스 코드. 관리 용도는 null
   selectedBranchCode String?        @map("selected_branch_code") @db.VarChar(32)
+  /// 챌린지 ID+코드 HMAC. 코드 원문은 저장하지 않음
   codeDigest         Bytes          @map("code_digest") @db.ByteA
+  /// PENDING·VERIFIED·EXPIRED·LOCKED
   status             String         @default("PENDING") @db.VarChar(24)
+  /// 시도 횟수
   attemptCount       Int            @default(0) @map("attempt_count")
+  /// 최대 시도 횟수
   maxAttempts        Int            @default(5) @map("max_attempts")
+  /// 만료 시각
   expiresAt          DateTime       @map("expires_at") @db.Timestamptz(6)
+  /// 확인 시각
   verifiedAt         DateTime?      @map("verified_at") @db.Timestamptz(6)
+  /// 발급한 예약 증명 ID
   otpProofAuditId    BigInt?        @unique @map("otp_proof_audit_id")
+  /// 생성 시각
   createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// OTP 증명
   otpProofAudit      OtpProofAudit? @relation(fields: [otpProofAuditId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([contactDigest, createdAt(sort: Desc)], map: "otp_challenges_contact_created_idx")
@@ -416,36 +718,59 @@ model OtpChallenge {
   @@map("otp_challenges")
 }
 
+/// 가족 단위 설명회 예약
 model FamilyBooking {
+  /// ID
   id                 BigInt                     @id @default(autoincrement())
+  /// 공개 ID
   publicId           String                     @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 회차 ID
   sessionId          BigInt                     @map("session_id")
+  /// 보호자 연락처 HMAC 다이제스트
   contactDigest      Bytes                      @map("contact_digest") @db.ByteA
+  /// 보호자 연락처 암호문
   contactCiphertext  Bytes                      @map("contact_ciphertext") @db.ByteA
+  /// 보호자 연락처 끝 4자리
   contactLast4       String                     @map("contact_last4") @db.Char(4)
+  /// 참석 보호자. MOTHER·FATHER·BOTH
   attendanceParty    String                     @map("attendance_party") @db.VarChar(16)
+  /// 예약 인원. 참석 보호자 기준 1 또는 2
   seatCount          Int                        @map("seat_count")
+  /// RESERVED·CHECKED_IN·CANCELLED·NO_SHOW
   status             String                     @default("RESERVED") @db.VarChar(24)
+  /// 낙관적 잠금 버전
   version            BigInt                     @default(1)
+  /// 예약 경로. WEB_APP·PHONE·TEACHER·ON_SITE
   bookingSource      String                     @default("WEB_APP") @map("booking_source") @db.VarChar(24)
+  /// 예약에 쓴 OTP 증명 ID
   otpProofAuditId    BigInt                     @map("otp_proof_audit_id")
+  /// 입장 시각
   checkedInAt        DateTime?                  @map("checked_in_at") @db.Timestamptz(6)
-  /// 실제로 입장한 학부모 수. 예약 인원(seatCount)과 다를 수 있다 — 2명 예약에 1명만 오는
-  /// 경우가 있어 게이트에서 스태프가 고른다. 미입장이면 null.
+  /// 실제 입장한 보호자 수. 예약 인원(seatCount)과 다를 수 있어 게이트에서 스태프가 입력. 미입장이면 null
   attendedCount      Int?                       @map("attended_count")
-  /// QR 재테스트용 예약. 통계에는 다른 예약과 똑같이 잡히고(집계가 도는지 확인해야 하므로),
-  /// Google Sheets 투영과 일반 문자 대상에서만 빠진다. 명단 맨 앞에 고정된다.
+  /// QR 재테스트용 예약 여부. 집계 확인을 위해 통계에는 포함하고 시트 반영·일반 문자 대상에서만 제외. 명단 맨 앞에 고정
   isTest             Boolean                    @default(false) @map("is_test")
+  /// 취소 시각
   cancelledAt        DateTime?                  @map("cancelled_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 회차
   session            SeminarSession             @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// OTP 증명
   otpProofAudit      OtpProofAudit              @relation(fields: [otpProofAuditId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 참가자
   students           FamilyBookingStudent[]
+  /// QR 자격 증명
   qrCredentials      QrCredential[]
+  /// 예약 이벤트
   bookingEvents      BookingEvent[]
+  /// 입장 이벤트
   checkInEvents      CheckInEvent[]
+  /// 관리 링크 자격 증명
   accessCredentials  BookingAccessCredential[]
+  /// 예약 관리 세션
   managementSessions BookingManagementSession[]
 
   @@unique([id, sessionId], map: "family_bookings_id_session_unique")
@@ -457,26 +782,47 @@ model FamilyBooking {
   @@map("family_bookings")
 }
 
+/// 예약 참가자. 예약 시점 스냅샷 보관
 model FamilyBookingStudent {
+  /// ID
   id                      BigInt         @id @default(autoincrement())
+  /// 공개 ID
   publicId                String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 가족 예약 ID
   familyBookingId         BigInt         @map("family_booking_id")
+  /// 회차 ID
   sessionId               BigInt         @map("session_id")
+  /// 참여 유형. ENROLLED 재원생, GUEST 비재원생
   participantType         String         @default("ENROLLED") @map("participant_type") @db.VarChar(16)
+  /// 학생 ID. 비재원생은 null
   studentId               BigInt?        @map("student_id")
+  /// 현재 예약에 포함 여부
   active                  Boolean        @default(true)
+  /// 예약에서 빠진 시각
   releasedAt              DateTime?      @map("released_at") @db.Timestamptz(6)
+  /// 예약 시점 캠퍼스
   branchCodeAtBooking     String         @map("branch_code_at_booking") @db.VarChar(32)
+  /// 학번 스냅샷. 비재원생은 `비재원-000001` 형식
   sourceStudentNoSnapshot String         @map("source_student_no_snapshot") @db.VarChar(160)
+  /// 이름 스냅샷
   studentNameSnapshot     String         @map("student_name_snapshot") @db.VarChar(300)
+  /// 반 스냅샷
   classNameSnapshot       String         @map("class_name_snapshot") @db.VarChar(300)
+  /// 학교 스냅샷
   schoolNameSnapshot      String?        @map("school_name_snapshot") @db.VarChar(300)
+  /// 학년 스냅샷
   gradeSnapshot           String?        @map("grade_snapshot") @db.VarChar(100)
+  /// 단위 스냅샷
   unitNameSnapshot        String?        @map("unit_name_snapshot") @db.VarChar(160)
+  /// 담임 스냅샷
   teacherNameSnapshot     String?        @map("teacher_name_snapshot") @db.VarChar(300)
+  /// 생성 시각
   createdAt               DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 가족 예약. 예약 ID와 회차 ID 복합 외래 키로 회차 일치 보장
   familyBooking           FamilyBooking  @relation(fields: [familyBookingId, sessionId], references: [id, sessionId], onDelete: NoAction, onUpdate: NoAction, map: "family_booking_students_family_session_fk")
+  /// 회차
   session                 SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 학생 원장
   student                 Student?       @relation(fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([familyBookingId, studentId], map: "family_booking_students_family_student_unique")
@@ -485,21 +831,37 @@ model FamilyBookingStudent {
   @@map("family_booking_students")
 }
 
+/// 예약 QR 자격 증명
 model QrCredential {
+  /// ID
   id              BigInt         @id @default(autoincrement())
+  /// 공개 ID
   publicId        String         @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 가족 예약 ID
   familyBookingId BigInt         @map("family_booking_id")
+  /// 토큰 SHA-256 다이제스트. 원문은 저장하지 않음
   tokenDigest     Bytes          @unique @map("token_digest") @db.ByteA
+  /// QR 원문 암호문. 재표시용, 없으면 재표시 불가
   tokenCiphertext Bytes?         @map("token_ciphertext") @db.ByteA
+  /// 예약 내 버전. 1부터
   version         Int
+  /// ACTIVE·REVOKED·EXPIRED
   status          String         @db.VarChar(24)
+  /// 발급 시각
   issuedAt        DateTime       @default(now()) @map("issued_at") @db.Timestamptz(6)
+  /// 만료 시각
   expiresAt       DateTime       @map("expires_at") @db.Timestamptz(6)
+  /// 폐기 시각
   revokedAt       DateTime?      @map("revoked_at") @db.Timestamptz(6)
+  /// 이 자격을 대체한 다음 자격 ID
   supersededById  BigInt?        @unique @map("superseded_by_id")
+  /// 가족 예약
   familyBooking   FamilyBooking  @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 대체한 자격
   predecessor     QrCredential?  @relation("credential_supersession", fields: [supersededById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 대체된 자격
   successor       QrCredential?  @relation("credential_supersession")
+  /// 입장 이벤트
   checkInEvents   CheckInEvent[]
 
   @@unique([familyBookingId, version], map: "qr_credentials_booking_version_unique")
@@ -507,17 +869,29 @@ model QrCredential {
   @@map("qr_credentials")
 }
 
+/// 예약 관리 링크 자격 증명
 model BookingAccessCredential {
+  /// ID
   id                 BigInt                     @id @default(autoincrement())
+  /// 공개 ID
   publicId           String                     @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 가족 예약 ID
   familyBookingId    BigInt                     @map("family_booking_id")
+  /// 토큰 SHA-256 다이제스트. 원문은 저장하지 않음
   tokenDigest        Bytes                      @unique @map("token_digest") @db.ByteA
+  /// ACTIVE·REVOKED·EXPIRED
   status             String                     @default("ACTIVE") @db.VarChar(24)
+  /// 발급 시각
   issuedAt           DateTime                   @default(now()) @map("issued_at") @db.Timestamptz(6)
+  /// 만료 시각
   expiresAt          DateTime                   @map("expires_at") @db.Timestamptz(6)
+  /// 폐기 시각
   revokedAt          DateTime?                  @map("revoked_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 가족 예약
   familyBooking      FamilyBooking              @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 이 링크로 발급한 관리 세션
   managementSessions BookingManagementSession[]
 
   @@index([familyBookingId, status], map: "booking_access_credentials_family_status_idx")
@@ -525,18 +899,31 @@ model BookingAccessCredential {
   @@map("booking_access_credentials")
 }
 
+/// 예약 관리 세션. 브라우저 세션 ID와 예약 하나를 묶음
 model BookingManagementSession {
+  /// ID
   id                        BigInt                  @id @default(autoincrement())
+  /// 공개 ID
   publicId                  String                  @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 관리 링크 자격 증명 ID
   bookingAccessCredentialId BigInt                  @map("booking_access_credential_id")
+  /// 가족 예약 ID
   familyBookingId           BigInt                  @map("family_booking_id")
+  /// 서버 세션 ID 다이제스트
   sessionDigest             Bytes                   @unique @map("session_digest") @db.ByteA
+  /// ACTIVE·REVOKED
   status                    String                  @default("ACTIVE") @db.VarChar(24)
+  /// 만료 시각
   expiresAt                 DateTime                @map("expires_at") @db.Timestamptz(6)
+  /// 확인 시각
   verifiedAt                DateTime                @default(now()) @map("verified_at") @db.Timestamptz(6)
+  /// 폐기 시각
   revokedAt                 DateTime?               @map("revoked_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 관리 링크 자격 증명
   accessCredential          BookingAccessCredential @relation(fields: [bookingAccessCredentialId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 가족 예약
   familyBooking             FamilyBooking           @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([familyBookingId, status, expiresAt], map: "booking_management_sessions_family_status_expires_idx")
@@ -544,29 +931,53 @@ model BookingManagementSession {
   @@map("booking_management_sessions")
 }
 
+/// QR 스캐너 기기
 model ScannerDevice {
+  /// ID
   id                BigInt                @id @default(autoincrement())
+  /// 공개 ID
   publicId          String                @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 지점 ID
   branchId          BigInt                @map("branch_id")
+  /// 기기 이름
   name              String                @db.VarChar(120)
+  /// 클라이언트 플랫폼
   model             String?               @db.VarChar(120)
+  /// 설치 위치(입구 이름)
   location          String?               @db.VarChar(160)
+  /// 출입구 코드
   gateCode          String                @map("gate_code") @db.VarChar(100)
+  /// 배터리 잔량(%)
   batteryPercent    Int?                  @map("battery_percent")
+  /// 충전 중 여부
   batteryIsCharging Boolean?              @map("battery_is_charging")
+  /// 배터리 보고 시각
   batteryReportedAt DateTime?             @map("battery_reported_at") @db.Timestamptz(6)
+  /// ACTIVE·REVOKED·UNPAIRED
   status            String                @default("ACTIVE") @db.VarChar(24)
+  /// 페어링 코드 발급 관리자
   pairedBy          String                @map("paired_by") @db.VarChar(160)
+  /// 페어링 시각
   pairedAt          DateTime              @default(now()) @map("paired_at") @db.Timestamptz(6)
+  /// 마지막 상태 보고 시각(60초 간격 기록)
   lastHeartbeatAt   DateTime?             @map("last_heartbeat_at") @db.Timestamptz(6)
+  /// 폐기 시각
   revokedAt         DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  /// 취소 주체
   revokedBy         String?               @map("revoked_by") @db.VarChar(160)
+  /// 잠긴 회차 ID
   selectedSessionId BigInt?               @map("selected_session_id")
+  /// 회차 잠금 시각
   scanModeLockedAt  DateTime?             @map("scan_mode_locked_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 입장 이벤트
   checkInEvents     CheckInEvent[]
+  /// 페어링 감사
   pairingAudits     ScannerPairingAudit[]
+  /// 지점
   branch            Branch                @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 잠긴 회차
   selectedSession   SeminarSession?       @relation(fields: [selectedSessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([status, lastHeartbeatAt(sort: Desc)], map: "scanner_devices_status_heartbeat_idx")
@@ -575,54 +986,93 @@ model ScannerDevice {
   @@map("scanner_devices")
 }
 
+/// 스캐너 페어링·관리 감사. 기기 삭제 시 함께 삭제
 model ScannerPairingAudit {
+  /// ID
   id              BigInt         @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId         String         @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 기기 ID. 기기 없는 실패 시도는 null
   scannerDeviceId BigInt?        @map("scanner_device_id")
+  /// 이벤트 종류
   eventType       String         @map("event_type") @db.VarChar(32)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject    String?        @map("actor_subject") @db.VarChar(160)
+  /// 결과 코드
   resultCode      String         @map("result_code") @db.VarChar(80)
+  /// 개인정보 없는 부가 정보
   safeMetadata    Json           @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt      DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 스캐너 기기
   scannerDevice   ScannerDevice? @relation(fields: [scannerDeviceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([scannerDeviceId, occurredAt(sort: Desc)], map: "scanner_pairing_audits_device_occurred_idx")
   @@map("scanner_pairing_audits")
 }
 
+/// 예약 이벤트. 추가 전용
 model BookingEvent {
+  /// ID
   id               BigInt        @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId          String        @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 가족 예약 ID
   familyBookingId  BigInt        @map("family_booking_id")
+  /// CREATED·UPDATED·CANCELLED·QR_ISSUED·QR_ROTATED·QR_REVOKED·CHECKED_IN·MARKED_NO_SHOW
   eventType        String        @map("event_type") @db.VarChar(32)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject     String?       @map("actor_subject") @db.VarChar(160)
+  /// 취소 유형. 취소 이벤트만
   cancellationType String?       @map("cancellation_type") @db.VarChar(24)
+  /// 개인정보 없는 부가 정보
   safeMetadata     Json          @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt       DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 가족 예약
   familyBooking    FamilyBooking @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([familyBookingId, occurredAt, id], map: "booking_events_family_occurred_idx")
   @@map("booking_events")
 }
 
+/// 입장 판정 이벤트. 결과와 무관하게 시도마다 기록
 model CheckInEvent {
+  /// ID
   id                   BigInt         @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId              String         @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 예약 ID. 찾지 못했으면 null
   familyBookingId      BigInt?        @map("family_booking_id")
+  /// QR 자격 ID
   qrCredentialId       BigInt?        @map("qr_credential_id")
+  /// 회차 ID
   sessionId            BigInt         @map("session_id")
+  /// QR·MANUAL
   source               String         @db.VarChar(16)
+  /// 판정 결과
   result               String         @db.VarChar(40)
+  /// 예약 인원(실제 입장 인원은 메타데이터)
   seatCount            Int            @map("seat_count")
+  /// 스캐너 기기 ID. 기기 삭제 시 null
   scannerDeviceId      BigInt?        @map("scanner_device_id")
+  /// 출입구 코드. 콘솔 입장은 `콘솔`
   gateCode             String?        @map("gate_code") @db.VarChar(100)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject         String?        @map("actor_subject") @db.VarChar(160)
+  /// 멱등 키 다이제스트
   idempotencyKeyDigest Bytes?         @map("idempotency_key_digest") @db.ByteA
+  /// 개인정보 없는 부가 정보
   safeMetadata         Json           @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt           DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 가족 예약
   familyBooking        FamilyBooking? @relation(fields: [familyBookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// QR 자격 증명
   qrCredential         QrCredential?  @relation(fields: [qrCredentialId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 스캐너 선택 회차
   session              SeminarSession @relation(fields: [sessionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 스캐너 기기
   scannerDevice        ScannerDevice? @relation(fields: [scannerDeviceId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([familyBookingId, occurredAt, id], map: "check_in_events_family_occurred_idx")
@@ -632,15 +1082,25 @@ model CheckInEvent {
   @@map("check_in_events")
 }
 
+/// 멱등 요청 기록. 24시간 보관
 model IdempotencyRecord {
+  /// ID
   id               BigInt   @id @default(autoincrement())
+  /// 멱등 범위
   scope            String   @db.VarChar(80)
+  /// 범위+키 SHA-256
   keyDigest        Bytes    @map("key_digest") @db.ByteA
+  /// 정렬 JSON 요청 SHA-256
   requestDigest    Bytes    @map("request_digest") @db.ByteA
+  /// 관련 리소스 공개 ID
   resourcePublicId String?  @map("resource_public_id") @db.Uuid
+  /// 응답 상태
   responseStatus   Int      @map("response_status")
+  /// 재생할 응답 본문
   responseBody     Json     @map("response_body") @db.JsonB
+  /// 생성 시각
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 만료 시각
   expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
 
   @@unique([scope, keyDigest], map: "idempotency_records_scope_key_unique")
@@ -648,55 +1108,100 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
+/// 문자 템플릿
 model SmsTemplate {
+  /// ID
   id        BigInt   @id @default(autoincrement())
+  /// 공개 ID
   publicId  String   @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 템플릿 키
   key       String   @unique @db.VarChar(80)
+  /// 표시 이름
   name      String   @db.VarChar(160)
+  /// 용도
   purpose   String   @db.VarChar(40)
+  /// LMS 제목
   title     String?  @db.VarChar(200)
+  /// 본문
   body      String   @db.Text
+  /// 활성 여부
   active    Boolean  @default(true)
+  /// 용도별 기본 템플릿 여부
   isDefault Boolean  @default(false) @map("is_default")
+  /// 낙관적 잠금 버전
   version   BigInt   @default(1)
+  /// 생성 주체
   createdBy String   @map("created_by") @db.VarChar(160)
+  /// 변경 주체
   updatedBy String   @map("updated_by") @db.VarChar(160)
+  /// 생성 시각
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([purpose, active], map: "sms_templates_purpose_active_idx")
   @@map("sms_templates")
 }
 
+/// 문자 발송 대기열
 model SmsOutbox {
+  /// ID
   id                     BigInt       @id @default(autoincrement())
+  /// 공개 ID
   publicId               String       @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 이벤트 키 SHA-256. 같은 이벤트 중복 적재 방지
   eventKeyDigest         Bytes        @unique @map("event_key_digest") @db.ByteA
+  /// 발생 원인
   source                 String       @db.VarChar(40)
+  /// 지점 코드
   branchCode             String       @map("branch_code") @db.VarChar(32)
+  /// 회차 공개 ID
   seminarSessionPublicId String?      @map("seminar_session_public_id") @db.Uuid
+  /// 가족 예약 공개 ID
   familyBookingPublicId  String?      @map("family_booking_public_id") @db.Uuid
+  /// 수신 번호 암호문
   recipientCiphertext    Bytes        @map("recipient_ciphertext") @db.ByteA
+  /// 수신 번호 다이제스트
   recipientDigest        Bytes        @map("recipient_digest") @db.ByteA
+  /// 수신 번호 끝 4자리
   recipientLast4         String       @map("recipient_last4") @db.Char(4)
+  /// 본문 암호문
   messageCiphertext      Bytes        @map("message_ciphertext") @db.ByteA
+  /// 제목 암호문
   titleCiphertext        Bytes?       @map("title_ciphertext") @db.ByteA
+  /// SMS·LMS
   messageType            String       @map("message_type") @db.VarChar(8)
+  /// 본문 EUC-KR 바이트
   messageBytes           Int          @map("message_bytes")
+  /// 제목 EUC-KR 바이트
   titleBytes             Int?         @map("title_bytes")
+  /// PENDING·CLAIMED·SENDING·SENT·BLOCKED_*·FAILED_PERMANENT·DELIVERY_UNKNOWN·DEAD·CANCELLED
   status                 String       @default("PENDING") @db.VarChar(32)
+  /// 시도 횟수
   attemptCount           Int          @default(0) @map("attempt_count")
+  /// 발송 가능 시각. 예약 발송·재시도 지연
   nextAttemptAt          DateTime     @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// 워커 점유 토큰
   leaseToken             String?      @map("lease_token") @db.Uuid
+  /// lease 만료 시각
   leaseExpiresAt         DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
+  /// 공급자 메시지 ID
   providerMessageId      String?      @map("provider_message_id") @db.VarChar(80)
+  /// 공급자 결과 코드
   providerResultCode     Int?         @map("provider_result_code")
+  /// 공급자 메시지 유형
   providerMessageType    String?      @map("provider_message_type") @db.VarChar(16)
+  /// 마지막 오류 코드
   lastErrorCode          String?      @map("last_error_code") @db.VarChar(80)
+  /// 처리 주체. 관리자 공개 ID 또는 `system:` 주체
   actorSubject           String?      @map("actor_subject") @db.VarChar(160)
+  /// 개인정보 없는 부가 정보
   safeMetadata           Json         @default("{}") @map("safe_metadata") @db.JsonB
+  /// 생성 시각
   createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt              DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 시도 기록
   attempts               SmsAttempt[]
 
   @@index([status, nextAttemptAt, id], map: "sms_outbox_worker_idx")
@@ -706,17 +1211,29 @@ model SmsOutbox {
   @@map("sms_outbox")
 }
 
+/// 문자 발송 시도 기록
 model SmsAttempt {
+  /// ID
   id                 BigInt    @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId            String    @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 대기열 행 ID
   smsOutboxId        BigInt    @map("sms_outbox_id")
+  /// 시도 번호
   attemptNo          Int       @map("attempt_no")
+  /// 결과
   result             String    @db.VarChar(32)
+  /// 공급자 결과 코드
   providerResultCode Int?      @map("provider_result_code")
+  /// 공급자 메시지 ID
   providerMessageId  String?   @map("provider_message_id") @db.VarChar(80)
+  /// 오류 코드
   errorCode          String?   @map("error_code") @db.VarChar(80)
+  /// 개인정보 없는 부가 정보
   safeMetadata       Json      @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt         DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 대기열 행
   outbox             SmsOutbox @relation(fields: [smsOutboxId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([smsOutboxId, attemptNo], map: "sms_attempts_outbox_attempt_unique")
@@ -724,57 +1241,104 @@ model SmsAttempt {
   @@map("sms_attempts")
 }
 
+/// 회차별 Google Sheets 반영 매핑
 model SheetMapping {
+  /// ID
   id                     BigInt        @id @default(autoincrement())
+  /// 공개 ID
   publicId               String        @unique @default(dbgenerated("gen_random_uuid()")) @map("public_id") @db.Uuid
+  /// 회차 공개 ID
   seminarSessionPublicId String        @unique @map("seminar_session_public_id") @db.Uuid
+  /// 스프레드시트 ID
   spreadsheetId          String        @map("spreadsheet_id") @db.VarChar(160)
+  /// 예약명단 시트 제목
   reservationSheetTitle  String        @default("예약명단") @map("reservation_sheet_title") @db.VarChar(100)
+  /// 예약명단 시트 ID
   reservationSheetId     Int           @default(1777564107) @map("reservation_sheet_id")
+  /// 이전 로그 시트 제목. 현재 반영에서 사용하지 않음
   logSheetTitle          String        @default("예약로그") @map("log_sheet_title") @db.VarChar(100)
+  /// 이전 로그 시트 ID. 현재 반영에서 사용하지 않음
   logSheetId             Int           @default(1787194666) @map("log_sheet_id")
+  /// 이전 A 시트 ID. 현재 반영에서 사용하지 않음
   campusASheetId          Int           @default(0) @map("campus_a_sheet_id")
+  /// 이전 B 시트 ID. 현재 반영에서 사용하지 않음
   campusBSheetId           Int           @default(470961226) @map("campus_b_sheet_id")
+  /// 이전 C 시트 ID. 현재 반영에서 사용하지 않음
   campusCSheetId        Int           @default(1080132708) @map("campus_c_sheet_id")
+  /// 시트 구조 지문
   schemaFingerprint      String        @map("schema_fingerprint") @db.VarChar(100)
+  /// 시트 스키마 버전. 코드 상수와 같아야 반영
   schemaVersion          Int           @default(4) @map("schema_version")
+  /// 반영 활성 여부
   enabled                Boolean       @default(false)
+  /// CLOSED 반영 가능, BLOCKED 차단
   circuitStatus          String        @default("BLOCKED") @map("circuit_status") @db.VarChar(24)
+  /// 차단 사유
   blockReasonCode        String?       @map("block_reason_code") @db.VarChar(80)
+  /// 마지막 워커 검증 시각
   lastValidatedAt        DateTime?     @map("last_validated_at") @db.Timestamptz(6)
+  /// 반영 lease 소유 토큰
   dispatchLeaseOwner     String?       @map("dispatch_lease_owner") @db.Uuid
+  /// 반영 lease 만료 시각
   dispatchLeaseExpiresAt DateTime?     @map("dispatch_lease_expires_at") @db.Timestamptz(6)
+  /// 마지막 반영 시각
   lastDispatchAt         DateTime?     @map("last_dispatch_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt              DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 반영 대기열
   deliveries             SheetOutbox[]
 
   @@index([enabled, circuitStatus], map: "sheet_mappings_enabled_circuit_idx")
   @@map("sheet_mappings")
 }
 
+/// 시트 반영 대기열. 예약 학생 단위
 model SheetOutbox {
+  /// ID
   id                           BigInt         @id @default(autoincrement())
+  /// 반영 공개 ID
   deliveryPublicId             String         @unique @default(dbgenerated("gen_random_uuid()")) @map("delivery_public_id") @db.Uuid
+  /// 매핑 ID
   mappingId                    BigInt         @map("mapping_id")
+  /// 예약 이벤트 ID
   eventId                      String         @map("event_id") @db.Uuid
+  /// CREATED·UPDATED·CANCELLED·CHECKED_IN
   eventType                    String         @map("event_type") @db.VarChar(32)
+  /// 회차 공개 ID
   seminarSessionPublicId       String         @map("seminar_session_public_id") @db.Uuid
+  /// 가족 예약 공개 ID
   familyBookingPublicId        String         @map("family_booking_public_id") @db.Uuid
+  /// 예약 학생 공개 ID
   familyBookingStudentPublicId String         @map("family_booking_student_public_id") @db.Uuid
+  /// 학생 공개 ID. 비재원생은 예약 학생 ID
   studentPublicId              String         @map("student_public_id") @db.Uuid
+  /// 이벤트 시점 예약 버전
   bookingVersion               BigInt         @map("booking_version")
+  /// 반영 스냅샷 암호문
   snapshotCiphertext           Bytes          @map("snapshot_ciphertext") @db.ByteA
+  /// PENDING·RETRY·CLAIMED·SUCCEEDED·BLOCKED·DEAD
   status                       String         @default("PENDING") @db.VarChar(24)
+  /// 시도 횟수
   attemptCount                 Int            @default(0) @map("attempt_count")
+  /// 다음 처리 가능 시각
   nextAttemptAt                DateTime       @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// 점유 토큰. 매핑 lease와 같은 값
   leaseOwner                   String?        @map("lease_owner") @db.Uuid
+  /// lease 만료 시각
   leaseExpiresAt               DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
+  /// 마지막 오류 코드
   lastErrorCode                String?        @map("last_error_code") @db.VarChar(80)
+  /// 완료 시각
   completedAt                  DateTime?      @map("completed_at") @db.Timestamptz(6)
+  /// 생성 시각
   createdAt                    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// 변경 시각
   updatedAt                    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// 시트 매핑
   mapping                      SheetMapping   @relation(fields: [mappingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// 시도 기록
   attempts                     SheetAttempt[]
 
   @@unique([mappingId, eventId, familyBookingStudentPublicId], map: "sheet_outbox_mapping_event_child_unique")
@@ -783,15 +1347,25 @@ model SheetOutbox {
   @@map("sheet_outbox")
 }
 
+/// 시트 반영 시도 기록
 model SheetAttempt {
+  /// ID
   id            BigInt      @id @default(autoincrement())
+  /// 이벤트 공개 ID
   eventId       String      @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  /// 대기열 행 ID
   sheetOutboxId BigInt      @map("sheet_outbox_id")
+  /// 시도 번호
   attemptNo     Int         @map("attempt_no")
+  /// 결과
   result        String      @db.VarChar(24)
+  /// 오류 코드
   errorCode     String?     @map("error_code") @db.VarChar(80)
+  /// 개인정보 없는 부가 정보
   safeMetadata  Json        @default("{}") @map("safe_metadata") @db.JsonB
+  /// 발생 시각
   occurredAt    DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// 대기열 행
   outbox        SheetOutbox @relation(fields: [sheetOutboxId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([sheetOutboxId, attemptNo], map: "sheet_attempts_outbox_attempt_unique")

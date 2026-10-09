@@ -1,9 +1,6 @@
-/**
- * 공개 표시용 마스킹 순수 테스트 (node:test + tsx). React·DOM 을 import 하지 않습니다.
- * 유니코드 안전·이중 마스킹 방지·원본 불변·국내 휴대전화 형식을 고정합니다.
- *
- * 실행: pnpm --dir apps/web test
- */
+// 공개 표시용 마스킹 순수 테스트. React·DOM을 import하지 않음
+// 유니코드 안전·이중 마스킹 방지·원본 불변·국내 휴대전화 형식 고정
+// 실행: pnpm --dir apps/web test
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -32,7 +29,7 @@ describe("maskName — 이름 가운데 가리기", () => {
   });
 
   it("서로게이트 쌍을 쪼개지 않는다 (유니코드 안전)", () => {
-    // 고딕 문자 3자 — 각 글자가 BMP 밖(서로게이트 쌍)이다.
+    // 고딕 문자 3자 — 각 글자가 BMP 밖(서로게이트 쌍)임
     assert.equal(maskName("𐌰𐌱𐌲"), "𐌰*𐌲");
   });
 });

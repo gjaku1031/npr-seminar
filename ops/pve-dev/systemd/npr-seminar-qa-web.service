@@ -1,3 +1,4 @@
+# QA 서버 Next.js web. 127.0.0.1:3100 에서 수신하고 frontdoor 가 3000 으로 노출함
 [Unit]
 Description=NPR Seminar QA Next.js web on 3100
 After=network-online.target npr-seminar-qa-api.service
@@ -10,12 +11,14 @@ Group=ken
 WorkingDirectory=/home/ken/develop/npr-seminar/apps/web
 EnvironmentFile=/etc/npr-seminar-qa/web.env
 Environment=NODE_ENV=production
+# 빌드 산출물이 없으면 시작하지 않음
 ExecStartPre=/usr/bin/test -f /home/ken/develop/npr-seminar/apps/web/.next/BUILD_ID
 ExecStart=/usr/bin/node /home/ken/develop/npr-seminar/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=30s
 UMask=0027
+# 샌드박스. Next 캐시만 쓰기 허용
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

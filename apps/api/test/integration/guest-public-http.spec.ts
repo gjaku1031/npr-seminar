@@ -19,13 +19,44 @@ import { bootstrapAdmin } from "../../src/commands/bootstrap-admin.js";
 import { type EnqueueSmsInput, SmsOutboxService } from "../../src/modules/sms/sms-outbox.service.js";
 import { StudentsService } from "../../src/modules/students/students.service.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * 테스트 공개 기준 출처
+ */
 const publicOrigin = "http://public.test";
+
+/**
+ * 비재원생 예약 연락처
+ */
 const primaryContact = "01070001001";
+
+/**
+ * 두 번째 비재원생 연락처
+ */
 const secondaryContact = "01070002002";
+
+/**
+ * 재원생 어머니 연락처
+ */
 const enrolledMotherContact = "01070003003";
+
+/**
+ * 재원생 아버지 연락처
+ */
 const enrolledFatherContact = "01070004004";
+
+/**
+ * 다른 캠퍼스 재원생 연락처
+ */
 const crossCampusEnrolledContact = "01070005005";
+
+/**
+ * 테스트 중 바꾸고 복원하는 환경 변수
+ */
 const managedEnvironmentKeys = [
   "NODE_ENV", "APP_ENV", "PROCESS_ROLE", "PORT", "DATABASE_URL", "WORKER_DATABASE_URL", "REDIS_URL",
   "SESSION_SECRET", "PHONE_ENCRYPTION_KEY", "PHONE_HMAC_KEY", "OTP_PEPPER", "SCANNER_PAIRING_HMAC_KEY",
@@ -36,20 +67,37 @@ const managedEnvironmentKeys = [
   "GOOGLE_APPLICATION_CREDENTIALS", "TONG_SYNC_ENABLED",
 ] as const;
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
   return copy;
 }
 
+/**
+ * 문자 대기열 대신 적재 요청을 메모리에 모으는 대역
+ */
 class CapturingSmsOutbox {
+  /**
+   * 적재 요청 목록
+   */
   public readonly messages: EnqueueSmsInput[] = [];
 
+  /**
+   * 적재 요청 기록
+   */
   public enqueue(_transaction: unknown, input: EnqueueSmsInput): Promise<void> {
     this.messages.push(input);
     return Promise.resolve();
   }
 
+  /**
+   * 연락처 끝 4자리로 가장 최근 OTP 문자의 6자리 코드 추출
+   *
+   * @throws {Error} 해당 OTP 문자가 없음
+   */
   public latestOtpCode(contactLast4: string): string {
     const captured = [...this.messages].reverse().find((message) => message.source === "OTP" && message.recipientLast4 === contactLast4);
     const code = captured?.message.match(/\b\d{6}\b/u)?.[0];
@@ -58,9 +106,18 @@ class CapturingSmsOutbox {
   }
 }
 
+/**
+ * 응답 Set-Cookie를 모아 다음 요청 Cookie 헤더로 보내는 쿠키 저장소
+ */
 class CookieJar {
+  /**
+   * 쿠키 이름별 값
+   */
   private readonly values = new Map<string, string>();
 
+  /**
+   * 응답 쿠키 반영. 빈 값은 삭제
+   */
   public capture(response: Response): void {
     for (const header of response.headers.getSetCookie()) {
       const pair = header.split(";", 1)[0];
@@ -74,48 +131,143 @@ class CookieJar {
     }
   }
 
+  /**
+   * Cookie 헤더 값
+   */
   public header(): string {
     return [...this.values].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 }
 
+/**
+ * 테스트 요청 옵션
+ */
 interface CallOptions {
+  /**
+   * 쿠키 저장소
+   */
   readonly jar?: CookieJar;
+
+  /**
+   * x-csrf-token 값
+   */
   readonly csrfToken?: string;
+
+  /**
+   * 추가 헤더
+   */
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/**
+ * 테스트 요청 결과
+ */
 interface CallResult {
+  /**
+   * HTTP 상태
+   */
   readonly status: number;
+
+  /**
+   * JSON 본문. 빈 본문은 null
+   */
   readonly body: unknown;
 }
 
+/**
+ * 비재원생 예약 응답 본문
+ */
 interface BookingBody {
+  /**
+   * 가족 예약 공개 ID
+   */
   readonly familyBookingId: string;
+
+  /**
+   * 회차 공개 ID
+   */
   readonly seminarSessionId: string;
+
+  /**
+   * 연락처
+   */
   readonly contact: string;
+
+  /**
+   * 참석 보호자
+   */
   readonly attendanceParty: "MOTHER" | "FATHER" | "BOTH";
+
+  /**
+   * 예약 인원
+   */
   readonly seatCount: number;
+
+  /**
+   * 예약 상태
+   */
   readonly status: string;
+
+  /**
+   * 예약 버전
+   */
   readonly version: number;
+
+  /**
+   * 비재원생 참가자 1명
+   */
   readonly students: readonly [{
+    /**
+     * 참여 유형
+     */
     readonly participantType: "GUEST";
+
+    /**
+     * 학생 ID. 비재원생은 null
+     */
     readonly studentId: null;
+
+    /**
+     * 비재원생 일련번호
+     */
     readonly sourceStudentNo: string;
+
+    /**
+     * 이름
+     */
     readonly name: string;
+
+    /**
+     * 캠퍼스
+     */
     readonly branch: string;
   }];
 }
 
+// 공개 비재원생 예약 HTTP 수명 주기. PostgreSQL·Redis 컨테이너와 실제 Nest 서버로 검증
 describe("public guest booking HTTP lifecycle", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer | undefined;
+
+  // Redis 컨테이너
   let redis: StartedTestContainer | undefined;
+
+  // 테스트 Nest 애플리케이션
   let app: INestApplication | undefined;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // 테스트 서버 주소
   let baseUrl = "";
+
+  // 문자 적재 기록
   let smsCapture: CapturingSmsOutbox;
+
+  // 테스트 전 환경 변수 값
   const originalEnvironment = new Map<string, string | undefined>();
 
+  // 컨테이너 기동, 마이그레이션, 환경 변수 설정, 문자 대기열 대역 주입 후 서버 기동
   beforeAll(async () => {
     [postgres, redis] = await Promise.all([
       new GenericContainer("postgres:18-alpine")
@@ -197,6 +349,7 @@ describe("public guest booking HTTP lifecycle", () => {
     prisma = app.get(PrismaService);
   }, 120_000);
 
+  // 서버·컨테이너 종료와 환경 변수 복원
   afterAll(async () => {
     await app?.close();
     await redis?.stop();
@@ -208,6 +361,7 @@ describe("public guest booking HTTP lifecycle", () => {
     }
   });
 
+  // 테스트 서버 요청. Origin 헤더와 쿠키 저장소를 자동 처리
   async function call(method: string, path: string, body?: unknown, options: CallOptions = {}): Promise<CallResult> {
     const headers = new Headers(options.headers);
     headers.set("origin", publicOrigin);
@@ -227,12 +381,17 @@ describe("public guest booking HTTP lifecycle", () => {
     return { status: response.status, body: text === "" ? null : JSON.parse(text) as unknown };
   }
 
+  // CSRF 토큰 발급
   async function csrf(jar: CookieJar): Promise<string> {
     const response = await call("GET", "/api/v1/auth/csrf", undefined, { jar });
     expect(response.status).toBe(200);
     return (response.body as { csrfToken: string }).csrfToken;
   }
 
+  /**
+   * OTP 요청·확인으로 예약 증명 발급
+   * @returns 예약 증명 원문
+   */
   async function issueProof(
     jar: CookieJar,
     csrfToken: string,
@@ -263,6 +422,7 @@ describe("public guest booking HTTP lifecycle", () => {
     return (verified.body as { bookingProof: string }).bookingProof;
   }
 
+  // OTP부터 비재원생 생성·QR·변경·결정적 입장·취소 제약까지 공개 HTTP 흐름 전체
   it("runs OTP through guest create, QR, update, deterministic check-in, and cancellation constraints", async () => {
     const readiness = await call("GET", "/health/ready");
     expect(readiness).toMatchObject({

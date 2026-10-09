@@ -5,11 +5,11 @@ import { defaultErrorMessage, logoutProjectSession, useOperationKey } from "@/sh
 import { Icons } from "@/shared/ui";
 
 /**
- * 우상단 아바타 메뉴 (flows ADMIN-F1-05) — 와이어프레임 App rightSlot 이식.
- * 메뉴: 관리자 표시 + 로그아웃.
+ * 우상단 아바타 메뉴
+ * 메뉴: 관리자 표시 + 로그아웃
  *
- * 표시 이름은 브라우저가 /auth/me 로 확인한 actor 의 displayName 이다 (props). 화면이 스스로
- * 신원을 지어내지 않는다 — 표시되는 사람과 인증된 세션이 갈라지면 안 된다.
+ * 표시 이름은 브라우저가 /auth/me 로 확인한 actor 의 displayName 임 (props). 화면이 스스로
+ * 신원을 지어내지 않음 — 표시되는 사람과 인증된 세션이 갈라지면 안 됨
  */
 export function AvatarMenu({ displayName }: { displayName: string }) {
   const [open, setOpen] = useState(false);
@@ -28,10 +28,10 @@ export function AvatarMenu({ displayName }: { displayName: string }) {
     try {
       await logoutProjectSession({ idempotencyKey: operationKey.current() });
       operationKey.settle();
-      // pending 유지 — 화면 전환까지 잠가 둔다.
+      // pending 유지 — 화면 전환까지 잠가 둠
       window.location.replace("/login/");
     } catch (err) {
-      // 확정 4xx 면 키를 버리고, 네트워크·5xx(결과 미상)면 유지해 같은 키로 재시도한다.
+      // 확정 4xx 면 키를 버리고, 네트워크·5xx(결과 미상)면 유지해 같은 키로 재시도함
       operationKey.settle(err);
       setError(defaultErrorMessage(err));
       setPending(false);

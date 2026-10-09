@@ -26,57 +26,183 @@ import {
   SHEET_TECHNICAL_MARKER_HEADER,
 } from "./google-sheets-schema.js";
 
+/**
+ * 스프레드시트 메타데이터와 기술 표식 열 보호 상태
+ */
 export interface SheetsMetadata {
+  /**
+   * 스프레드시트 로캘
+   */
   readonly locale: string;
+
+  /**
+   * 스프레드시트 시간대
+   */
   readonly timeZone: string;
+
+  /**
+   * Drive 소유자 존재 여부. 공유 드라이브 등 소유자가 없으면 false
+   */
   readonly driveOwnersPresent: boolean;
+
+  /**
+   * 시트 목록
+   */
   readonly sheets: readonly { readonly sheetId: number; readonly title: string; readonly columnCount: number }[];
+
+  /**
+   * 시트별 기술 표식 열 상태
+   */
   readonly technicalColumns: readonly {
+    /**
+     * 시트 ID
+     */
     readonly sheetId: number;
+
+    /**
+     * 시트 제목
+     */
     readonly title: string;
+
+    /**
+     * 사용자가 숨긴 열 여부
+     */
     readonly hidden: boolean;
+
+    /**
+     * 경고 전용이 아닌 보호 범위 적용 여부
+     */
     readonly protected: boolean;
+
+    /**
+     * 서비스 계정이 보호 범위를 편집할 수 있는지 여부
+     */
     readonly requestingUserCanEdit: boolean;
-    /** Drive owners are implicit editors and are allowed in addition to the service account. */
+
+    /**
+     * 보호 범위 편집자가 서비스 계정과 Drive 소유자로만 제한되는지 여부. 소유자는 암묵적 편집자라 허용
+     */
     readonly editorsRestrictedToServiceAccount: boolean;
   }[];
 }
 
+/**
+ * 값 기록 범위
+ */
 export interface SheetsValueRange {
+  /**
+   * A1 표기 범위
+   */
   readonly range: string;
+
+  /**
+   * 행 단위 값
+   */
   readonly values: readonly (readonly (string | number | boolean | null)[])[];
 }
 
+/**
+ * Google API 호출 실패
+ */
 export class SheetsClientError extends Error {
+  /**
+   * 상태·코드·커밋 가능성 설정
+   *
+   * @param status HTTP 상태. 네트워크 오류는 0
+   * @param writeMayHaveCommitted 쓰기 요청이 서버에 반영됐을 수 있는지 여부. true면 재시도 전 확인 필요
+   */
   public constructor(public readonly status: number, public readonly code: string, public readonly writeMayHaveCommitted = false) {
     super(code);
   }
 }
 
+/**
+ * 접근 목적. DISPATCH는 일반 반영, ACTIVATION은 운영자 활성화 작업(시트 사용 비활성이어도 허용)
+ */
 export type SheetsAccessMode = "DISPATCH" | "ACTIVATION";
 
+/**
+ * 스프레드시트 접근 추상화. 테스트에서 가짜 구현으로 교체
+ */
 export abstract class SheetsClient {
+  /**
+   * 공유 설정 안전성 확인
+   */
   public abstract assertSafeSharing(spreadsheetId: string, access?: SheetsAccessMode): Promise<void>;
+
+  /**
+   * 메타데이터 조회
+   */
   public abstract metadata(spreadsheetId: string, access?: SheetsAccessMode): Promise<SheetsMetadata>;
+
+  /**
+   * 여러 범위 값 조회
+   */
   public abstract batchGet(spreadsheetId: string, ranges: readonly string[], access?: SheetsAccessMode): Promise<Readonly<Record<string, readonly (readonly string[])[]>>>;
+
+  /**
+   * 여러 범위 값 기록
+   */
   public abstract batchUpdate(spreadsheetId: string, data: readonly SheetsValueRange[]): Promise<void>;
+
+  /**
+   * 기술 표식 열 준비
+   */
   public abstract ensureTechnicalMarkerColumn(spreadsheetId: string, markerHeader: string): Promise<void>;
 }
 
+/**
+ * 서비스 계정 자격 증명 JSON의 필요한 필드
+ */
 interface ServiceAccount {
+  /**
+   * 서비스 계정 이메일
+   */
   readonly client_email: string;
+
+  /**
+   * PEM 개인 키
+   */
   readonly private_key: string;
 }
 
+/**
+ * Google OAuth 토큰 엔드포인트
+ */
 const googleTokenUri = "https://oauth2.googleapis.com/token";
 
+/**
+ * Google Sheets v4·Drive v3 REST 클라이언트
+ *
+ * 서비스 계정 JWT로 접근 토큰을 받아 캐시. 워커 프로세스 전용
+ */
 @Injectable()
 export class GoogleSheetsV4Client extends SheetsClient {
+  /**
+   * 접근 토큰 캐시. 만료 1분 전까지 재사용
+   */
   private accessToken: { readonly value: string; readonly expiresAt: number } | null = null;
+
+  /**
+   * 검증된 서비스 계정 캐시
+   */
   private serviceAccountCache: ServiceAccount | null = null;
 
+  /**
+   * 실행 환경 주입. 시트 사용 여부·자격 증명 경로를 읽음
+   */
   public constructor(@Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment) { super(); }
 
+  /**
+   * 스프레드시트 공유 설정 안전성 확인
+   *
+   * 1. 스프레드시트 파일이고 휴지통에 없으며 서비스 계정이 편집 가능해야 함
+   * 2. 권한 목록 전체를 페이지 단위로 확인. 링크 공개·도메인·그룹 권한은 읽기 권한이라도 거부
+   * 3. 개발 환경 예외 설정이 있을 때만 링크 공개 편집 허용
+   * 4. 서비스 계정이 사용자 권한으로 직접 편집자여야 함
+   *
+   * @throws {SheetsClientError} 403 안전하지 않은 공유·편집 권한 없음, 400 스프레드시트 아님
+   */
   public async assertSafeSharing(spreadsheetId: string, access: SheetsAccessMode = "DISPATCH"): Promise<void> {
     const account = await this.serviceAccount();
     const baseUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(spreadsheetId)}`;
@@ -130,6 +256,11 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * 스프레드시트 메타데이터와 기술 표식 열 상태 조회
+   *
+   * 예약명단 AD열, 예약집계·로그 Z열을 기술 표식 열로 보고 숨김·보호·편집자 제한 여부 계산
+   */
   public async metadata(spreadsheetId: string, access: SheetsAccessMode = "DISPATCH"): Promise<SheetsMetadata> {
     const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`;
     const payload = await this.request("GET", `${baseUrl}?fields=properties(locale,timeZone),sheets.properties(sheetId,title,gridProperties(columnCount))`, false, undefined, access) as {
@@ -143,6 +274,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
         title: sheet.properties.title,
         columnCount: sheet.properties.gridProperties.columnCount,
       }]);
+    // 존재하는 시트의 기술 표식 열만 조회
     const markerTargets = [
       { title: RESERVATION_SHEET_TITLE, column: "AD", markerIndex: 29 },
       { title: FAMILY_SUMMARY_SHEET_TITLE, column: "Z", markerIndex: 25 },
@@ -162,6 +294,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
         }>;
       }>;
     };
+    // 보호 편집자는 서비스 계정과 Drive 소유자만 허용
     const ownerEmails = await this.driveOwnerEmails(spreadsheetId, access);
     const account = await this.serviceAccount();
     const serviceAccountEmail = this.normalizedEmail(account.client_email);
@@ -202,6 +335,18 @@ export class GoogleSheetsV4Client extends SheetsClient {
     };
   }
 
+  /**
+   * 기술 표식 열 준비. 운영자 활성화 작업 전용
+   *
+   * 1. 세 시트의 ID·제목·열 수 확인. 예약집계 시트만 없을 수 있음
+   * 2. 업무 머리글·예비 빈 열·표식 머리글이 기대와 다르면 변경 없이 중단
+   * 3. 기존 보호 범위가 안전하지 않으면 중단
+   * 4. 예약집계 시트가 없으면 생성 후 메타데이터 재조회
+   * 5. 빈 머리글 채우기, 표식 열 숨김·보호 요청을 한 번의 batchUpdate로 적용
+   *
+   * @param markerHeader 예약명단 표식 머리글. 다른 값이면 거부
+   * @throws {SheetsClientError} 400 구조·머리글 불일치, 보호 설정 위험
+   */
   public async ensureTechnicalMarkerColumn(spreadsheetId: string, markerHeader: string): Promise<void> {
     if (markerHeader !== SHEET_TECHNICAL_MARKER_HEADER) {
       throw new SheetsClientError(400, "GOOGLE_SHEETS_TECHNICAL_HEADER_CONFLICT");
@@ -218,6 +363,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
       throw new SheetsClientError(400, "GOOGLE_SHEETS_SCHEMA_DRIFT");
     }
 
+    // 변경 전 머리글 검증. 업무 데이터가 있는 시트를 덮어쓰지 않도록 먼저 확인
     const initialRanges = [
       `${RESERVATION_SHEET_TITLE}!A1:AD1`,
       `${BOOKING_LOG_SHEET_TITLE}!A1:Z1`,
@@ -254,6 +400,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
     this.assertExistingTechnicalSafety(metadata, bookingLog.sheetId, bookingLog.title);
     if (familySummary !== null) this.assertExistingTechnicalSafety(metadata, familySummary.sheetId, familySummary.title);
 
+    // 예약집계 시트 생성
     const structuralUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
     if (familySummary === null) {
       await this.request("POST", structuralUrl, true, { requests: [{ addSheet: { properties: {
@@ -264,6 +411,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
       metadata = await this.metadata(spreadsheetId, "ACTIVATION");
     }
 
+    // 생성 이후 구조 재확인과 머리글 채우기 요청 수집
     const preparedReservation = locateExactReservationSheet(metadata.sheets);
     const preparedSummary = locateExactFamilySummarySheet(metadata.sheets);
     const preparedLog = locateExactBookingLogSheet(metadata.sheets);
@@ -298,6 +446,7 @@ export class GoogleSheetsV4Client extends SheetsClient {
       markerHeader: BOOKING_LOG_TECHNICAL_MARKER_HEADER,
       allowBlank: true,
     });
+    // 표식 열 숨김·서비스 계정 전용 보호 요청 수집
     const account = await this.serviceAccount();
     for (const target of [
       { sheet: preparedReservation, markerIndex: 29, markerHeader: SHEET_TECHNICAL_MARKER_HEADER },
@@ -334,6 +483,11 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * 여러 범위 값을 문자열 행으로 조회
+   *
+   * @returns 요청 범위 문자열별 행 목록. 값이 없는 범위는 빈 배열
+   */
   public async batchGet(spreadsheetId: string, ranges: readonly string[], access: SheetsAccessMode = "DISPATCH"): Promise<Readonly<Record<string, readonly (readonly string[])[]>>> {
     const query = ranges.map((range) => `ranges=${encodeURIComponent(range)}`).join("&");
     const payload = await this.request("GET", `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet?majorDimension=ROWS&${query}`, false, undefined, access) as {
@@ -347,6 +501,9 @@ export class GoogleSheetsV4Client extends SheetsClient {
     return result;
   }
 
+  /**
+   * 여러 범위 값을 RAW로 기록. 쓰기 요청이라 5xx·네트워크 오류는 커밋 가능성 있음으로 표시
+   */
   public async batchUpdate(spreadsheetId: string, data: readonly SheetsValueRange[]): Promise<void> {
     await this.request("POST", `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`, true, {
       valueInputOption: "RAW",
@@ -355,6 +512,14 @@ export class GoogleSheetsV4Client extends SheetsClient {
     });
   }
 
+  /**
+   * 준비 전 머리글 검증
+   *
+   * 업무 머리글 일치, 예비 열 비어 있음, 표식 열은 비었거나 기대 값이어야 함
+   *
+   * @param allowBlank 행 전체가 비어 있으면 통과 여부
+   * @throws {SheetsClientError} 400 GOOGLE_SHEETS_HEADER_DRIFT
+   */
   private assertPreparatoryHeader(
     row: readonly string[],
     businessHeaders: readonly string[],
@@ -375,6 +540,11 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * 머리글 준비 요청 추가
+   *
+   * 빈 행이면 업무 머리글·예비 열·표식 머리글 전체 기록, 표식 칸만 비었으면 표식 머리글만 기록
+   */
   private appendHeaderPreparation(
     requests: unknown[],
     sheetId: number,
@@ -430,6 +600,11 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * 기존 기술 표식 열 보호 설정이 안전한지 확인
+   *
+   * @throws {SheetsClientError} 400 보호돼 있지만 서비스 계정이 편집 불가하거나 다른 편집자가 있을 때
+   */
   private assertExistingTechnicalSafety(metadata: SheetsMetadata, sheetId: number, title: string): void {
     const technical = this.exactTechnicalColumn(metadata, sheetId, title);
     if (technical.protected && (!technical.requestingUserCanEdit || !technical.editorsRestrictedToServiceAccount)) {
@@ -437,6 +612,11 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * ID·제목이 정확히 일치하는 기술 표식 열 상태
+   *
+   * @throws {SheetsClientError} 400 GOOGLE_SHEETS_SCHEMA_DRIFT
+   */
   private exactTechnicalColumn(metadata: SheetsMetadata, sheetId: number, title: string): SheetsMetadata["technicalColumns"][number] {
     const candidates = metadata.technicalColumns.filter((column) => column.sheetId === sheetId || column.title === title);
     if (candidates.length !== 1 || candidates[0]?.sheetId !== sheetId || candidates[0].title !== title) {
@@ -445,6 +625,16 @@ export class GoogleSheetsV4Client extends SheetsClient {
     return candidates[0];
   }
 
+  /**
+   * Google API 요청
+   *
+   * 시트 사용이 꺼져 있으면 활성화 작업 외 거부. 제한 시간 30초
+   * 쓰기 요청의 5xx·네트워크 오류는 반영 여부 불명으로 표시
+   *
+   * @param write 쓰기 요청 여부
+   * @returns 응답 JSON. 빈 본문이면 빈 객체
+   * @throws {SheetsClientError} HTTP 오류·네트워크 오류
+   */
   private async request(method: "GET" | "POST", url: string, write: boolean, body?: unknown, access: SheetsAccessMode = "DISPATCH"): Promise<unknown> {
     if (!this.environment.googleSheetsEnabled && access !== "ACTIVATION") {
       throw new SheetsClientError(503, "GOOGLE_SHEETS_DISABLED");
@@ -466,6 +656,13 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }
   }
 
+  /**
+   * 서비스 계정 JWT로 접근 토큰 발급
+   *
+   * 남은 유효 시간이 1분 넘게 남은 캐시 토큰은 재사용
+   *
+   * @throws {SheetsClientError} 서명 실패·토큰 요청 실패·응답 형식 오류
+   */
   private async token(): Promise<string> {
     if (this.accessToken !== null && this.accessToken.expiresAt > Date.now() + 60_000) return this.accessToken.value;
     const account = await this.serviceAccount();
@@ -506,6 +703,9 @@ export class GoogleSheetsV4Client extends SheetsClient {
     return payload.access_token;
   }
 
+  /**
+   * Drive 소유자 이메일 집합. 정규화한 값
+   */
   private async driveOwnerEmails(spreadsheetId: string, access: SheetsAccessMode): Promise<ReadonlySet<string>> {
     const baseUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(spreadsheetId)}`;
     const file = await this.request(
@@ -521,10 +721,21 @@ export class GoogleSheetsV4Client extends SheetsClient {
     }));
   }
 
+  /**
+   * 이메일 비교용 정규화. NFKC·공백 제거·소문자
+   */
   private normalizedEmail(value: string): string {
     return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
   }
 
+  /**
+   * 서비스 계정 자격 증명 로드
+   *
+   * 워커 프로세스에서만, 정규화된 절대 경로의 일반 파일을 심볼릭 링크 없이 열고
+   * 프로세스 사용자 소유·그룹/기타 권한 없음(0600 계열)인 경우만 허용
+   *
+   * @throws {SheetsClientError} 503 프로세스 역할·경로·파일 권한·형식 오류
+   */
   private async serviceAccount(): Promise<ServiceAccount> {
     if (this.serviceAccountCache !== null) return this.serviceAccountCache;
     const path = this.environment.googleApplicationCredentials;

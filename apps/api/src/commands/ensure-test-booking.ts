@@ -11,35 +11,36 @@ import { PrismaService } from "../common/prisma/prisma.service.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { QrTokenProtector } from "../modules/family-bookings/qr-token-protector.service.js";
 
-/**
- * QR 리허설용 테스트 예약을 한 건 보장한다.
- *
- * 왜 필요한가: 게이트 장비와 QR 흐름은 실제 예약으로 확인할 수 없다. 실제 입장 기록은
- * 되돌릴 수 없기 때문이다(되돌릴 수 있으면 그게 더 큰 문제다). 그래서 `is_test` 가 붙은
- * 예약을 하나 두고 그것만 몇 번이고 입장·취소한다.
- *
- * 이 예약은 **통계에 그대로 잡힌다** — 집계가 실제로 도는지 당일 전에 확인해야 하고, 그
- * 확인은 실제 화면의 실제 숫자로만 된다. 확인이 끝나면 운영자가 이 예약을 취소해 정리한다.
- * 다만 구글시트 투영과 일반 문자 대상에서는 빠진다: 그건 집계가 아니라 시스템 **밖으로
- * 나가는** 것이라, 리허설이 실제 시트나 실제 번호에 닿아서는 안 된다.
- *
- * 이 예약은 **2명(모/부) 예약**이다. 인원 선택 화면까지 함께 리허설해야 하기 때문이다.
- *
- * 비재원(GUEST) 참가자로 만든다 — 실제 학생 레코드를 건드리지 않고, 명단의 재원생 행을
- * 오염시키지 않는다.
- *
- * 멱등이다. 같은 회차에 테스트 예약이 이미 있으면 다시 만들지 않고 그대로 둔다. QR 이
- * 없거나 죽어 있으면 그것만 새로 발급한다.
- *
- * 취소된 테스트 예약은 **다시 예약 상태로 되돌린다.** 리허설은 취소까지 해 보는 것이
- * 목적이라 취소는 자주 일어나고, 그때마다 사람이 DB 를 직접 만지게 둘 이유가 없다.
- * 되돌리는 대상은 `is_test` 예약뿐이다 — 실제 가정의 취소는 이 명령이 손대지 않는다.
- */
+// QR 리허설용 테스트 예약 1건 보장 명령
+// 사용: node dist/commands/ensure-test-booking.js <seminarSessionId> <BRANCH_CODE>. PUBLIC_BASE_URL 필수
+//
+// 게이트 장비와 QR 흐름은 실제 예약으로 확인할 수 없음. 실제 입장 기록은 되돌릴 수 없기 때문
+// 그래서 is_test 예약 하나를 두고 그것만 반복해 입장·취소함
+// 이 예약은 통계에 그대로 포함됨. 당일 전에 실제 화면 집계가 움직이는지 확인하고, 확인 후 운영자가 취소해 정리
+// 시트 반영과 일반 문자 대상에서는 제외됨. 외부로 나가는 동작이라 리허설이 실제 시트·번호에 닿으면 안 됨
+// 인원 선택 화면까지 리허설하도록 2명(모/부) 예약으로 생성
+// 실제 학생 레코드와 명단의 재원생 행을 건드리지 않도록 비재원생 참가자로 생성
+// 멱등: 같은 회차에 테스트 예약이 있으면 새로 만들지 않고, QR이 없거나 폐기됐으면 QR만 새로 발급
+// 취소된 테스트 예약은 다시 예약 상태로 되돌림. 대상은 is_test 예약뿐이며 실제 가정의 취소는 건드리지 않음
 
+/**
+ * 테스트 예약 연락처
+ */
 const TEST_CONTACT = "01000007147";
+
+/**
+ * 테스트 참가자 이름
+ */
 const TEST_GUEST_NAME = "테스트 계정";
+
+/**
+ * 테스트 참가자 학번 표시
+ */
 const TEST_SOURCE_STUDENT_NO = "NPR-TEST-0001";
 
+/**
+ * 명령 전용 모듈. 환경 설정·DB·연락처 보호·QR 암호화 구성
+ */
 @Module({
   imports: [
     ConfigModule.forRoot({ cache: true, isGlobal: true, ignoreEnvFile: process.env.NODE_ENV === "production" }),
@@ -50,21 +51,48 @@ const TEST_SOURCE_STUDENT_NO = "NPR-TEST-0001";
 })
 class EnsureTestBookingModule {}
 
+/**
+ * 테스트 예약 보장 결과
+ */
 export interface EnsureTestBookingResult {
-  readonly action: "CREATED" | "UNCHANGED" | "QR_REISSUED" | "REINSTATED";
-  readonly familyBookingId: string;
-  readonly seminarSessionId: string;
   /**
-   * 이 예약을 여는 개인 링크. 원문 토큰은 **fragment 로만** 실린다 — path·query 에 담으면
-   * 서버 로그·리퍼러에 남는다.
+   * 처리 결과. 생성·변경 없음·QR 재발급·취소 복구
+   */
+  readonly action: "CREATED" | "UNCHANGED" | "QR_REISSUED" | "REINSTATED";
+
+  /**
+   * 가족 예약 공개 ID
+   */
+  readonly familyBookingId: string;
+
+  /**
+   * 회차 공개 ID
+   */
+  readonly seminarSessionId: string;
+
+  /**
+   * 이 예약을 여는 개인 관리 링크
    *
-   * 링크만으로는 열리지 않는다: 교환에 연락처(010-0000-7147)가 함께 필요하다. 그래서 이
-   * 값을 한 번 출력하는 것이 자격 자체를 넘겨주는 것과 같지 않다. 그래도 테스트 예약에만
-   * 쓰고 실제 가족 링크를 이렇게 뽑지 않는다.
+   * 원문 토큰은 URL 프래그먼트로만 전달. 경로·쿼리에 담으면 서버 로그·Referer에 남음
+   * 링크만으로는 열리지 않고 교환에 연락처(010-0000-7147)가 함께 필요해, 출력이 자격 자체를 넘기는 것과 같지 않음
+   * 테스트 예약에만 쓰고 실제 가족 링크는 이렇게 발급하지 않음
    */
   readonly accessUrl: string;
 }
 
+/**
+ * 회차의 테스트 예약 보장
+ *
+ * 1. 취소된 테스트 예약이 있으면 복구
+ * 2. 있으면 관리 링크를 새로 발급하고, ACTIVE QR이 없을 때만 QR 재발급
+ * 3. 없으면 소비 완료 OTP 증명·예약·비재원생 참가자·생성 이벤트·QR·관리 링크 생성
+ *
+ * QR·관리 링크 만료는 회차 종료 1일 후
+ *
+ * @param branchCode 테스트 참가자 캠퍼스
+ * @param publicBaseUrl 관리 링크 기준 URL
+ * @throws {Error} 회차 없음
+ */
 export async function ensureTestBooking(
   prisma: PrismaService,
   phones: PhoneProtector,
@@ -97,8 +125,7 @@ export async function ensureTestBooking(
     }
 
     if (existing !== null) {
-      // 접근 링크는 매번 새로 낸다. 원문 토큰은 저장하지 않으므로 기존 자격의 URL 은 다시
-      // 만들어 낼 수 없고, 리허설하려면 지금 쓸 수 있는 링크가 하나 필요하다.
+      // 관리 링크는 매번 새로 발급. 원문 토큰을 저장하지 않아 기존 링크를 다시 만들 수 없고, 리허설에는 지금 쓸 링크가 필요함
       const accessUrl = await issueAccessCredential(transaction, publicBaseUrl, existing.id, expiresAt);
       if (existing.qrCredentials.length > 0) {
         return { action: "UNCHANGED", familyBookingId: existing.publicId, seminarSessionId: session.publicId, accessUrl };
@@ -107,8 +134,8 @@ export async function ensureTestBooking(
       return { action: "QR_REISSUED", familyBookingId: existing.publicId, seminarSessionId: session.publicId, accessUrl };
     }
 
-    // 예약은 OTP 증빙을 반드시 가리켜야 한다(FK). 테스트 예약도 예외를 만들지 않고
-    // 소비 완료 상태의 증빙을 하나 남긴다 — 스키마에 구멍을 내는 것보다 낫다.
+    // 예약은 OTP 증명을 반드시 참조해야 함(외래 키). 테스트 예약도 예외 없이 소비 완료 상태의 증명을 남김
+    // 스키마 제약에 예외를 만드는 것보다 나음
     const proof = await transaction.otpProofAudit.create({
       data: {
         proofDigest: prismaBytes(createHash("sha256").update(`npr-test-booking:${session.publicId}`).digest()),
@@ -131,7 +158,7 @@ export async function ensureTestBooking(
         contactDigest: prismaBytes(contact.digest),
         contactCiphertext: prismaBytes(contact.ciphertext),
         contactLast4: contact.last4,
-        // 2명 예약이어야 인원 선택 화면까지 리허설된다.
+        // 2명 예약이어야 인원 선택 화면까지 리허설됨
         attendanceParty: "BOTH",
         seatCount: 2,
         status: "RESERVED",
@@ -176,11 +203,12 @@ export async function ensureTestBooking(
 }
 
 /**
- * 취소된 테스트 예약을 다시 예약 상태로 되돌린다.
+ * 취소된 테스트 예약을 다시 예약 상태로 복구
  *
- * 취소하면서 함께 내려간 것을 모두 되돌린다 — 참가 학생행, 입장 기록, 그리고 폐기된 QR.
- * QR 은 되살리지 않고 새로 낸다: 취소 시점에 폐기된 자격을 다시 살리면 "폐기된 QR 은
- * 다시 쓸 수 없다"는 성질이 테스트 예약에서만 깨진다.
+ * 취소와 함께 내려간 참가자·입장 기록을 되돌리고 QR·관리 링크를 새로 발급
+ * 폐기된 QR은 되살리지 않음. 되살리면 폐기된 QR은 다시 쓸 수 없다는 성질이 테스트 예약에서만 깨짐
+ *
+ * @returns 새 관리 링크
  */
 async function reinstate(
   transaction: Prisma.TransactionClient,
@@ -194,7 +222,7 @@ async function reinstate(
     data: {
       status: "RESERVED",
       cancelledAt: null,
-      // RESERVED 는 입장 전 상태다(family_bookings_state_time_check).
+      // RESERVED는 입장 전 상태(family_bookings_state_time_check 제약)
       checkedInAt: null,
       attendedCount: null,
       version: { increment: 1 },
@@ -217,9 +245,10 @@ async function reinstate(
 }
 
 /**
- * 원문 QR 은 저장하지 않는다(digest 와 암호문만). 운영자는 학부모와 똑같은 경로로 —
- * `/reserve?mode=manage` 에서 이 번호로 본인 확인 — QR 을 열어 스캔한다. 리허설이
- * 실제 흐름과 같아야 리허설로서 값을 한다.
+ * 새 QR 자격 증명 발급
+ *
+ * 원문 QR은 저장하지 않고 다이제스트와 암호문만 저장
+ * 운영자는 학부모와 같은 경로(`/reserve?mode=manage`에서 이 번호로 본인 확인)로 QR을 열어 스캔. 리허설이 실제 흐름과 같아야 의미가 있음
  */
 async function issueCredential(
   transaction: Prisma.TransactionClient,
@@ -228,8 +257,7 @@ async function issueCredential(
   expiresAt: Date,
 ): Promise<void> {
   const rawToken = randomBytes(32).toString("base64url");
-  // version 은 예약 안에서 유일해야 한다(qr_credentials_booking_version_unique). 폐기된
-  // 자격도 그 자리를 계속 차지하므로, 늘 1 로 내면 두 번째 발급에서 부딪힌다.
+  // 버전은 예약 안에서 유일해야 함(qr_credentials_booking_version_unique). 폐기된 자격도 버전을 차지하므로 최신 버전+1 사용
   const latest = await transaction.qrCredential.findFirst({
     where: { familyBookingId },
     orderBy: { version: "desc" },
@@ -249,11 +277,12 @@ async function issueCredential(
 }
 
 /**
- * 개인 접근 자격을 새로 내고 그 링크를 돌려준다. 이전 ACTIVE 자격은 폐기한다 —
- * 리허설용 링크가 여러 개 살아 있을 이유가 없다.
+ * 개인 관리 링크 자격 증명 발급
  *
- * 서버는 digest 만 보관하므로 원문은 지금 이 순간에만 존재한다. 그래서 링크를 여기서
- * 만들어 돌려주고, 저장하거나 다시 만들어 내려 하지 않는다.
+ * 기존 ACTIVE 자격은 폐기. 리허설용 링크가 여러 개 유효할 이유가 없음
+ * 서버는 다이제스트만 보관하므로 원문은 이 순간에만 존재해 여기서 링크를 만들어 반환
+ *
+ * @returns `{기준 URL}/booking/access#token={원문}`
  */
 async function issueAccessCredential(
   transaction: Prisma.TransactionClient,
@@ -265,7 +294,7 @@ async function issueAccessCredential(
     where: { familyBookingId, status: "ACTIVE" },
     data: { status: "REVOKED", revokedAt: new Date() },
   });
-  // 계약 형식: 정확히 43자 base64url (32바이트).
+  // 계약 형식: 정확히 43자 base64url(32바이트)
   const rawToken = randomBytes(32).toString("base64url");
   await transaction.bookingAccessCredential.create({
     data: {
@@ -279,6 +308,11 @@ async function issueAccessCredential(
   return `${publicBaseUrl.replace(/\/+$/, "")}/booking/access#token=${rawToken}`;
 }
 
+/**
+ * 인자를 읽어 테스트 예약 보장 실행 후 결과 JSON 출력
+ *
+ * @throws {Error} 인자 누락, PUBLIC_BASE_URL 미설정
+ */
 async function main(): Promise<void> {
   const [, , sessionPublicId, branchCode] = process.argv;
   if (sessionPublicId === undefined || branchCode === undefined) {
@@ -302,6 +336,7 @@ async function main(): Promise<void> {
   }
 }
 
+// 직접 실행할 때만 main 호출
 const entrypoint = process.argv[1];
 if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
   void main().catch((error: unknown) => {
@@ -310,7 +345,9 @@ if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).hr
   });
 }
 
-/** Prisma 는 ArrayBuffer 기반 Uint8Array 를 요구한다 — Buffer 는 그대로 넘길 수 없다. */
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본. Buffer를 그대로 넘길 수 없음
+ */
 function prismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
