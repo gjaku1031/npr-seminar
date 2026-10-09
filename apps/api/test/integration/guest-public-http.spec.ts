@@ -967,6 +967,7 @@ describe("public guest booking HTTP lifecycle", () => {
     expect(shift).toMatchObject({ status: 201, body: { locked: true, lock: { seminarSessionId: target.publicId } } });
     const checkedIn = await call("POST", "/api/v1/scanner/check-ins/qr", {
       qrToken: createdBody.qrToken,
+      attendedCount: 1,
     }, {
       jar: scannerJar,
       csrfToken: scannerCsrf,

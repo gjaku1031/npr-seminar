@@ -481,12 +481,12 @@ describe("scanner pairing and unpair concurrency", () => {
 
     const manual = await seedBooking("1001");
     const qr = await seedBooking("1002");
-    await expect(checkIns.byManual(actor, manual.booking.publicId, "manual-check-in-key-1001")).resolves.toMatchObject({
+    await expect(checkIns.byManual(actor, manual.booking.publicId, "manual-check-in-key-1001", 1)).resolves.toMatchObject({
       result: "CHECKED_IN", attendanceParty: "MOTHER", representativeStudentName: "학생1001",
     });
     expect(await prisma.sheetOutbox.count({ where: { familyBookingPublicId: manual.booking.publicId, eventType: "CHECKED_IN" } })).toBe(1);
     const qrResults = await Promise.all(Array.from({ length: 20 }, (_value, index) =>
-      checkIns.byQr(actor, qr.rawToken, `qr-check-in-key-1002-${index}`)));
+      checkIns.byQr(actor, qr.rawToken, `qr-check-in-key-1002-${index}`, 1)));
     expect(qrResults.filter((result) => result.result === "CHECKED_IN")).toHaveLength(1);
     expect(qrResults.filter((result) => result.result === "ALREADY_CHECKED_IN")).toHaveLength(19);
     expect(qrResults.every((result) =>

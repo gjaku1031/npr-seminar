@@ -844,9 +844,9 @@ describe("family booking lifecycle", () => {
       scannerDeviceId: device.publicId,
       selectedSessionId: target.publicId,
     };
-    await expect(checkIns.byQr(actor, scienceBooking.qrToken!, `science-checkin-${randomUUID()}`))
+    await expect(checkIns.byQr(actor, scienceBooking.qrToken!, `science-checkin-${randomUUID()}`, 1))
       .resolves.toMatchObject({ result: "CHECKED_IN" });
-    await expect(checkIns.byQr(actor, mathBooking.qrToken!, `math-checkin-${randomUUID()}`))
+    await expect(checkIns.byQr(actor, mathBooking.qrToken!, `math-checkin-${randomUUID()}`, 1))
       .resolves.toMatchObject({ result: "CHECKED_IN" });
 
     const checkedInPayloads = await prisma.sheetOutbox.findMany({
@@ -963,7 +963,7 @@ describe("family booking lifecycle", () => {
     } });
     const actor = { subject: device.publicId, role: "SCANNER" as const, scannerDeviceId: device.publicId, selectedSessionId: checkSession.publicId };
     const checkRace = await Promise.allSettled([
-      checkIns.byQr(actor, checkBooking.result.qrToken!, `race-check-${randomUUID()}`),
+      checkIns.byQr(actor, checkBooking.result.qrToken!, `race-check-${randomUUID()}`, 1),
       management.cancel(checkBooking.result.familyBookingId, 1, "SELF_SERVICE", null, `race-check-cancel-${randomUUID()}`, await proof(checkPhone, "BOOKING_MANAGE"), "입장 경합"),
     ]);
     const final = await prisma.familyBooking.findUniqueOrThrow({ where: { publicId: checkBooking.result.familyBookingId } });

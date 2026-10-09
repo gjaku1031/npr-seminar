@@ -497,7 +497,7 @@ export class SessionStatisticsService {
              summary.no_show_booking_count summary_no_show_booking_count,
              channels.*,
              monitoring_channels.*,
-             monitoring_channel_families.*,
+             monitoring_channel_families.*
         from unit_groups groups
         left join unit_statistics units on units.unit_group=groups.unit_group
         left join monitoring_unit_students monitoring_students on monitoring_students.unit_group=groups.unit_group
