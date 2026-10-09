@@ -162,7 +162,7 @@ describe("SMS administration", () => {
       branch: "CAMPUS_A",
       seminarSessionId: sessionPublicId,
       audience: audience as "BOOKED_FAMILIES" | "RESERVED_FAMILIES" | "CHECKED_IN_FAMILIES" | "CANCELLED_FAMILIES",
-      message: "{학생명}|{설명회명}|{일시}|{장소}|{QR링크}|{문의전화}|{설문링크}",
+      message: "{학생명}|{설명회명}|{일시}|{장소}|{QR링크}|{문의전화}|{예약확인링크}",
     })).recipientCount));
     expect(counts).toEqual([2, 1, 1, 1]);
 
@@ -170,7 +170,7 @@ describe("SMS administration", () => {
       branch: "CAMPUS_A",
       seminarSessionId: sessionPublicId,
       audience: "CANCELLED_FAMILIES",
-      message: "{학생명}|{QR링크}|{설문링크}|{문의전화}",
+      message: "{학생명}|{QR링크}|{예약확인링크}|{문의전화}",
     });
     expect(cancelled.samples).toHaveLength(1);
     expect(cancelled.samples[0]).toMatchObject({

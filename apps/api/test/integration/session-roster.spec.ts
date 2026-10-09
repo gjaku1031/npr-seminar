@@ -876,7 +876,7 @@ describe("ADMIN seminar session roster", () => {
     expect((worksheet!.getRow(1).values as unknown[]).slice(1)).toEqual([
       "예약일시", "예약번호", "참여유형", "학번", "캠퍼스", "학생명", "대표반", "수학반",
       "과학반", "단위", "학교", "학년", "담임", "학부모HP (모)", "학부모HP (부)",
-      "예약경로", "참석자", "예약인원", "예약상태", "체크인상태", "체크인일시",
+      "예약경로", "참석자", "예약인원", "입장인원", "예약상태", "체크인상태", "체크인일시",
       "최근이벤트", "최근이벤트코드", "최근이벤트일시",
     ]);
     expect(worksheet!.rowCount).toBe(3);
@@ -889,12 +889,12 @@ describe("ADMIN seminar session roster", () => {
     expect(siblingOne?.getCell(10).text).toBe("고등");
     expect(siblingOne?.getCell(14).text).toBe("01023334444");
     expect(siblingOne?.getCell(15).text).toBe("01025556666");
-    expect(siblingOne?.getCell(19).text).toBe("예약");
-    expect(siblingOne?.getCell(20).text).toBe("입장 완료");
-    expect(siblingOne?.getCell(21).text).toBe("2026-07-17 10:11:00");
-    expect(siblingOne?.getCell(22).text).toBe("입장 완료");
-    expect(siblingOne?.getCell(23).text).toBe("CHECKED_IN");
-    expect(siblingOne?.getCell(24).text).toBe("2026-07-17 10:11:00");
+    expect(siblingOne?.getCell(20).text).toBe("예약");
+    expect(siblingOne?.getCell(21).text).toBe("입장 완료");
+    expect(siblingOne?.getCell(22).text).toBe("2026-07-17 10:11:00");
+    expect(siblingOne?.getCell(23).text).toBe("입장 완료");
+    expect(siblingOne?.getCell(24).text).toBe("CHECKED_IN");
+    expect(siblingOne?.getCell(25).text).toBe("2026-07-17 10:11:00");
 
     const contactOutput = await service.exportXlsx(sessionPublicId, {
       branch: "CAMPUS_A",
