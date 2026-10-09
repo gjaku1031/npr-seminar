@@ -4,26 +4,26 @@ import { WorkerAppModule } from "./worker-app.module.js";
 import { SmsWorkerService } from "./modules/sms/sms-worker.service.js";
 import { SheetWorkerService } from "./modules/google-sheets/sheet-worker.service.js";
 
+/**
+ * 문자·시트 발송 워커 프로세스 기동과 반복 실행
+ *
+ * SIGINT·SIGTERM을 받으면 현재 반복을 마친 뒤 종료
+ * 처리한 작업이 없으면 1초 대기, 실패가 이어지면 1초씩 늘려 최대 30초 대기
+ */
 async function bootstrapWorker(): Promise<void> {
   const context = await NestFactory.createApplicationContext(WorkerAppModule, { bufferLogs: true });
   context.enableShutdownHooks();
   const worker = context.get(SmsWorkerService);
   const sheetWorker = context.get(SheetWorkerService);
+  // 종료 신호 수신 시 다음 반복부터 멈춤
   let running = true;
   const stop = () => { running = false; };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  /**
-   * 한 바퀴가 실패해도 워커는 계속 돈다.
-   *
-   * 예전에는 여기서 나온 오류가 그대로 프로세스를 죽였고 systemd 가 5초 뒤 다시 띄웠다.
-   * 그런데 큐 워커에게 일시적 오류는 예외 상황이 아니라 일상이다 — DB 연결이 잠깐 모자라는
-   * 것 하나로 프로세스가 죽으면, 죽는 동안 붙잡고 있던 작업의 리스가 만료되고 그 작업은
-   * **보냈는지 알 수 없는 상태**로 남는다. 실제로 문자 77건이 그렇게 됐다.
-   *
-   * 되살릴 수 없는 오류(설정 누락 등)는 어차피 매 바퀴 같은 자리에서 실패하므로, 계속
-   * 도는 것이 조용히 넘어가는 것과 다르지 않다 — 그래서 로그를 남긴다.
-   */
+  // 한 번의 반복이 실패해도 워커는 계속 실행함
+  // 큐 워커에게 일시적 오류는 일상임. DB 연결 부족만으로 프로세스가 죽으면 잡고 있던 작업의 리스가 만료되어
+  // 발송 여부를 알 수 없는 상태로 남음(문자 77건 사례)
+  // 설정 누락처럼 복구되지 않는 오류는 매번 같은 자리에서 실패하므로 계속 실행하되 로그를 남김
   let consecutiveFailures = 0;
   while (running) {
     try {
@@ -34,7 +34,8 @@ async function bootstrapWorker(): Promise<void> {
     } catch (error) {
       consecutiveFailures += 1;
       process.stderr.write(`worker iteration failed (${consecutiveFailures}): ${error instanceof Error ? error.message : "unknown"}\n`);
-      // 실패가 이어지면 물러선다 — 같은 오류로 초당 한 번씩 두드려 봐야 나아지지 않는다.
+      // 연속 실패 시 대기를 늘림. 같은 오류로 초당 재시도해도 나아지지 않음
+      // 실패가 이어지면 물러섬 — 같은 오류로 초당 한 번씩 두드려 봐야 나아지지 않음
       await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 1_000 * consecutiveFailures)));
     }
   }

@@ -8,72 +8,225 @@ import { RedisService } from "../../common/redis/redis.service.js";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
+/**
+ * 페어링 코드 유효 시간(초). 5분
+ */
 const PAIRING_TTL_SECONDS = 300;
+
+/**
+ * 페어링 상태 보관 시간(초). 코드 만료 후에도 취소·사용 결과 확인용으로 1시간 유지
+ */
 const PAIRING_STATE_TTL_SECONDS = 3_600;
+
+/**
+ * 페어링 코드 문자 집합. 혼동되는 0·1·I·O 제외
+ */
 const PAIRING_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/**
+ * 접속 표시 유지 시간(초)
+ */
 const PRESENCE_TTL_SECONDS = 60;
+
+/**
+ * DB 상태 보고 기록 최소 간격(밀리초)
+ */
 const HEARTBEAT_WRITE_INTERVAL_MS = 60_000;
 
+/**
+ * Redis에 저장하는 페어링 발급 정보
+ */
 interface PairingMetadata {
+  /**
+   * 페어링 코드 ID
+   */
   readonly pairingCodeId: string;
+
+  /**
+   * 코드 만료 시각(epoch 밀리초)
+   */
   readonly expiresAtEpochMs: number;
+
+  /**
+   * 캠퍼스
+   */
   readonly branchCode: PairingInput["branchCode"];
+
+  /**
+   * 등록 예정 기기 이름
+   */
   readonly name: string;
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 설치 위치. 없으면 빈 문자열
+   */
   readonly location: string;
+
+  /**
+   * 발급 관리자
+   */
   readonly pairedBy: string;
 }
 
+/**
+ * Redis 페어링 상태. 코드 원문 대신 다이제스트만 보관
+ */
 interface PairingState extends PairingMetadata {
+  /**
+   * 코드 HMAC 다이제스트
+   */
   readonly codeDigest: string;
+
+  /**
+   * 상태. ACTIVE 사용 가능, CLAIMED 사용됨, CANCELLED 취소됨
+   */
   readonly status: "ACTIVE" | "CLAIMED" | "CANCELLED";
+
+  /**
+   * 사용 요청 다이제스트. 같은 요청의 재시도만 성공으로 재생
+   */
   readonly claimRequestDigest?: string;
 }
 
+/**
+ * 페어링 코드 발급 입력
+ */
 interface PairingInput {
+  /**
+   * 캠퍼스
+   */
   readonly branchCode: "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
+
+  /**
+   * 기기 이름
+   */
   readonly name: string;
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 설치 위치
+   */
   readonly location?: string;
 }
 
-/** 관리자 기기 목록의 상태·캠퍼스 필터와 1부터 시작하는 페이지 입력. */
+/**
+ * 관리자 기기 목록 쿼리. 페이지는 1부터
+ */
 export interface ListScannerDevicesQuery {
+  /**
+   * 캠퍼스 필터. 생략하면 전체
+   */
   readonly branch?: "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
+
+  /**
+   * 기기 상태
+   */
   readonly status: "ACTIVE" | "REVOKED" | "UNPAIRED";
+
+  /**
+   * 페이지 번호
+   */
   readonly page: number;
+
+  /**
+   * 페이지 크기
+   */
   readonly pageSize: number;
 }
 
-/** 일회성 코드의 비밀 원문을 제외한 발급 정보. */
+/**
+ * 일회성 코드 원문을 제외한 발급 정보
+ */
 export interface PairingCodeMetadata {
+  /**
+   * 페어링 코드 ID
+   */
   readonly pairingCodeId: string;
+
+  /**
+   * 캠퍼스
+   */
   readonly branch: PairingInput["branchCode"];
+
+  /**
+   * 출입구 코드
+   */
   readonly gateCode: string;
+
+  /**
+   * 등록 예정 기기 이름
+   */
   readonly intendedDeviceName: string;
+
+  /**
+   * 만료 시각
+   */
   readonly expiresAt: Date;
+
+  /**
+   * 유효 시간(초)
+   */
   readonly ttlSeconds: number;
 }
 
-/** 최초 발급에만 pairingCode가 있고 멱등 재생에는 메타데이터만 있다. */
+/**
+ * 페어링 코드 발급 결과. 최초 발급에만 원문 pairingCode가 있고 멱등 재생에는 발급 정보만 있음
+ */
 export type PairingCreateResult =
   | { readonly pairing: PairingCodeMetadata; readonly replayed: false; readonly pairingCode: string }
   | { readonly pairing: PairingCodeMetadata; readonly replayed: true };
 
-/** 페어링의 Redis 임시 상태, 기기·감사 DB 기록, 스캐너 세션을 각 커밋 경계에서 관리한다. */
+/**
+ * 스캐너 기기 페어링·관리
+ *
+ * 페어링 코드는 Redis 임시 상태, 기기·감사는 DB, 스캐너 세션은 Redis 세션 저장소에 두고 각 커밋 경계를 따로 관리
+ * DB 커밋 후 Redis 정리가 실패해도 같은 멱등 키 재요청으로 정리를 반복할 수 있게 함
+ */
 @Injectable()
 export class ScannerDevicesService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 페어링 상태·접속 표시·세션 저장소
+     */
     private readonly redis: RedisService,
+
+    /**
+     * 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
+
+    /**
+     * 실행 환경. HMAC 키·세션 만료
+     */
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
   /**
-   * Redis에 5분짜리 코드를 먼저 만들고 DB에 감사·멱등 결과를 기록한다.
-   * 최초 성공에만 코드 원문을 반환하며 동일 키 재생에는 메타데이터만 반환한다.
-   * @throws {DomainError} 비활성 캠퍼스 또는 코드 충돌로 발급할 수 없을 때.
+   * 페어링 코드 발급
+   *
+   * 1. 같은 키의 이전 결과가 있으면 발급 정보만 재생
+   * 2. 활성 캠퍼스 확인 후 Redis에 코드 키·상태 키를 Lua로 원자 생성. 충돌하면 최대 5회 재시도
+   * 3. DB에 감사·멱등 결과 기록. 그 사이 다른 요청이 같은 키를 먼저 기록했으면 방금 만든 Redis 코드를 지우고 재생
+   *
+   * @returns 최초 성공에만 코드 원문 포함
+   * @throws {DomainError} 404 비활성 캠퍼스, 503 코드 충돌로 발급 불가
    */
   public async createPairing(input: PairingInput, actorSubject: string, key: string): Promise<PairingCreateResult> {
     const replayRequest = { ...input, actorSubject };
@@ -134,8 +287,12 @@ export class ScannerDevicesService {
   }
 
   /**
-   * 미사용 코드의 Redis 상태를 먼저 취소하고 DB 감사·멱등 기록을 남긴다.
-   * claim된 코드는 HTTP 409이며, 이미 기록된 동일 키는 재생 후 조용히 끝난다.
+   * 미사용 페어링 코드 취소
+   *
+   * Redis 상태를 먼저 취소하고 DB 감사·멱등 기록을 남김. 이미 기록된 같은 키는 재생 후 종료
+   * 감사 중복을 막기 위해 코드 ID 기준 advisory lock 아래 한 번만 기록
+   *
+   * @throws {DomainError} 404 코드 없음, 409 이미 사용된 코드
    */
   public async cancelPairing(pairingCodeId: string, actorSubject: string, key: string): Promise<void> {
     const replayRequest = { pairingCodeId };
@@ -163,10 +320,14 @@ export class ScannerDevicesService {
   }
 
   /**
-   * 사용 횟수를 제한한 뒤 Redis Lua로 코드를 원자적으로 claim하고 DB 기기·감사를 커밋한다.
-   * 이후 {@link ScannerDevicesService.establishScannerSession}이 별도로 세션과 CSRF를 만든다.
-   * 동일 멱등 키의 재생은 기존 기기에 새 스캐너 세션을 연결한다.
-   * @throws {DomainError} 무효·이미 claim된 코드, 제한 초과, 기기 활성 상태 불일치 시.
+   * 공개 브라우저의 페어링 코드 사용
+   *
+   * 1. 코드 정규화·형식 확인, 같은 키 재요청이면 기존 기기에 새 스캐너 세션 연결
+   * 2. IP별 20회·코드별 10회(5분), 전체 600회(1분) 시도 제한
+   * 3. Redis Lua로 코드를 원자적으로 사용 처리. 같은 요청의 재시도만 재생 허용
+   * 4. DB에 기기·감사 기록 후 establishScannerSession이 세션과 CSRF 토큰 발급
+   *
+   * @throws {DomainError} 400 무효 코드, 409 이미 사용됨·기기 비활성, 429 시도 초과
    */
   public async claim(request: Request, suppliedCode: string, clientPlatform: string, deviceName: string, key: string) {
     const code = suppliedCode.normalize("NFKC").trim().toUpperCase();
@@ -209,7 +370,14 @@ export class ScannerDevicesService {
     return this.establishScannerSession(request, durable.value.deviceId);
   }
 
-  /** DB에 기록된 활성 기기를 확인하고 세션·CSRF·presence를 만든 뒤 활성 상태를 재확인한다. */
+  /**
+   * 스캐너 세션 수립
+   *
+   * 활성 기기 확인 후 세션 재생성, SCANNER 주체·절대 만료·CSRF 저장, 기기별 세션 목록·접속 표시 기록
+   * 그 사이 기기가 취소됐으면 방금 만든 런타임 상태와 세션을 지우고 실패
+   *
+   * @throws {DomainError} 409 SCANNER_PAIRING_INVALID
+   */
   private async establishScannerSession(request: Request, deviceId: string) {
     const device = await this.prisma.scannerDevice.findUnique({
       where: { publicId: deviceId }, include: { branch: { select: { code: true } } },
@@ -228,6 +396,7 @@ export class ScannerDevicesService {
     await this.redis.client.sAdd(this.deviceSessionsKey(device.publicId), request.sessionID);
     await this.redis.client.expire(this.deviceSessionsKey(device.publicId), this.environment.sessionAbsoluteTtlSeconds);
     const presenceExpiresAt = await this.markPresent(device.publicId);
+    // 세션 생성 중 취소된 기기는 런타임 상태를 지우고 거부
     const stillActive = await this.prisma.scannerDevice.count({
       where: { publicId: device.publicId, status: "ACTIVE" },
     });
@@ -255,7 +424,9 @@ export class ScannerDevicesService {
     };
   }
 
-  /** 상태·캠퍼스로 기기를 페이지 조회하고 Redis presence TTL로 접속 상태를 덧붙인다. */
+  /**
+   * 상태·캠퍼스별 기기 페이지 조회. Redis 접속 표시 TTL로 접속 여부·만료 시각 계산
+   */
   public async list(query: ListScannerDevicesQuery) {
     const where: Prisma.ScannerDeviceWhereInput = {
       status: query.status,
@@ -300,7 +471,11 @@ export class ScannerDevicesService {
     } };
   }
 
-  /** 세션의 활성 기기 정보와 잠긴 회차를 반환한다. 기기가 없으면 HTTP 404다. */
+  /**
+   * 세션의 활성 기기 정보와 잠긴 회차
+   *
+   * @throws {DomainError} 404 활성 기기 없음
+   */
   public async current(deviceId: string) {
     const device = await this.prisma.scannerDevice.findFirst({
       where: { publicId: deviceId, status: "ACTIVE" },
@@ -333,7 +508,11 @@ export class ScannerDevicesService {
     };
   }
 
-  /** 관리자가 취소된 상태까지 포함한 기기 상세를 조회한다. 삭제되어 없으면 HTTP 404다. */
+  /**
+   * 취소 상태까지 포함한 기기 상세. 활성 기기만 회차 잠금 조회
+   *
+   * @throws {DomainError} 404 삭제된 기기
+   */
   public async detail(deviceId: string) {
     const device = await this.prisma.scannerDevice.findUnique({
       where: { publicId: deviceId },
@@ -357,7 +536,12 @@ export class ScannerDevicesService {
     };
   }
 
-  /** 해당 기기의 감사 사건을 sequence 오름차순으로 반환하고 다음 커서를 계산한다. */
+  /**
+   * 기기 감사 이벤트를 순번 오름차순으로 조회하고 다음 커서 계산
+   *
+   * @param requestedLimit 1~200, 기본 50
+   * @throws {DomainError} 404 기기 없음
+   */
   public async events(deviceId: string, afterSequence?: string, requestedLimit?: number) {
     const device = await this.prisma.scannerDevice.findUnique({ where: { publicId: deviceId }, select: { id: true } });
     if (device === null) this.fail(404, "SCANNER_DEVICE_NOT_FOUND");
@@ -379,7 +563,17 @@ export class ScannerDevicesService {
     };
   }
 
-  /** DB heartbeat 기록은 60초 간격으로 제한하고 Redis presence는 매번 60초로 갱신한다. */
+  /**
+   * 스캐너 상태 보고
+   *
+   * DB 기록은 60초 간격으로 제한하고 Redis 접속 표시는 매번 서버 시각 기준 60초로 갱신
+   * 갱신 중 기기가 취소됐으면 런타임 상태를 지우고 실패
+   *
+   * @param actorDeviceId 세션 주체 기기. 대상 기기와 달라야 하면 거부
+   * @param batteryLevelPercent 생략하면 기존 값 유지
+   * @param isCharging 생략하면 기존 값 유지
+   * @throws {DomainError} 403 다른 기기, 404 활성 기기 없음
+   */
   public async heartbeat(
     deviceId: string,
     actorDeviceId: string | undefined,
@@ -411,7 +605,14 @@ export class ScannerDevicesService {
     return { serverTime, presenceExpiresAt };
   }
 
-  /** 기기 행 잠금 아래 OPEN·캠퍼스 일치 회차를 고정하고 감사·멱등 결과를 함께 커밋한다. */
+  /**
+   * 스캐너 회차 선택
+   *
+   * 기기 행 잠금 아래 OPEN이고 캠퍼스가 맞는 회차를 고정하고 감사·멱등 결과를 함께 커밋
+   * 이미 같은 회차면 그대로 성공, 다른 회차가 잠겨 있으면 거부. 커밋 후 세션의 선택 회차 갱신
+   *
+   * @throws {DomainError} 403 다른 기기, 404 기기 없음, 409 회차 불가·다른 회차 잠김
+   */
   public async selectSession(request: Request, deviceId: string, sessionId: string, key: string) {
     const actor = request.session.actor!;
     if (actor.role === "SCANNER" && actor.scannerDeviceId !== deviceId) this.fail(403, "SCANNER_DEVICE_SCOPE_MISMATCH");
@@ -444,7 +645,11 @@ export class ScannerDevicesService {
     return this.currentShift(deviceId);
   }
 
-  /** 활성 기기의 회차 잠금 정보를 반환한다. 선택 회차가 없으면 locked=false다. */
+  /**
+   * 활성 기기의 회차 잠금 정보. 선택 회차가 없으면 locked=false
+   *
+   * @throws {DomainError} 404 활성 기기 없음
+   */
   public async currentShift(deviceId: string) {
     const device = await this.prisma.scannerDevice.findFirst({
       where: { publicId: deviceId, status: "ACTIVE" },
@@ -472,7 +677,13 @@ export class ScannerDevicesService {
     };
   }
 
-  /** 기기 행을 잠그고 잠긴 회차가 있을 때만 해제·SHIFT_RELEASED 감사를 멱등 커밋한다. 스캐너 요청이면 세션도 갱신한다. */
+  /**
+   * 회차 잠금 해제
+   *
+   * 기기 행을 잠그고 잠긴 회차가 있을 때만 해제·SHIFT_RELEASED 감사를 멱등 커밋. 스캐너 요청이면 세션 선택 회차도 제거
+   *
+   * @throws {DomainError} 403 다른 기기, 404 활성 기기 없음
+   */
   public async unlockSession(request: Request, deviceId: string, actorSubject: string, reason: string, key: string) {
     const actor = request.session.actor!;
     if (actor.role === "SCANNER" && actor.scannerDeviceId !== deviceId) this.fail(403, "SCANNER_DEVICE_SCOPE_MISMATCH");
@@ -498,18 +709,26 @@ export class ScannerDevicesService {
     return { locked: false, lock: null };
   }
 
-  /** DB에서 기기를 취소한 뒤 Redis 세션·presence를 무효화한다. 같은 키 재생도 사후 정리를 반복한다. */
+  /**
+   * 기기 취소
+   *
+   * DB에서 취소한 뒤 Redis 세션·접속 표시 무효화. 같은 키 재요청도 정리를 반복
+   */
   public async revoke(deviceId: string, actorSubject: string, reason: string, key: string) {
     await this.idempotency.execute("SCANNER_DEVICE_REVOKE", key, { deviceId, reason }, async (transaction) => {
       const status = await this.deactivateDevice(transaction, deviceId, "REVOKED", actorSubject, reason);
       return { deviceId, status };
     });
-    // Redis 정리는 DB 트랜잭션 밖이다. 커밋 뒤 실패해도 같은 멱등 키를 재생하면 다시 정리한다.
+    // Redis 정리는 DB 트랜잭션 밖. 커밋 후 실패해도 같은 멱등 키 재요청으로 다시 정리
     await this.invalidateDeviceRuntime(deviceId);
     return this.detail(deviceId);
   }
 
-  /** 기기를 DB에서 삭제한 뒤 Redis 세션·presence·관련 페어링 상태를 지운다. 완료만 반환한다. */
+  /**
+   * 관리자 기기 삭제
+   *
+   * DB 삭제 후 Redis 세션·접속 표시와 관련 페어링 상태 정리
+   */
   public async deleteDevice(deviceId: string, actorSubject: string, key: string): Promise<void> {
     const deletion = await this.idempotency.execute("SCANNER_DEVICE_DELETE", key, { deviceId, actorSubject }, async (transaction) => {
       const pairingCodeIds = await this.hardDeleteDevice(transaction, deviceId);
@@ -521,7 +740,11 @@ export class ScannerDevicesService {
     ]);
   }
 
-  /** 자기 기기를 DB에서 삭제하고 Redis 상태를 지운 뒤 현재 Express 세션을 파기한다. */
+  /**
+   * 스캐너 자가 해제
+   *
+   * 자기 기기를 DB에서 삭제하고 Redis 상태를 지운 뒤 현재 세션 파기
+   */
   public async selfUnpair(request: Request, deviceId: string, key: string): Promise<void> {
     const deletion = await this.idempotency.execute("SCANNER_SELF_UNPAIR", key, { deviceId }, async (transaction) => {
       const pairingCodeIds = await this.hardDeleteDevice(transaction, deviceId);
@@ -534,34 +757,55 @@ export class ScannerDevicesService {
     await this.destroy(request);
   }
 
-  /** 서버 비밀 HMAC으로 코드·요청 출처를 다이제스트화한다. 비밀 미설정은 HTTP 503이다. */
+  /**
+   * 서버 비밀 기반 HMAC-SHA256 다이제스트(base64url). 코드·요청 출처 식별용
+   *
+   * @throws {DomainError} 503 HMAC 키 미설정
+   */
   private digest(value: string): string {
     const secret = this.environment.scannerPairingHmacKey;
     if (secret === undefined) this.fail(503, "SESSION_NOT_CONFIGURED");
     return createHmac("sha256", Buffer.from(secret, "base64")).update(value).digest("base64url");
   }
 
+  /**
+   * 코드 원문의 Redis 조회 키
+   */
   private pairingKey(code: string): string {
     return this.pairingKeyFromDigest(this.digest(code));
   }
 
+  /**
+   * 코드 다이제스트의 Redis 조회 키
+   */
   private pairingKeyFromDigest(codeDigest: string): string {
     return `${this.redis.prefix}scanner:pairing:code:${codeDigest}`;
   }
 
+  /**
+   * 페어링 상태 Redis 키
+   */
   private pairingStateKey(pairingCodeId: string): string {
     return `${this.redis.prefix}scanner:pairing:id:${pairingCodeId}`;
   }
 
+  /**
+   * 접속 표시 Redis 키
+   */
   private presenceKey(deviceId: string): string {
     return `${this.redis.prefix}scanner:presence:${deviceId}`;
   }
 
+  /**
+   * 기기별 세션 ID 집합 Redis 키
+   */
   private deviceSessionsKey(deviceId: string): string {
     return `${this.redis.prefix}scanner:sessions:${deviceId}`;
   }
 
-  /** 기기에 연결된 Express 세션과 presence를 Redis에서 함께 무효화한다. */
+  /**
+   * 기기에 연결된 모든 세션과 접속 표시를 Redis Lua로 한 번에 삭제
+   */
   private async invalidateDeviceRuntime(deviceId: string): Promise<void> {
     await this.redis.client.eval(
       "local ids=redis.call('SMEMBERS',KEYS[1]); for _,id in ipairs(ids) do redis.call('DEL',ARGV[1]..id) end; redis.call('DEL',KEYS[1],KEYS[2]); return #ids",
@@ -572,7 +816,9 @@ export class ScannerDevicesService {
     );
   }
 
-  /** 삭제된 기기의 감사 메타데이터에서 찾은 코드 상태와 코드 조회 키를 Redis에서 지운다. */
+  /**
+   * 삭제된 기기 감사 메타데이터의 페어링 상태와 코드 조회 키를 Redis에서 삭제
+   */
   private async invalidatePairingRuntime(pairingCodeIds: readonly string[]): Promise<void> {
     if (pairingCodeIds.length === 0) return;
     await this.redis.client.eval(
@@ -584,7 +830,11 @@ export class ScannerDevicesService {
     );
   }
 
-  /** 기기 행을 잠근 뒤 관련 페어링 코드 ID를 수집하고 DB 행을 삭제한다. 없으면 빈 목록이다. */
+  /**
+   * 기기 행 잠금 후 관련 페어링 코드 ID를 수집하고 행 삭제
+   *
+   * @returns 페어링 코드 ID 목록. 기기가 없으면 빈 목록
+   */
   private async hardDeleteDevice(transaction: Prisma.TransactionClient, deviceId: string): Promise<string[]> {
     const rows = await transaction.$queryRaw<Array<{ id: bigint }>>`
       select id from scanner_devices where public_id=${deviceId}::uuid for update`;
@@ -604,7 +854,13 @@ export class ScannerDevicesService {
     return pairingCodeIds;
   }
 
-  /** 기기 행 잠금 아래 상태·회차 잠금 해제와 감사 사건을 기록한다. 이미 종료된 상태는 그대로 반환한다. */
+  /**
+   * 기기 비활성화
+   *
+   * 기기 행 잠금 아래 상태 변경·회차 잠금 해제와 감사 기록. 이미 취소·해제된 기기는 현재 상태 반환
+   *
+   * @throws {DomainError} 404 기기 없음, 409 알 수 없는 상태
+   */
   private async deactivateDevice(
     transaction: Prisma.TransactionClient,
     deviceId: string,
@@ -646,14 +902,20 @@ export class ScannerDevicesService {
     this.fail(409, "SCANNER_DEVICE_STATE_INVALID");
   }
 
-  /** Redis presence를 서버 시각부터 60초 동안 기록하고 만료 시각을 돌려준다. */
+  /**
+   * 서버 시각부터 60초 동안 접속 표시 기록
+   *
+   * @returns 접속 표시 만료 시각
+   */
   private async markPresent(deviceId: string, serverTime = new Date()): Promise<Date> {
     const expiresAt = new Date(serverTime.getTime() + PRESENCE_TTL_SECONDS * 1_000);
     await this.redis.client.set(this.presenceKey(deviceId), "1", { PXAT: expiresAt.getTime() });
     return expiresAt;
   }
 
-  /** 사용자가 보는 사건 종류로 내부 감사 이벤트명을 바꾼다. 대응값이 없으면 원문을 반환한다. */
+  /**
+   * 내부 감사 이벤트 이름을 화면 표시 종류로 변환. 대응값이 없으면 그대로
+   */
   private auditEventType(value: string): string {
     const mapping: Readonly<Record<string, string>> = {
       PAIRING_CLAIM: "PAIRED",
@@ -665,14 +927,22 @@ export class ScannerDevicesService {
     return mapping[value] ?? value;
   }
 
-  /** Redis 카운터로 페어링 시도를 제한한다. 한도를 넘으면 HTTP 429다. */
+  /**
+   * 고정 창 페어링 시도 제한
+   *
+   * @throws {DomainError} 429 SCANNER_PAIRING_RATE_LIMITED
+   */
   private async rateLimit(key: string, maximum: number, ttlSeconds: number): Promise<void> {
     const attempts = await this.redis.client.incr(key);
     if (attempts === 1) await this.redis.client.expire(key, ttlSeconds);
     if (attempts > maximum) this.fail(429, "SCANNER_PAIRING_RATE_LIMITED");
   }
 
-  /** Redis의 페어링 JSON을 검증한다. 누락·손상된 필드는 HTTP 400이다. */
+  /**
+   * Redis 페어링 상태 JSON 검증
+   *
+   * @throws {DomainError} 400 필드 누락·손상
+   */
   private parsePairingState(value: string): PairingState {
     try {
       const parsed = JSON.parse(value) as Partial<PairingState>;
@@ -691,22 +961,32 @@ export class ScannerDevicesService {
     }
   }
 
-  /** 요청의 Express 세션 ID를 새로 발급받는다. 저장 실패는 호출자에게 전파한다. */
+  /**
+   * 세션 ID 재발급. 실패는 호출자에게 전파
+   */
   private regenerate(request: Request): Promise<void> {
     return new Promise((resolve, reject) => request.session.regenerate((error) => error == null ? resolve() : reject(error)));
   }
 
-  /** 현재 Express 세션을 저장한다. 저장 실패는 호출자에게 전파한다. */
+  /**
+   * 세션 저장. 실패는 호출자에게 전파
+   */
   private save(request: Request): Promise<void> {
     return new Promise((resolve, reject) => request.session.save((error) => error == null ? resolve() : reject(error)));
   }
 
-  /** 현재 Express 세션을 파기한다. 파기 실패는 호출자에게 전파한다. */
+  /**
+   * 세션 파기. 실패는 호출자에게 전파
+   */
   private destroy(request: Request): Promise<void> {
     return new Promise((resolve, reject) => request.session.destroy((error) => error == null ? resolve() : reject(error)));
   }
 
-  /** 기기 업무 실패를 HTTP 도메인 오류로 알린다. 항상 예외를 던진다. */
+  /**
+   * 기기 작업 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The scanner device operation could not be completed.");
   }

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ADMIN_SESSION_EXPIRED_EVENT, defaultErrorMessage, getCurrentActor, isAborted, isApiError } from "@/shared/api";
 import { LoginForm } from "./LoginForm";
 
+/**
+ * 콘솔 세션 확인 상태
+ */
 type SessionState =
   | { kind: "checking" }
   | { kind: "admin"; displayName: string }
@@ -14,7 +17,9 @@ type SessionState =
   | { kind: "forbidden" }
   | { kind: "error"; message: string };
 
-/** 브라우저 세션 확인 훅. 갱신·탭 복귀·BFCache 복원 시 재확인하고 이전 요청은 취소한다. */
+/**
+ * 브라우저 세션 확인 훅. 갱신·탭 복귀·BFCache 복원 시 재확인하고 이전 요청은 취소함
+ */
 export function useSessionCheck() {
   const [state, setState] = useState<SessionState>({ kind: "checking" });
   const abortRef = useRef<AbortController | null>(null);
@@ -74,11 +79,28 @@ export function useSessionCheck() {
   return { state, retry: check };
 }
 
-/** 정적 인증 상태를 기존 화면 토큰에 맞춘 간결한 안내로 표시한다. */
+/**
+ * 정적 인증 상태를 기존 화면 토큰에 맞춘 간결한 안내로 표시함
+ */
 export function SessionNotice({ title, message, action, onAction }: {
+  /**
+   * 제목
+   */
   title: string;
+
+  /**
+   * 안내 문구
+   */
   message: string;
+
+  /**
+   * 버튼 문구. 없으면 버튼 없음
+   */
   action?: string;
+
+  /**
+   * 버튼 클릭 처리
+   */
   onAction?: () => void;
 }) {
   return (
@@ -92,7 +114,9 @@ export function SessionNotice({ title, message, action, onAction }: {
   );
 }
 
-/** 로그인 화면에서 기존 ADMIN만 콘솔로 이동시키고 SCANNER는 관리자 로그인을 안내한다. */
+/**
+ * 로그인 화면에서 기존 ADMIN만 콘솔로 이동시키고 SCANNER는 관리자 로그인을 안내함
+ */
 export function LoginSessionGate() {
   const { state, retry } = useSessionCheck();
   const showForm = state.kind === "anonymous" || state.kind === "expired" || state.kind === "scanner";
@@ -103,7 +127,7 @@ export function LoginSessionGate() {
 
   return (
     <>
-      {/* 재확인 중에도 폼을 유지해 입력한 관리자 자격증명을 지우지 않는다. */}
+      {/* 재확인 중에도 폼을 유지해 입력한 관리자 자격증명을 지우지 않음 */}
       <div hidden={!showForm}>
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
           {state.kind === "scanner" && <p role="status" style={{ maxWidth: 400, color: "var(--status-danger)" }}>스캐너 기기 세션입니다. 운영 콘솔에는 관리자 계정으로 로그인해 주세요.</p>}

@@ -1,3 +1,4 @@
+# 소켓으로 받은 GCP 게이트웨이 요청을 로컬 web(127.0.0.1:3000)으로 중계하는 프록시
 [Unit]
 Description=NPR Seminar Caddy upstream proxy
 Requires=npr-seminar-caddy-upstream.socket
@@ -6,6 +7,7 @@ After=npr-seminar-web.service
 [Service]
 Type=notify
 ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3000
+# 샌드박스
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true

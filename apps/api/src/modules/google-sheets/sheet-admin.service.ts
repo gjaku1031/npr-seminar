@@ -7,15 +7,30 @@ import {
   SHEET_WORKER_READINESS_TTL_MS,
 } from "./google-sheets.gateway.js";
 
+/**
+ * 시트 반영 상태·이력 조회
+ *
+ * 현재 스키마 버전·지문과 같은 매핑만 상태 계산에 포함
+ */
 @Injectable()
 export class SheetAdminService {
+  /**
+   * DB 클라이언트 주입
+   */
   public constructor(
     private readonly prisma: PrismaService,
   ) {}
 
+  /**
+   * 시트 반영 준비 상태
+   *
+   * 활성 매핑 중 워커 검증이 유효 기간 안인 것이 있으면 실시간 반영 가능
+   * 막힌 경우 사유: 검증 만료, 첫 차단 매핑의 사유, 활성 매핑 없음 순
+   */
   public async readiness() {
     const validationCutoff = new Date(Date.now() - SHEET_WORKER_READINESS_TTL_MS);
     const schema = { schemaVersion: SHEET_SCHEMA_VERSION, schemaFingerprint: SHEET_SCHEMA_FINGERPRINT } as const;
+    // 매핑 수·활성·최근 검증·준비 완료 수, 첫 차단 사유, 대기·차단 반영 건수를 병렬 조회
     const [mappings, activeMappings, freshActiveMappings, freshValidatedMappings, blockedMapping, pending, blocked] = await Promise.all([
       this.prisma.sheetMapping.count({ where: schema }),
       this.prisma.sheetMapping.count({ where: { ...schema, enabled: true, circuitStatus: "CLOSED" } }),
@@ -59,6 +74,9 @@ export class SheetAdminService {
     };
   }
 
+  /**
+   * 시트 매핑 목록. ID 오름차순
+   */
   public async mappings() {
     const rows = await this.prisma.sheetMapping.findMany({ orderBy: { id: "asc" } });
     return { items: rows.map((row) => ({
@@ -69,6 +87,11 @@ export class SheetAdminService {
     })) };
   }
 
+  /**
+   * 반영 대기열 목록. 최신순
+   *
+   * @param filters limit은 1~200, 기본 50
+   */
   public async deliveries(filters: { status?: string; seminarSessionId?: string; limit?: number }) {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const rows = await this.prisma.sheetOutbox.findMany({
@@ -87,6 +110,11 @@ export class SheetAdminService {
     })) };
   }
 
+  /**
+   * 반영 1건과 시도 기록
+   *
+   * @throws {DomainError} 404 SHEET_DELIVERY_NOT_FOUND
+   */
   public async delivery(deliveryId: string) {
     const row = await this.prisma.sheetOutbox.findUnique({
       where: { deliveryPublicId: deliveryId }, include: { attempts: { orderBy: { attemptNo: "asc" } } },

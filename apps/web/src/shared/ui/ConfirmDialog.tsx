@@ -1,38 +1,80 @@
 "use client";
 
-/**
- * 파기적 동작 확인 — 핸드오프 요구: `alertdialog`, 포커스 트랩, 취소 버튼 기본 포커스.
- *
- * DS Dialog(shared/ui/Dialog)는 `role="dialog"` 에 포커스 트랩이 없어서
- * 연결 해제처럼 되돌릴 수 없는 확인에는 쓰지 않는다. DS 는 수정하지 않고
- * 같은 시각 언어(라디우스·표면·그림자·타이포)를 그대로 따르는 컴포넌트를 따로 둔다.
- */
+// 파괴적 작업 확인 대화상자. alertdialog 역할, 포커스 트랩, 취소 버튼 기본 포커스
+// 일반 Dialog는 role="dialog"에 포커스 트랩이 없어 연결 해제처럼 되돌릴 수 없는 확인에는 쓰지 않음
+// 일반 Dialog는 그대로 두고 같은 시각 언어(모서리·표면·그림자·글꼴)를 따르는 별도 컴포넌트로 둠
 
 import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
 import { Button } from "./Button";
 
+/**
+ * 포커스 가능한 요소 선택자
+ */
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * 확인 대화상자 속성
+ */
 export interface ConfirmDialogProps {
-  open: boolean;
-  title: string;
-  /** 무엇이 사라지고 무엇이 남는지 — 사용자가 결정할 수 있게 구체적으로. */
-  children: ReactNode;
-  confirmLabel: string;
-  cancelLabel?: string;
-  /** 되돌릴 수 없는 동작은 danger. */
-  tone?: "danger" | "primary";
-  busy?: boolean;
   /**
-   * 확인 버튼을 잠근다 — 되돌릴 수 없는 조작에서 "문구를 정확히 입력했는가" 같은 추가 조건을
-   * 호출부가 걸 때 쓴다. 잠긴 이유는 children 안에서 사용자에게 말해 준다.
+   * 열림 여부
+   */
+  open: boolean;
+
+  /**
+   * 제목
+   */
+  title: string;
+
+  /**
+   * 무엇이 사라지고 무엇이 남는지 사용자가 판단할 수 있는 구체적 설명
+   */
+  children: ReactNode;
+
+  /**
+   * 확인 버튼 문구
+   */
+  confirmLabel: string;
+
+  /**
+   * 취소 버튼 문구. 기본 `취소`
+   */
+  cancelLabel?: string;
+
+  /**
+   * 확인 버튼 색조. 되돌릴 수 없는 작업은 danger
+   */
+  tone?: "danger" | "primary";
+
+  /**
+   * 처리 중 여부. 두 버튼 비활성과 `처리 중...` 표시
+   */
+  busy?: boolean;
+
+  /**
+   * 확인 버튼 잠금
+   *
+   * 되돌릴 수 없는 작업에서 문구 정확 입력 같은 추가 조건을 호출부가 걸 때 사용. 잠긴 이유는 children에서 안내
    */
   confirmDisabled?: boolean;
+
+  /**
+   * 확인 처리
+   */
   onConfirm: () => void;
+
+  /**
+   * 취소 처리. Escape 키도 같음
+   */
   onCancel: () => void;
 }
 
+/**
+ * 파괴적 작업 확인 대화상자
+ *
+ * 열리면 이전 포커스를 기억하고 취소 버튼에 포커스, 본문 스크롤 잠금. 닫히면 둘 다 복원
+ */
 export function ConfirmDialog({
   open,
   title,
@@ -45,12 +87,14 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  // 패널·취소 버튼·복원할 포커스 참조와 접근성 ID
   const panelRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const bodyId = useId();
 
+  // Tab 순환을 패널 안으로 제한
   const trapFocus = useCallback((event: KeyboardEvent) => {
     const panel = panelRef.current;
     if (!panel || event.key !== "Tab") return;
@@ -77,9 +121,10 @@ export function ConfirmDialog({
     if (!open) return;
 
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    // 기본 포커스는 취소 — 확인이 파기적이라 Enter 오입력이 곧장 실행되면 안 된다.
+    // 기본 포커스는 취소. 확인이 파괴적이라 Enter 오입력이 바로 실행되면 안 됨
     cancelRef.current?.querySelector<HTMLElement>("button")?.focus();
 
+    // Escape는 취소, Tab은 포커스 트랩
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

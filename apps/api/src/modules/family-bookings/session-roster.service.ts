@@ -12,70 +12,231 @@ import {
   type OperationalBookingEventType,
 } from "./booking-operational-event.js";
 
+/**
+ * 명단 단위 그룹
+ */
 export type RosterUnitGroup = StudentUnitGroup;
 
+/**
+ * 명단 필터
+ */
 interface RosterFilters {
+  /**
+   * 캠퍼스
+   */
   readonly branch?: string;
+
+  /**
+   * 단위 그룹
+   */
   readonly unitGroup: RosterUnitGroup;
+
+  /**
+   * 수학 담임
+   */
   readonly teacherName?: string;
+
+  /**
+   * 이름·학교·학번 검색어. 숫자 4자리면 연락처 끝 4자리도 검색
+   */
   readonly query?: string;
+
+  /**
+   * 페이지 번호
+   */
   readonly page: number;
+
+  /**
+   * 페이지 크기
+   */
   readonly pageSize: number;
 }
 
+/**
+ * 명단 SQL 조회 행. 재원생은 학생 1명, 비재원생은 같은 연락처·이름·캠퍼스 묶음 1행
+ */
 interface RosterDatabaseRow {
+  /**
+   * 명단 행 ID. 재원생은 학생 공개 ID, 비재원생은 묶음의 첫 예약 학생 공개 ID
+   */
   readonly roster_entry_id: string;
+
+  /**
+   * 참여 유형
+   */
   readonly participant_type: "ENROLLED" | "GUEST";
+
+  /**
+   * 학생 공개 ID. 비재원생은 null
+   */
   readonly student_id: string | null;
+
+  /**
+   * 예약 학생 공개 ID. 재원생은 null
+   */
   readonly family_booking_student_id: string | null;
+
+  /**
+   * 학생 내부 ID. 비재원생은 null
+   */
   readonly student_internal_id: bigint | null;
+
+  /**
+   * 대표 비재원생 예약 학생 내부 ID
+   */
   readonly guest_child_internal_id: bigint | null;
+
+  /**
+   * 같은 묶음의 비재원생 예약 학생 내부 ID 전체
+   */
   readonly guest_child_internal_ids: bigint[];
+
+  /**
+   * 학번
+   */
   readonly source_student_no: string;
+
+  /**
+   * 이름
+   */
   readonly name: string;
+
+  /**
+   * 캠퍼스
+   */
   readonly branch: string;
+
+  /**
+   * 원장 대표 반 또는 비재원생 반 표시
+   */
   readonly class_name: string;
+
+  /**
+   * 표시용 수학 반. 현재 반이 없는 재원생은 `비재원생`
+   */
   readonly math_class_name: string | null;
+
+  /**
+   * 과학 반 목록
+   */
   readonly science_class_names: string[];
+
+  /**
+   * 학교
+   */
   readonly school_name: string | null;
+
+  /**
+   * 학년
+   */
   readonly grade: string | null;
+
+  /**
+   * 단위
+   */
   readonly unit_name: string | null;
+
+  /**
+   * 수학 담임. 수학 반이 있을 때만
+   */
   readonly primary_teacher: string | null;
+
+  /**
+   * 어머니 연락처 암호문
+   */
   readonly mother_phone_ciphertext: Uint8Array | null;
+
+  /**
+   * 아버지 연락처 암호문
+   */
   readonly father_phone_ciphertext: Uint8Array | null;
+
+  /**
+   * 비재원생 예약 연락처 암호문
+   */
   readonly guest_contact_ciphertext: Uint8Array | null;
-  /** 정렬 전용 — 화면에 나가는 값은 booking 투영의 isTest 다. */
+
+  /**
+   * 테스트 예약 여부. 정렬 전용이며 화면 값은 예약 투영의 isTest
+   */
   readonly is_test: boolean;
 }
 
+/**
+ * 명단 선택지 행. 담임 목록과 어느 단위 탭에도 속하지 않는 재원생 수
+ */
 interface RosterFacetRow { readonly teachers: string[]; readonly unmatched_unit_count: number; }
+
+/**
+ * 명단 모니터링 집계 행
+ */
 interface RosterMonitoringRow {
+  /**
+   * 명단 행 수
+   */
   readonly roster_row_count: bigint;
+
+  /**
+   * 현재 예약이 있는 학생 수
+   */
   readonly student_count: bigint;
+
+  /**
+   * 가족 예약 수
+   */
   readonly family_booking_count: bigint;
+
+  /**
+   * 예상 참석 인원. 둘 다 참석은 2명
+   */
   readonly attendee_count: bigint;
 }
 
+/**
+ * 현재 예약 상태. 예약·입장
+ */
 const CURRENT_BOOKING_STATUSES = new Set(["RESERVED", "CHECKED_IN"]);
 
-/** 스프레드시트 수식으로 해석될 수 있는 사용자 문자열 앞에 작은따옴표를 붙여 반환한다. */
+/**
+ * 스프레드시트 수식 주입 방지
+ *
+ * 앞쪽 공백·제어 문자 뒤에 `= + @ -`로 시작하는 문자열에 작은따옴표를 붙임. null은 빈 문자열
+ */
 export function neutralizeSpreadsheetText(value: string | null | undefined): string {
   const text = value ?? "";
   return /^[\s\u0000-\u001f\u007f-\u009f]*[=+@-]/u.test(text) ? `'${text}` : text;
 }
 
-/** 회차 예약 명단을 조회·내보내며 재원생과 비재원생별 대표 행에 예약 이력을 투영한다. */
+/**
+ * 회차 예약 명단 조회·엑셀 내보내기
+ *
+ * 재원생은 학생 1명당 1행, 비재원생은 같은 연락처·이름·캠퍼스 묶음당 1행에 예약 이력을 모아 표시
+ */
 @Injectable()
 export class SessionRosterService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 연락처 복호화
+     */
     private readonly phoneProtector: PhoneProtector,
   ) {}
 
   /**
-   * 회차의 필터·페이지별 명단, 담임 선택지와 예약 기준 모니터링 수치를 반환한다.
-   * 회차 부재는 404, 지점 회차의 연결 지점 누락은 409이며 다른 지점 요청은 빈 결과를 반환한다.
-   * 조회는 행을 잠그지 않고 보호자 연락처는 응답 매핑 단계에서 복호화한다.
+   * 회차 명단 조회
+   *
+   * 필터·페이지별 명단, 담임 선택지, 예약 기준 모니터링 수치 반환
+   * 지점 회차에 다른 캠퍼스를 요청하면 빈 결과. 행을 잠그지 않으며 보호자 연락처는 응답 변환 단계에서 복호화
+   * 어느 단위 탭에도 속하지 않는 재원생 수에서는 비재원생 탭에서 보이는 `비재원생` 표시 학생을 제외
+   *
+   * @throws {DomainError} 404 회차 없음, 409 지점 회차의 지점 누락
    */
   public async list(sessionId: string, filters: RosterFilters) {
     const session = await this.prisma.seminarSession.findUnique({
@@ -143,9 +304,13 @@ export class SessionRosterService {
   }
 
   /**
-   * 목록과 같은 조건의 전체 명단을 XLSX 버퍼로 반환한다. 다른 지점 요청은 헤더만 있는 파일이다.
-   * 문자열 셀은 {@link neutralizeSpreadsheetText}로 수식 실행을 막고 날짜는 서울 시각으로 표기한다.
-   * 회차 부재는 404, 지점 회차의 연결 지점 누락은 409를 던진다.
+   * 회차 명단 엑셀(XLSX) 생성
+   *
+   * 목록과 같은 조건의 전체 명단. 지점 회차에 다른 캠퍼스를 요청하면 머리글만 있는 파일
+   * 문자열 셀은 neutralizeSpreadsheetText로 수식 실행을 막고 날짜는 서울 시각으로 표기
+   *
+   * @returns XLSX 파일 버퍼
+   * @throws {DomainError} 404 회차 없음, 409 지점 회차의 지점 누락
    */
   public async exportXlsx(sessionId: string, filters: Omit<RosterFilters, "page" | "pageSize">): Promise<Buffer> {
     const session = await this.prisma.seminarSession.findUnique({
@@ -174,6 +339,7 @@ export class SessionRosterService {
       items = await this.mapRows(session.id, await this.rosterRows(filtered));
     }
 
+    // 통합 문서·시트 생성. 첫 행 고정
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "NPR Seminar";
     workbook.created = new Date();
@@ -201,7 +367,7 @@ export class SessionRosterService {
       { header: "예약경로", key: "bookingSource", width: 12 },
       { header: "참석자", key: "attendanceParty", width: 10 },
       { header: "예약인원", key: "seatCount", width: 10 },
-      // 예약인원 바로 오른쪽 — 예약한 수와 실제 온 수를 나란히 놓고 봐야 의미가 있다.
+      // 예약인원 바로 오른쪽에 두어 예약한 수와 실제 온 수를 나란히 비교
       { header: "입장인원", key: "attendedCount", width: 10 },
       { header: "예약상태", key: "reservationStatus", width: 14 },
       { header: "체크인상태", key: "checkInStatus", width: 14 },
@@ -210,6 +376,7 @@ export class SessionRosterService {
       { header: "최근이벤트코드", key: "latestEventType", width: 24 },
       { header: "최근이벤트일시", key: "latestEventAt", width: 22 },
     ];
+    // 비재원생 연락처는 참석 보호자에 따라 모·부 열에 배치(둘 다면 모 열)
     for (const item of items) {
       const currentHistory = item.bookingHistory.find((entry) => entry.current);
       const guestContact = item.participantType === "GUEST" ? item.guestContact : null;
@@ -236,7 +403,7 @@ export class SessionRosterService {
         bookingSource: neutralizeSpreadsheetText(this.bookingSourceLabel(item.booking.bookingSource)),
         attendanceParty: neutralizeSpreadsheetText(this.attendancePartyLabel(item.booking.attendanceParty)),
         seatCount: item.booking.seatCount,
-        // 미입장이면 0 이 아니라 빈 칸이다 — 0 명 입장과 아직 안 온 것은 다른 사실이다.
+        // 미입장은 0이 아니라 빈 칸. 0명 입장과 아직 오지 않은 것은 다른 사실
         attendedCount: item.booking.attendedCount ?? null,
         reservationStatus: neutralizeSpreadsheetText(this.reservationStatus(item.booking.status)),
         checkInStatus: neutralizeSpreadsheetText(this.checkInStatus(item.booking.status)),
@@ -246,6 +413,7 @@ export class SessionRosterService {
         latestEventAt: neutralizeSpreadsheetText(this.formatSeoulDate(item.latestOperationalEvent?.occurredAt ?? null)),
       });
     }
+    // 머리글 필터·서식
     worksheet.autoFilter = { from: "A1", to: "X1" };
     const header = worksheet.getRow(1);
     header.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -259,7 +427,11 @@ export class SessionRosterService {
     return Buffer.from(output);
   }
 
-  /** 조회된 명단 행에 같은 회차의 예약 링크를 모아 각 학생·비재원생 대표 행으로 변환한다. */
+  /**
+   * 명단 행에 같은 회차의 예약 학생 연결을 모아 응답 행으로 변환
+   *
+   * 재원생은 학생 ID, 비재원생은 묶음의 예약 학생 ID로 연결
+   */
   private async mapRows(sessionInternalId: bigint, rows: readonly RosterDatabaseRow[]) {
     const links = await this.bookingLinks(sessionInternalId, rows);
     const byRosterEntry = new Map<string, typeof links>();
@@ -278,7 +450,15 @@ export class SessionRosterService {
     return rows.map((row) => this.mapRow(row, byRosterEntry.get(this.rowKey(row)) ?? []));
   }
 
-  /** 연결된 재원생과 보호자 연락처 해시·이름·지점이 같은 비재원생의 대표 행을 만드는 SQL을 반환한다. */
+  /**
+   * 명단 기본 SQL(roster_base CTE)
+   *
+   * 재원생: 회차에 예약 이력이 있는 학생. 활성 대표 수강 등록에서 수학·과학 반 계산
+   * 비재원생: 연락처 다이제스트·정규화 이름·캠퍼스가 같은 예약 학생을 묶고, 현재 예약 우선·최신 예약을 대표로 선택
+   * 현재 반이 없어 `비재원생`으로 표시된 재원생은 수학 반 칸에도 그대로 표시해 값 누락과 구분
+   *
+   * @param branch 캠퍼스 제한. null이면 전체
+   */
   private rosterBase(sessionInternalId: bigint, branch: string | null) {
     return Prisma.sql`
       with guest_ranked as (
@@ -371,7 +551,12 @@ export class SessionRosterService {
       )`;
   }
 
-  /** 단위·담임·검색어 필터 SQL을 반환한다. 비재원생 단위에는 현행 반이 없는 재원생도 포함한다. */
+  /**
+   * 단위·담임·검색어 필터 SQL(roster_filtered CTE)
+   *
+   * 비재원생 그룹에는 통통통에 없는 가정과, 등록했지만 현재 반이 없어 `비재원생`으로 표시된 재원생을 함께 포함
+   * 후자를 빼면 어느 단위 탭에도 걸리지 않아 전체 탭에서만 보임
+   */
   private filteredRoster(
     base: Prisma.Sql,
     unitGroup: RosterUnitGroup,
@@ -409,7 +594,14 @@ export class SessionRosterService {
       )`;
   }
 
-  /** isTest 표시 행 우선과 지점·단위·반·이름 순서를 적용해 명단 행을 읽는다. 페이지 인자가 없으면 전체를 읽는다. */
+  /**
+   * 명단 행 조회
+   *
+   * 정렬: 테스트 예약 → 캠퍼스 → 단위(비재원생은 단위 뒤) → 대표 반 → 이름 → 학번
+   * 테스트 예약은 QR 재테스트용으로 매번 찾아야 하므로 항상 맨 앞
+   *
+   * @param pagination 생략하면 전체
+   */
   private rosterRows(filtered: Prisma.Sql, pagination?: { readonly offset: number; readonly limit: number }) {
     const page = pagination === undefined
       ? Prisma.empty
@@ -451,7 +643,12 @@ export class SessionRosterService {
        ${page}`);
   }
 
-  /** 각 명단 행에서 활성 예약 우선·최신 순으로 하나를 골라 학생·가족·예상 인원을 집계한다. */
+  /**
+   * 명단 모니터링 집계
+   *
+   * 명단 행마다 현재 예약 우선·최신 예약 하나를 고르고, 그중 예약·입장 상태만 학생·가족·예상 인원으로 집계
+   * 형제가 같은 예약이면 가족은 한 번만 셈
+   */
   private rosterMonitoring(sessionInternalId: bigint, filtered: Prisma.Sql) {
     return this.prisma.$queryRaw<RosterMonitoringRow[]>(Prisma.sql`
       ${filtered},
@@ -489,7 +686,9 @@ export class SessionRosterService {
         from selected_families`);
   }
 
-  /** 현재 페이지의 재원생 ID와 비재원생 링크 ID에 대한 예약·최신 운영 이벤트를 조회한다. */
+  /**
+   * 현재 페이지 행의 예약 학생 연결과 예약별 최신 운영 이벤트 조회
+   */
   private async bookingLinks(sessionInternalId: bigint, rows: readonly RosterDatabaseRow[]) {
     const studentIds = rows.flatMap((row) => row.student_internal_id === null ? [] : [row.student_internal_id]);
     const guestIds = rows.flatMap((row) => row.guest_child_internal_ids);
@@ -530,8 +729,12 @@ export class SessionRosterService {
   }
 
   /**
-   * 활성 예약 우선·최신 순으로 현재 예약을 선택하고 전체 예약 이력과 최근 운영 이벤트를 반환한다.
-   * 보호자·비재원생 연락처는 여기서 복호화하며 연결된 예약이 없으면 500을 던진다.
+   * 명단 응답 행 변환
+   *
+   * 현재 예약 우선·최신 순으로 대표 예약을 고르고 전체 예약 이력과 가장 최근 운영 이벤트를 함께 반환
+   * 보호자·비재원생 연락처는 여기서 복호화
+   *
+   * @throws {DomainError} 500 연결된 예약 없음
    */
   private mapRow(row: RosterDatabaseRow, links: Awaited<ReturnType<SessionRosterService["bookingLinks"]>>) {
     const sorted = [...links].sort((left, right) => {
@@ -582,7 +785,9 @@ export class SessionRosterService {
     };
   }
 
-  /** 선택한 예약의 참석·입장 인원과 상태·버전을 명단 응답에 투영한다. */
+  /**
+   * 선택한 예약의 상태·참석 보호자·예약·입장 인원·버전
+   */
   private bookingProjection(link: Awaited<ReturnType<SessionRosterService["bookingLinks"]>>[number]) {
     return {
       familyBookingId: link.familyBooking.publicId,
@@ -599,7 +804,11 @@ export class SessionRosterService {
     };
   }
 
-  /** 이벤트 주체의 식별자 형태와 입장 이벤트 여부로 화면용 행위자 유형을 반환한다. */
+  /**
+   * 이벤트 처리 주체 유형
+   *
+   * 주체 없음은 공개 예약 증명, 입장은 스캐너, UUID 주체는 관리자, 그 외 시스템
+   */
   private eventActorType(eventType: string, actorSubject: string | null): "ADMIN" | "SCANNER" | "PUBLIC_PROOF" | "SYSTEM" {
     if (actorSubject === null) return "PUBLIC_PROOF";
     if (eventType === "CHECKED_IN") return "SCANNER";
@@ -608,12 +817,18 @@ export class SessionRosterService {
       : "SYSTEM";
   }
 
+  /**
+   * 엑셀 예약 상태 표시
+   */
   private reservationStatus(status: string): string {
     if (status === "CANCELLED") return "예약취소";
     if (status === "NO_SHOW") return "미참석";
     return "예약";
   }
 
+  /**
+   * 엑셀 체크인 상태 표시
+   */
   private checkInStatus(status: string): string {
     if (status === "CHECKED_IN") return "입장 완료";
     if (status === "RESERVED") return "미입장";
@@ -621,11 +836,18 @@ export class SessionRosterService {
     return "해당 없음";
   }
 
+  /**
+   * 엑셀 참여 유형 표시
+   */
   private participantTypeLabel(participantType: "ENROLLED" | "GUEST"): string {
     return participantType === "ENROLLED" ? "재원생" : "비재원생";
   }
 
-  /** 예약 경로를 엑셀 표시명으로 바꾸며 알 수 없는 값이면 500을 던진다. */
+  /**
+   * 엑셀 예약 경로 표시
+   *
+   * @throws {DomainError} 500 알 수 없는 값
+   */
   private bookingSourceLabel(bookingSource: string): string {
     switch (bookingSource) {
       case "WEB_APP": return "웹앱";
@@ -636,7 +858,11 @@ export class SessionRosterService {
     }
   }
 
-  /** 참석자 구성을 엑셀 표시명으로 바꾸며 알 수 없는 값이면 500을 던진다. */
+  /**
+   * 엑셀 참석 보호자 표시
+   *
+   * @throws {DomainError} 500 알 수 없는 값
+   */
   private attendancePartyLabel(attendanceParty: string): string {
     switch (attendanceParty) {
       case "MOTHER": return "모";
@@ -646,6 +872,9 @@ export class SessionRosterService {
     }
   }
 
+  /**
+   * 서울 시간 `YYYY-MM-DD HH:mm:ss` 표기. null이면 빈 문자열
+   */
   private formatSeoulDate(value: Date | null): string {
     if (value === null) return "";
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -662,7 +891,11 @@ export class SessionRosterService {
     return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}`;
   }
 
-  /** 지점 코드를 엑셀 표시명으로 바꾸며 알 수 없는 값이면 500을 던진다. */
+  /**
+   * 엑셀 캠퍼스 이름
+   *
+   * @throws {DomainError} 500 알 수 없는 지점 코드
+   */
   private campusName(branch: string): string {
     switch (branch) {
       case "CAMPUS_A": return "A";
@@ -672,13 +905,18 @@ export class SessionRosterService {
     }
   }
 
-  /** 재원생 내부 ID 또는 비재원생 대표 행 ID로 예약 링크 묶음의 키를 만든다. */
+  /**
+   * 명단 행과 예약 연결을 잇는 키. 재원생 `E:{학생 ID}`, 비재원생 `G:{명단 행 ID}`
+   */
   private rowKey(row: RosterDatabaseRow): string {
     return row.student_internal_id === null
       ? `G:${row.roster_entry_id}`
       : `E:${row.student_internal_id.toString()}`;
   }
 
+  /**
+   * 빈 명단 응답
+   */
   private empty(page: number, pageSize: number) {
     return {
       items: [],
@@ -688,7 +926,11 @@ export class SessionRosterService {
     };
   }
 
-  /** 지정한 상태와 코드의 {@link DomainError}를 던지며 정상 반환하지 않는다. */
+  /**
+   * 명단 조회 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The session roster could not be loaded.");
   }

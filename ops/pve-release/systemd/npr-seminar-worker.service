@@ -1,3 +1,5 @@
+# 문자 발송·Google Sheets 반영 워커 프로세스. HTTP 포트를 열지 않음
+# 비밀값은 /etc/npr-seminar/worker.env 에서 읽고, API 전용 값은 환경에서 지움
 [Unit]
 Description=NPR Seminar isolated SMS and Google Sheets worker
 After=network-online.target postgresql.service
@@ -12,9 +14,11 @@ EnvironmentFile=/etc/npr-seminar/worker.env
 Environment=NODE_ENV=production
 Environment=APP_ENV=production
 Environment=PROCESS_ROLE=worker
+# API 전용 DB 계정·세션·암호화·Redis·통통통·포스터 저장 값은 워커에 넘기지 않음
 UnsetEnvironment=DATABASE_URL MIGRATION_DATABASE_URL PORT SESSION_SECRET OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY REDIS_URL
 UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
 UnsetEnvironment=POSTER_STORAGE_DIR
+# 릴리스 빌드 산출물이 없으면 시작하지 않음
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/api/dist/worker.js
 ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/api/dist/worker.js
 Restart=on-failure
@@ -24,6 +28,7 @@ TimeoutStopSec=45s
 KillSignal=SIGTERM
 UMask=0077
 
+# 샌드박스. 다른 프로세스의 env 파일은 숨기고 Google 서비스 계정 키만 읽기 허용
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true

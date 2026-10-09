@@ -1,37 +1,88 @@
 "use client";
 
 /**
- * 회차 종료·삭제 확인 — **문구를 직접 입력해야** 확인 버튼이 열린다.
+ * 회차 종료·삭제 확인 — 문구를 직접 입력해야 확인 버튼이 열림
  *
- * 왜 한 번 더 막는가: 두 조작 모두 학부모가 보는 화면을 즉시 바꾼다. 종료하면 그 회차로
- * 새 예약을 받지 못하고, 삭제하면 목록에서 사라진다. 설명회 당일 운영 중에 눌리는 자리라
- * "정말요?" 한 번으로는 부족하다 — 손이 미끄러져도 문구까지 타이핑되지는 않는다.
+ * 왜 한 번 더 막는가: 두 조작 모두 학부모가 보는 화면을 즉시 바꿈. 종료하면 그 회차로
+ * 새 예약을 받지 못하고, 삭제하면 목록에서 사라짐. 설명회 당일 운영 중에 눌리는 자리라
+ * "정말요?" 한 번으로는 부족함 — 손이 미끄러져도 문구까지 타이핑되지는 않음
  *
- * 입력 문구는 조작마다 다르다. 종료 화면에서 '삭제합니다'를 치게 하면 방금 무엇을 하는지
- * 헷갈리게 만든다.
+ * 입력 문구는 조작마다 다름. 종료 화면에서 '삭제합니다'를 치게 하면 방금 무엇을 하는지
+ * 헷갈리게 만듦
  *
- * ConfirmDialog 가 role="alertdialog" · 포커스 트랩 · 기본 포커스=취소 · Esc 취소를 준다.
+ * ConfirmDialog 가 role="alertdialog" · 포커스 트랩 · 기본 포커스=취소 · Esc 취소를 줌
  */
 
 import { useId, useState } from "react";
 import { ConfirmDialog } from "@/shared/ui";
 
+/**
+ * 회차 종료(CLOSE) 또는 보관(ARCHIVE)
+ */
 export type SessionLifecycleAction = "CLOSE" | "ARCHIVE";
 
+/**
+ * 회차 종료·보관 확인 창 속성
+ */
 export interface SessionLifecycleDialogProps {
+  /**
+   * 확인할 조작. 닫혀 있으면 null
+   */
   action: SessionLifecycleAction | null;
+
+  /**
+   * 대상 회차 표시 이름
+   */
   sessionLabel: string;
+
+  /**
+   * 처리 중 여부
+   */
   busy: boolean;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
+
+  /**
+   * 확인 처리
+   */
   onConfirm: () => void;
+
+  /**
+   * 취소 처리
+   */
   onCancel: () => void;
 }
 
+/**
+ * 조작별 확인 창 문구
+ */
 const COPY: Readonly<Record<SessionLifecycleAction, {
+  /**
+   * 제목
+   */
   title: string;
+
+  /**
+   * 실행 전에 직접 입력해야 하는 문구
+   */
   phrase: string;
+
+  /**
+   * 확인 버튼 문구
+   */
   confirmLabel: string;
+
+  /**
+   * 경고 문구
+   */
   warning: string;
+
+  /**
+   * 부가 설명
+   */
   detail: string;
 }>> = {
   CLOSE: {
@@ -50,17 +101,17 @@ const COPY: Readonly<Record<SessionLifecycleAction, {
   },
 };
 
+/**
+ * 회차 종료·보관 확인 창. 확인 문구를 입력해야 실행됨
+ */
 export function SessionLifecycleDialog({
   action, sessionLabel, busy, error, onConfirm, onCancel,
 }: SessionLifecycleDialogProps) {
   const inputId = useId();
-  /**
-   * 입력값에 **어느 조작의 것인지**를 함께 들고 있는다.
-   *
-   * 창이 닫히거나 다른 조작으로 바뀌면 앞서 친 문구는 곧바로 남의 것이 된다. effect 로
-   * 비우는 대신 조작을 대조해 파생하면, 종료 창에 친 '종료합니다'가 삭제 창으로 넘어가
-   * 확인 절차를 건너뛰게 만드는 창이 아예 없다.
-   */
+  // 입력값에 어느 조작의 것인지를 함께 들고 있음
+  // 창이 닫히거나 다른 조작으로 바뀌면 앞서 친 문구는 곧바로 남의 것이 됨. effect 로
+  // 비우는 대신 조작을 대조해 파생하면, 종료 창에 친 '종료합니다'가 삭제 창으로 넘어가
+  // 확인 절차를 건너뛰게 만드는 창이 아예 없음
   const [entry, setEntry] = useState<{ action: SessionLifecycleAction; text: string } | null>(null);
 
   if (action === null) return null;

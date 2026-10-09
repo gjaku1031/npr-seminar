@@ -1,6 +1,9 @@
+# QA 서버 데이터 저장소(PostgreSQL·Redis) Docker Compose 정의
+# 비밀번호는 install-datastores.sh 가 만든 env 파일에서 받고, 포트는 127.0.0.1 에만 열음
 name: npr-seminar-qa
 
 services:
+  # PostgreSQL 18. 마이그레이션 계정으로 초기화하고 UTC 고정
   postgres:
     image: postgres:18-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
     environment:
@@ -30,6 +33,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Redis 8. 시작 스크립트가 비밀번호로 ACL 파일을 만든 뒤 기동
   redis:
     image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
     environment:
@@ -57,6 +61,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
+# 데이터 볼륨. 이름을 고정해 Compose 프로젝트와 무관하게 유지
 volumes:
   npr_qa_postgres_data:
     name: npr_qa_postgres_data

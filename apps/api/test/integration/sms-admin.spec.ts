@@ -13,22 +13,43 @@ import { SmsMessagePolicy } from "../../src/modules/sms/sms-message-policy.servi
 import { SmsOutboxService } from "../../src/modules/sms/sms-outbox.service.js";
 import { SmsTemplateRenderer } from "../../src/modules/sms/sms-template-renderer.service.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * 테스트 회차 공개 ID
+ */
 const sessionPublicId = "00000000-0000-4000-8000-000000000102";
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
   return copy;
 }
 
+// 관리자 문자 통합 테스트. PostgreSQL 컨테이너 사용
 describe("SMS administration", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // 연락처 보호
   let protector: PhoneProtector;
+
+  // 관리자 문자 서비스
   let service: SmsAdminService;
+
+  // 학생 이름별 예약 공개 ID
   const bookings = new Map<string, string>();
 
+  // 컨테이너 기동, 마이그레이션, 회차·서비스 구성
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_sms" })
@@ -76,11 +97,13 @@ describe("SMS administration", () => {
     await createBooking("CANCELLED", "01020001003", "취소 학생");
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await prisma?.$disconnect();
     await postgres?.stop();
   });
 
+  // 테스트 회차에 재원생 1명 예약 생성
   async function createBooking(status: "RESERVED" | "CHECKED_IN" | "CANCELLED", phone: string, studentName: string) {
     const session = await prisma.seminarSession.findUniqueOrThrow({ where: { publicId: sessionPublicId } });
     const contact = protector.protect(phone);
@@ -119,6 +142,7 @@ describe("SMS administration", () => {
     bookings.set(status, booking.publicId);
   }
 
+  // 기본 템플릿 4종이 준비되고 네 대상 모두 수신자별 안전한 링크로 렌더링
   it("seeds four defaults and renders all four audiences with safe per-recipient links", async () => {
     const templates = await service.listTemplates();
     expect(templates.items).toHaveLength(4);
@@ -167,6 +191,7 @@ describe("SMS administration", () => {
     })).rejects.toMatchObject({ code: "SMS_TEMPLATE_VARIABLE_UNKNOWN" });
   });
 
+  // 손대지 않은 이전 기본 문구만 갱신하고 운영자 편집은 유지
   it("refreshes only untouched legacy seed copy and preserves operator edits", async () => {
     const migration = readFileSync(resolve(
       apiDirectory,
@@ -208,6 +233,7 @@ describe("SMS administration", () => {
     expect(knownSeeds.every((template) => !template.body.includes("사진"))).toBe(true);
   });
 
+  // 발송 등록은 미리보기 결과와 정확히 묶이고 행별 렌더링과 배치 이력을 노출
   it("binds enqueue to the exact preview, renders each row, and exposes aggregate batch history", async () => {
     const request = {
       branch: "CAMPUS_A" as const,
@@ -282,6 +308,7 @@ describe("SMS administration", () => {
     })]);
   });
 
+  // 키 중복을 거부하고 낙관적 잠금으로 활성 기본 템플릿을 보호
   it("rejects duplicate keys and protects the active default under optimistic locking", async () => {
     await expect(service.createTemplate({
       key: "BOOKING_CONFIRMED_DEFAULT",
@@ -300,6 +327,7 @@ describe("SMS administration", () => {
     expect(await prisma.smsTemplate.findUnique({ where: { id: keep.id } })).not.toBeNull();
   });
 
+  // 미사용 템플릿은 삭제, 사용 템플릿은 보관하고 두 결과 모두 재생
   it("deletes unused templates, archives used templates, and replays both outcomes", async () => {
     const unused = await service.createTemplate({
       key: `UNUSED_${randomUUID().replaceAll("-", "").toUpperCase()}`,

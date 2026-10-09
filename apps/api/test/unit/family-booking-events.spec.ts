@@ -8,7 +8,9 @@ import {
 } from "../../src/modules/family-bookings/family-bookings.controller.js";
 import { FamilyBookingsManagementService } from "../../src/modules/family-bookings/family-bookings-management.service.js";
 
+// 예약 감사 이벤트 응답 형식과 관리자 예약 DTO
 describe("family booking audit event response contract", () => {
+  // OpenAPI BookingAuditEvent 형식으로 응답하고 저장소 필드명을 노출하지 않음
   it("returns the OpenAPI BookingAuditEvent shape without persistence field names", async () => {
     const occurredAt = new Date("2026-07-17T10:00:00Z");
     const prisma = {
@@ -38,6 +40,7 @@ describe("family booking audit event response contract", () => {
     expect(response.items[0]).not.toHaveProperty("safeMetadata");
   });
 
+  // 기기 행이 삭제된 뒤에도 입장 당시 스캐너 스냅샷을 표시
   it("projects immutable scanner snapshots after the device relation is deleted", async () => {
     const occurredAt = new Date("2026-07-19T03:21:00Z");
     const scannerSnapshot = {
@@ -74,6 +77,7 @@ describe("family booking audit event response contract", () => {
     });
   });
 
+  // 관리자 취소 유형은 전화·선생님·기타 세 가지만 허용
   it("accepts only the three administrator cancellation types", async () => {
     for (const cancellationType of ["PHONE", "TEACHER", "OTHER"] as const) {
       expect(await validate(Object.assign(new AdminCancelDto(), { expectedVersion: 1, cancellationType }))).toHaveLength(0);
@@ -88,6 +92,7 @@ describe("family booking audit event response contract", () => {
     }))).not.toHaveLength(0);
   });
 
+  // 관리자 생성 사유는 생략 가능하고 길이 제한된 기본 사유를 만들며, 변경 사유는 계속 필수
   it("allows an omitted admin-create reason, derives a bounded audit reason, and keeps update reasons mandatory", async () => {
     const create = Object.assign(new AdminCreateDto(), {
       seminarSessionId: "00000000-0000-4000-8000-000000000101",

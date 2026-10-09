@@ -21,14 +21,25 @@ import { BookingCryptoService } from "../../src/modules/family-bookings/booking-
 import { SheetOutboxService } from "../../src/modules/google-sheets/sheet-outbox.service.js";
 import { CheckInsService } from "../../src/modules/check-ins/check-ins.service.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
   return copy;
 }
 
+/**
+ * 세션 콜백이 즉시 성공하는 최소 요청
+ *
+ * @param sessionId 세션 ID
+ */
 function request(sessionId: string): Request {
   const session = {
     regenerate: (callback: (error?: Error) => void) => callback(),
@@ -38,16 +49,33 @@ function request(sessionId: string): Request {
   return { ip: "127.0.0.1", sessionID: sessionId, session } as unknown as Request;
 }
 
+// 스캐너 페어링·해제 동시성 통합 테스트. PostgreSQL·Redis 컨테이너 사용
 describe("scanner pairing and unpair concurrency", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // Redis 컨테이너
   let redisContainer: StartedTestContainer;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // Redis 클라이언트
   let redis: RedisService;
+
+  // 스캐너 기기 서비스
   let service: ScannerDevicesService;
+
+  // 테스트 실행 환경
   let environment: AppEnvironment;
+
+  // 연락처 보호
   let phoneProtector: PhoneProtector;
+
+  // 문자 대기열
   let smsOutbox: SmsOutboxService;
 
+  // 컨테이너 기동, 마이그레이션, 서비스 구성
   beforeAll(async () => {
     [postgres, redisContainer] = await Promise.all([
       new GenericContainer("postgres:18-alpine")
@@ -97,12 +125,14 @@ describe("scanner pairing and unpair concurrency", () => {
     smsOutbox = new SmsOutboxService(phoneProtector, new SmsMessagePolicy());
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await prisma?.$disconnect();
     await redis?.onModuleDestroy();
     await Promise.all([postgres?.stop(), redisContainer?.stop()]);
   });
 
+  // 코드 사용과 코드 취소가 경합하면 결과는 하나만 성공
   it("allows exactly one outcome when claim races pairing-code cancellation", async () => {
     const issued = await service.createPairing({ branchCode: "CAMPUS_A", name: "Gate", gateCode: "G1" }, "admin-test", "create-pairing-race-key");
     if (!("pairingCode" in issued)) throw new Error("expected fresh pairing code");
@@ -116,6 +146,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect((rejected as PromiseRejectedResult).reason).toBeInstanceOf(DomainError);
   });
 
+  // 발급 재생은 원문 코드 없이, 사용 재생은 두 번째 기기 없이 처리
   it("replays pairing creation without the raw code and claim without a second device", async () => {
     const input = { branchCode: "CAMPUS_B" as const, name: "Replay Gate", gateCode: "R1" };
     const fresh = await service.createPairing(input, "admin-replay", "pairing-create-replay-key");
@@ -131,6 +162,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await prisma.scannerPairingAudit.count({ where: { scannerDevice: { publicId: claimed.device.deviceId }, eventType: "PAIRING_CLAIM" } })).toBe(1);
   });
 
+  // 기기 필터와 페이지가 일치하는 6건 전체를 다루고 총건수를 5로 자르지 않음
   it("filters scanner devices and paginates all six matching rows without capping the total at five", async () => {
     const [campusC, campusA] = await Promise.all([
       prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_C" } }),
@@ -164,6 +196,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(otherBranch.page.totalItems).toBe(1);
   });
 
+  // Redis 접속 표시와 상태 보고 응답이 정확히 60초 창 사용
   it("uses an exact 60-second presence window in Redis and in the heartbeat response", async () => {
     const branch = await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_C" } });
     const device = await prisma.scannerDevice.create({
@@ -175,6 +208,7 @@ describe("scanner pairing and unpair concurrency", () => {
     await service.deleteDevice(device.publicId, "ttl-test", "ttl-device-delete-key");
   });
 
+  // 기기 삭제는 멱등이며 감사는 함께 삭제, 입장 기록은 유지, 런타임 상태는 정리
   it("hard-deletes a device idempotently while cascading audits, retaining check-ins, and clearing runtime state", async () => {
     const branch = await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_A" } });
     const session = await prisma.seminarSession.findUniqueOrThrow({ where: { publicId: "00000000-0000-4000-8000-000000000102" } });
@@ -259,6 +293,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await redis.client.exists(`${redis.prefix}session:admin-session-b`)).toBe(0);
   });
 
+  // 동시 자가 해제도 삭제하고 재생 요청의 세션까지 모두 파기
   it("hard-deletes on concurrent self-unpair and destroys every replaying request session", async () => {
     const branch = await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_A" } });
     const device = await prisma.scannerDevice.create({
@@ -296,6 +331,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(replayDestroy).toHaveBeenCalledOnce();
   });
 
+  // 삭제 정리 이후 등록된 스캐너 세션도 제거
   it("removes a scanner session that is registered after delete cleanup has already run", async () => {
     const issued = await service.createPairing(
       { branchCode: "CAMPUS_B", name: "Late Session", gateCode: "RACE-SESSION" },
@@ -351,6 +387,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await redis.client.exists(`${redis.prefix}scanner:presence:${deviceId}`)).toBe(0);
   });
 
+  // 관리자 계정 준비는 멱등이며 명시했을 때만 비밀번호 교체
   it("bootstraps an administrator idempotently and rotates only when explicit", async () => {
     const initialPassword = "Initial-Admin-Secret-2026!";
     const rotatedPassword = "Rotated-Admin-Secret-2026!";
@@ -375,6 +412,7 @@ describe("scanner pairing and unpair concurrency", () => {
     expect(await prisma.authAudit.count({ where: { adminUserId: after.id, eventType: "ADMIN_BOOTSTRAP" } })).toBe(2);
   });
 
+  // admin/admin은 격리 QA 플래그가 있을 때만 허용
   it("allows admin/admin only behind the explicit isolated-QA bootstrap flag", async () => {
     await expect(bootstrapAdmin(prisma, {
       username: "admin", displayName: "QA Admin", password: "admin", rotate: true,
@@ -400,6 +438,7 @@ describe("scanner pairing and unpair concurrency", () => {
     }
   });
 
+  // 첫 QR·수동 입장을 시트에 반영하고 스캐너 표시 정보를 반환
   it("projects first QR and manual check-ins to Sheets and returns scanner display fields", async () => {
     const branch = await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_A" } });
     const session = await prisma.seminarSession.findUniqueOrThrow({ where: { publicId: "00000000-0000-4000-8000-000000000102" } });
@@ -458,6 +497,7 @@ describe("scanner pairing and unpair concurrency", () => {
       .toBeGreaterThanOrEqual(2);
   });
 
+  // 같은 문자 이벤트를 동시 트랜잭션에서 적재해도 1건만 저장
   it("deduplicates the same SMS domain event under concurrent transactions", async () => {
     const contact = phoneProtector.protect("01000000011");
     const input = {
@@ -478,6 +518,7 @@ describe("scanner pairing and unpair concurrency", () => {
     await prisma.smsOutbox.updateMany({ where: { eventKeyDigest: bytes(digest) }, data: { status: "BLOCKED_DISABLED" } });
   });
 
+  // 동시 워커가 행을 한 번씩만 점유하고 접수 불명은 재시도하지 않음
   it("claims each row once across concurrent workers and never retries unknown acceptance", async () => {
     const sent = vi.fn().mockResolvedValue({ kind: "SENT", providerMessageId: "test-message", providerResultCode: 1, providerMessageType: "SMS" });
     const gateway = { send: sent } as unknown as AligoGateway;

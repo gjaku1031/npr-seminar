@@ -1,4 +1,8 @@
+# GCP 게이트웨이 Caddy 설정. 공개 도메인 요청을 WireGuard 너머 PVE 릴리스 서버의 Caddy upstream(3001)으로 전달
+# HTTPS 인증서는 Caddy 자동 발급
 survey.example.kr {
+	# 응답 압축
 	encode zstd gzip
+	# WireGuard 로 연결된 PVE 릴리스 서버 upstream
 	reverse_proxy 10.10.10.165:3001
 }

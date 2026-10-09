@@ -1,7 +1,12 @@
+// 동기화 완료 뒤 학생 명부를 다시 읽을지 판정하는 규칙 테스트
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { shouldRefreshStudentsAfterSync, type ObservedSyncRun } from "./sync-status-freshness";
 
+/**
+ * 테스트 관측 실행 생성
+ */
 const run = (identity: string, status: ObservedSyncRun["status"]): ObservedSyncRun => ({ identity, status });
 
 test("첫 상태 로드와 실행 중 발견은 명부 재조회를 만들지 않는다", () => {

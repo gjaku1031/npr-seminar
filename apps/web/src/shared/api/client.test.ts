@@ -1,9 +1,9 @@
 /**
- * 바이너리 다운로드 코어 테스트 (node:test + tsx).
+ * 바이너리 다운로드 코어 테스트 (node:test + tsx)
  *
  * 여기서 지키려는 것 둘:
- *   1. `parseContentDispositionFilename` 이 RFC5987 을 우선하고, 깨진 인코딩이면 안전하게 물러난다.
- *   2. `apiDownload` 가 GET 으로 same-origin `/api/v1` 을 부르고 Blob·파일명·타입을 돌려준다.
+ *   1. `parseContentDispositionFilename` 이 RFC5987 을 우선하고, 깨진 인코딩이면 안전하게 물러남
+ *   2. `apiDownload` 가 GET 으로 same-origin `/api/v1` 을 부르고 Blob·파일명·타입을 돌려줌
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -88,8 +88,8 @@ describe("apiDownload", () => {
 
 /**
  * DELETE 요청의 헤더 배선 — If-Match(낙관적 잠금 version)·Idempotency-Key·X-CSRF-Token 이
- * 함께 나가야 한다. CSRF 만료로 403 을 맞아 토큰을 새로 받아 재시도할 때도 If-Match 와
- * Idempotency-Key 는 **같은 값**이 다시 나가야 서버가 리플레이로 인식한다.
+ * 함께 나가야 함. CSRF 만료로 403 을 맞아 토큰을 새로 받아 재시도할 때도 If-Match 와
+ * Idempotency-Key 는 같은 값이 다시 나가야 서버가 리플레이로 인식함
  */
 describe("apiRequest DELETE — If-Match·Idempotency-Key·CSRF", () => {
   const realFetch = globalThis.fetch;
@@ -155,7 +155,7 @@ describe("apiRequest DELETE — If-Match·Idempotency-Key·CSRF", () => {
         csrf: headers.get("x-csrf-token"),
       });
       deleteAttempts += 1;
-      // 첫 시도는 CSRF 실패로 403 — 클라이언트가 토큰을 버리고 한 번 재시도해야 한다.
+      // 첫 시도는 CSRF 실패로 403 — 클라이언트가 토큰을 버리고 한 번 재시도해야 함
       if (deleteAttempts === 1) {
         return new Response(
           JSON.stringify({ status: 403, code: "CSRF_TOKEN_INVALID", title: "CSRF 토큰이 만료됐어요." }),
@@ -172,12 +172,12 @@ describe("apiRequest DELETE — If-Match·Idempotency-Key·CSRF", () => {
     });
 
     assert.equal(sent.length, 2);
-    // 두 시도의 If-Match·Idempotency-Key 는 동일해야 리플레이로 인식된다.
+    // 두 시도의 If-Match·Idempotency-Key 는 동일해야 리플레이로 인식됨
     assert.equal(sent[0]!.ifMatch, "9");
     assert.equal(sent[1]!.ifMatch, "9");
     assert.equal(sent[0]!.idempotencyKey, "op-del-1");
     assert.equal(sent[1]!.idempotencyKey, "op-del-1");
-    // CSRF 토큰은 새로 받은 값으로 갱신된다.
+    // CSRF 토큰은 새로 받은 값으로 갱신됨
     assert.equal(sent[0]!.csrf, "csrf-1");
     assert.equal(sent[1]!.csrf, "csrf-2");
   });
@@ -185,10 +185,10 @@ describe("apiRequest DELETE — If-Match·Idempotency-Key·CSRF", () => {
 
 /**
  * FormData 본문 배선(포스터 업로드) — 클라이언트 확장의 핵심 계약:
- *   1. Content-Type 을 **코드가 설정하지 않는다** → 브라우저가 multipart boundary 를 채운다.
- *   2. multipart 필드가 그대로 실린다.
+ *   1. Content-Type 을 코드가 설정하지 않는다 → 브라우저가 multipart boundary 를 채움
+ *   2. multipart 필드가 그대로 실림
  *   3. 상태 변경이라 X-CSRF-Token 이 붙고, CSRF 만료 403 이면 새 토큰으로 재시도하되
- *      Idempotency-Key 는 동일하게 유지된다(서버가 리플레이로 인식).
+ *      Idempotency-Key 는 동일하게 유지됨(서버가 리플레이로 인식)
  */
 describe("apiRequest FormData — Content-Type 미설정·필드·CSRF·Idempotency-Key", () => {
   const realFetch = globalThis.fetch;
@@ -230,7 +230,7 @@ describe("apiRequest FormData — Content-Type 미설정·필드·CSRF·Idempote
     await apiRequest("/admin/poster", { method: "PUT", body: form, idempotencyKey: "op-put-1" });
 
     assert.equal(seen.length, 1);
-    // 코드가 Content-Type 을 붙이지 않았다 — 브라우저가 boundary 를 채울 자리를 남긴다.
+    // 코드가 Content-Type 을 붙이지 않았음 — 브라우저가 boundary 를 채울 자리를 남김
     assert.equal(seen[0]!.contentType, null);
     assert.equal(seen[0]!.csrf, "csrf-1");
     assert.equal(seen[0]!.idempotencyKey, "op-put-1");
@@ -274,13 +274,13 @@ describe("apiRequest FormData — Content-Type 미설정·필드·CSRF·Idempote
     await apiRequest("/admin/poster", { method: "PUT", body: form, idempotencyKey: "op-put-2" });
 
     assert.equal(seen.length, 2);
-    // 두 시도 모두 Content-Type 미설정 + 같은 멱등 키 + poster 필드.
+    // 두 시도 모두 Content-Type 미설정 + 같은 멱등 키 + poster 필드
     assert.equal(seen[0]!.contentType, null);
     assert.equal(seen[1]!.contentType, null);
     assert.equal(seen[0]!.idempotencyKey, "op-put-2");
     assert.equal(seen[1]!.idempotencyKey, "op-put-2");
     assert.ok((seen[1]!.body as FormData).get("poster") instanceof Blob);
-    // CSRF 는 새 값으로 갱신된다.
+    // CSRF 는 새 값으로 갱신됨
     assert.equal(seen[0]!.csrf, "csrf-1");
     assert.equal(seen[1]!.csrf, "csrf-2");
   });
@@ -344,7 +344,7 @@ describe("apiRequest readOnlyPost — 조회 전용 무세션 경계", () => {
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
 
-    // 다른 변경 경로, 쿼리 문자열 우회, 트레일링 슬래시, 경로 조작, 관리자 경로 모두 거절한다.
+    // 다른 변경 경로, 쿼리 문자열 우회, 트레일링 슬래시, 경로 조작, 관리자 경로 모두 거절함
     const rejectedPaths = [
       "/public/family-bookings/00000000-0000-4000-8000-000000000000/cancel",
       "/public/family-bookings/lookup?bypass=1",
@@ -368,7 +368,7 @@ describe("apiRequest readOnlyPost — 조회 전용 무세션 경계", () => {
       TypeError,
     );
 
-    // 어떤 요청도 네트워크로 나가지 않았다 — 경계는 fetch·CSRF 이전에 닫힌다.
+    // 어떤 요청도 네트워크로 나가지 않았음 — 경계는 fetch·CSRF 이전에 닫힘
     assert.equal(fetchCalls, 0);
   });
 });

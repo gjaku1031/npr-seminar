@@ -1,12 +1,12 @@
 /**
- * 가족 예약 이력 수집 테스트 (node:test + tsx).
+ * 가족 예약 이력 수집 테스트 (node:test + tsx)
  *
- * 여기서 지키려는 것 하나: **이력을 끝까지 읽는가.**
+ * 여기서 지키려는 것 하나: 이력을 끝까지 읽는가
  *
- * 이 엔드포인트는 sequence 오름차순 + `afterSequence` 커서다. 첫 페이지만 읽으면 손에 남는 건
- * *가장 오래된* 기록이고 최신 기록은 통째로 빠진다 — 그런데도 "최근 것만 보여 준다"고 말하면
- * 사실과 정반대다. 그래서 두 번째 페이지가 **서버가 준 커서로** 실제로 요청되는지, 그리고
- * 마지막 이벤트가 결과에 들어오는지 본다.
+ * 이 엔드포인트는 sequence 오름차순 + `afterSequence` 커서임. 첫 페이지만 읽으면 손에 남는 건
+ * *가장 오래된* 기록이고 최신 기록은 통째로 빠짐 — 그런데도 "최근 것만 보여 준다"고 말하면
+ * 사실과 정반대임. 그래서 두 번째 페이지가 서버가 준 커서로 실제로 요청되는지, 그리고
+ * 마지막 이벤트가 결과에 들어오는지 봄
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -29,8 +29,14 @@ import type {
 } from "./contract";
 import { isAborted } from "./problem";
 
+/**
+ * 테스트 예약 ID
+ */
 const BOOKING_ID = "22222222-2222-4222-8222-222222222222";
 
+/**
+ * 테스트 예약 이력 이벤트 생성
+ */
 const event = (id: string, sequence: string): BookingAuditEvent => ({
   eventId: id,
   sequence,
@@ -43,12 +49,17 @@ const event = (id: string, sequence: string): BookingAuditEvent => ({
   occurredAt: "2026-07-15T02:00:00.000Z",
 });
 
+/**
+ * 테스트 후 되돌릴 원래 fetch
+ */
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** 페이지들을 차례로 내주면서 요청 URL 을 붙잡는다 — 진짜 서버는 없다. */
+/**
+ * 페이지들을 차례로 내주면서 요청 URL 을 붙잡음 — 진짜 서버는 없음
+ */
 function serve(pages: BookingAuditEventPage[]): { urls: string[] } {
   const urls: string[] = [];
   let call = 0;
@@ -63,6 +74,9 @@ function serve(pages: BookingAuditEventPage[]): { urls: string[] } {
   return { urls };
 }
 
+/**
+ * 요청 URL 의 query 파라미터 추출
+ */
 const query = (raw: string) => new URL(raw, "https://example.test").searchParams;
 
 describe("collectFamilyBookingEvents — 이력 전부", () => {
@@ -75,14 +89,14 @@ describe("collectFamilyBookingEvents — 이력 전부", () => {
     const events = await collectFamilyBookingEvents(BOOKING_ID);
 
     assert.equal(captured.urls.length, 2);
-    // 첫 장은 커서 없이 — 서버 기본값('0')부터다.
+    // 첫 장은 커서 없이 — 서버 기본값('0')부터임
     assert.equal(query(captured.urls[0]!).has("afterSequence"), false);
-    // 두 번째 장은 **첫 장이 돌려준 커서 그대로**. 이게 빠지면 같은 첫 장만 되풀이한다.
+    // 두 번째 장은 첫 장이 돌려준 커서 그대로. 이게 빠지면 같은 첫 장만 되풀이함
     assert.equal(query(captured.urls[1]!).get("afterSequence"), "20");
-    // 계약 최대치로 읽어 왕복을 줄인다.
+    // 계약 최대치로 읽어 왕복을 줄임
     assert.equal(query(captured.urls[0]!).get("limit"), String(BOOKING_EVENT_PAGE_LIMIT_MAX));
 
-    // 첫 장만 읽었다면 e3(가장 최신)이 없다 — 그게 정확히 이 테스트가 막는 회귀다.
+    // 첫 장만 읽었다면 e3(가장 최신)이 없음 — 그게 정확히 이 테스트가 막는 회귀임
     assert.deepEqual(
       events.map((e) => e.eventId),
       ["e1", "e2", "e3"],
@@ -127,14 +141,14 @@ describe("collectFamilyBookingEvents — 이력 전부", () => {
   });
 
   it("커서가 유효한 10진수 sequence 가 아니면(첫 커서 포함) 던진다", async () => {
-    // 첫 장이 곧장 망가진 커서를 줘도 잘린 목록을 전부인 척하지 않는다.
+    // 첫 장이 곧장 망가진 커서를 줘도 잘린 목록을 전부인 척하지 않음
     serve([{ items: [event("e1", "10")], page: { nextAfterSequence: "20-bad", hasMore: true } }]);
 
     await assert.rejects(() => collectFamilyBookingEvents(BOOKING_ID), /끝까지 읽지 못했어요/);
   });
 
   it("커서가 거꾸로 가면(순환 20→10→20 포함) 던진다", async () => {
-    // 직전 값하고만 비교하면(20→10 은 다르니 통과) 20↔10 을 영원히 오간다. 엄격히 커야 막힌다.
+    // 직전 값하고만 비교하면(20→10 은 다르니 통과) 20↔10 을 영원히 오감. 엄격히 커야 막힘
     serve([
       { items: [event("e1", "10")], page: { nextAfterSequence: "20", hasMore: true } },
       { items: [event("e2", "20")], page: { nextAfterSequence: "10", hasMore: true } },
@@ -145,8 +159,8 @@ describe("collectFamilyBookingEvents — 이력 전부", () => {
   });
 
   it("Number 로 좁히면 같아 보이는 큰 커서도 BigInt 로는 나아가 끝까지 읽는다", async () => {
-    // 9007199254740993 은 Number 로 바꾸면 992 로 반올림돼 직전 992 와 같아 보인다 —
-    // 그러면 진짜 진전을 "제자리"로 오해해 이력을 잘라 버린다. BigInt 비교라야 나아간다.
+    // 9007199254740993 은 Number 로 바꾸면 992 로 반올림돼 직전 992 와 같아 보임 —
+    // 그러면 진짜 진전을 "제자리"로 오해해 이력을 잘라 버림. BigInt 비교라야 나아감
     serve([
       { items: [event("e1", "1")], page: { nextAfterSequence: "9007199254740992", hasMore: true } },
       { items: [event("e2", "2")], page: { nextAfterSequence: "9007199254740993", hasMore: true } },
@@ -166,7 +180,7 @@ describe("collectFamilyBookingEvents — 이력 전부", () => {
       { items: [event("e1", "10")], page: { nextAfterSequence: "10", hasMore: true } },
       { items: [event("e2", "20")], page: { nextAfterSequence: null, hasMore: false } },
     ]);
-    // 첫 장을 내주자마자 끊는다 — 모달을 닫은 상황이다.
+    // 첫 장을 내주자마자 끊음 — 모달을 닫은 상황임
     const serveOne = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await serveOne(input, init);
@@ -177,7 +191,7 @@ describe("collectFamilyBookingEvents — 이력 전부", () => {
     await assert.rejects(() => collectFamilyBookingEvents(BOOKING_ID, controller.signal), (caught: unknown) =>
       isAborted(caught),
     );
-    // 두 번째 장을 부르지 않았다 — 훅은 이걸 조용히 무시한다(빈 오류를 그리지 않는다).
+    // 두 번째 장을 부르지 않았음 — 훅은 이걸 조용히 무시함(빈 오류를 그리지 않음)
     assert.equal(captured.urls.length, 1);
   });
 });
@@ -244,7 +258,7 @@ describe("cancelAdminFamilyBooking — 취소 본문은 정확히 {expectedVersi
     cancelledAt: "2026-07-15T03:00:00.000Z",
   };
 
-  /** CSRF 부트스트랩과 취소 POST 를 함께 처리하면서 POST 본문을 붙잡는다. */
+  // CSRF 부트스트랩과 취소 POST 를 함께 처리하면서 POST 본문을 붙잡음
   function serveCancel(): { bodies: string[] } {
     const bodies: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -274,9 +288,9 @@ describe("cancelAdminFamilyBooking — 취소 본문은 정확히 {expectedVersi
 
     assert.equal(captured.bodies.length, 1);
     const parsed = JSON.parse(captured.bodies[0]!) as Record<string, unknown>;
-    // 본문은 정확히 이 두 키다 — 자유 사유는 실리지 않는다.
+    // 본문은 정확히 이 두 키임 — 자유 사유는 실리지 않음
     assert.deepEqual(parsed, { expectedVersion: 7, cancellationType: "TEACHER" });
-    // undefined 로 담긴 것도 아니고, 키 자체가 없어야 한다.
+    // undefined 로 담긴 것도 아니고, 키 자체가 없어야 함
     assert.equal("reason" in parsed, false);
   });
 });
@@ -307,7 +321,7 @@ describe("가족 예약 생성 — reason 은 선택이라 없으면 본문에�
     },
   };
 
-  /** CSRF 부트스트랩과 생성 POST 를 함께 처리하면서 POST 본문을 붙잡는다. */
+  // CSRF 부트스트랩과 생성 POST 를 함께 처리하면서 POST 본문을 붙잡음
   function serveCreate(): { bodies: string[] } {
     const bodies: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

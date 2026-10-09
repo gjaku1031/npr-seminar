@@ -1,3 +1,5 @@
+# QA 진입 프록시. 소켓으로 받은 연결을 web(127.0.0.1:3100)으로 중계
+# web 재시작 중에도 3000 포트 연결을 소켓이 붙잡아 둠
 [Unit]
 Description=NPR Seminar QA front door proxy to web 3100
 Requires=npr-seminar-qa-frontdoor.socket
@@ -8,6 +10,7 @@ Type=simple
 User=nobody
 Group=nogroup
 ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3100
+# 샌드박스
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

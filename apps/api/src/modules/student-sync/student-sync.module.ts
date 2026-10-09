@@ -15,6 +15,12 @@ import { TongTongTongGateway } from "./tongtontong.gateway.js";
 import { AdminAuthModule } from "../admin-auth/admin-auth.module.js";
 import type { AppEnvironment } from "../../common/config/environment.js";
 
+/**
+ * 학생 동기화 모듈
+ *
+ * 통통통 연동 사용 설정이면 HTTP 게이트웨이, 아니면 비활성 게이트웨이를 TongTongTongGateway로 제공
+ * 테스트에서 교체할 수 있도록 fetch를 TONG_HTTP_FETCH로 주입
+ */
 @Module({
   imports: [AdminAuthModule],
   controllers: [StudentSyncController],

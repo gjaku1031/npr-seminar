@@ -27,27 +27,60 @@ import { SmsTemplateCatalog } from "../../src/modules/sms/sms-template-catalog.s
 import { SmsTemplateRenderer } from "../../src/modules/sms/sms-template-renderer.service.js";
 import { QrTokenProtector } from "../../src/modules/family-bookings/qr-token-protector.service.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy;
 }
 
+// 가족 예약 수명 주기 통합 테스트. PostgreSQL 컨테이너에 마이그레이션을 적용해 실제 SQL로 검증
 describe("family booking lifecycle", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // 연락처 보호
   let protector: PhoneProtector;
+
+  // 토큰 다이제스트
   let crypto: BookingCryptoService;
+
+  // 예약 증명
   let proofService: BookingProofService;
+
+  // 예약 생성 서비스
   let bookings: FamilyBookingsService;
+
+  // 예약 관리 서비스
   let management: FamilyBookingsManagementService;
+
+  // QR 서비스
   let qr: QrService;
+
+  // 체크인 서비스
   let checkIns: CheckInsService;
+
+  // 게시 완료 동기화 실행 ID
   let runId: bigint;
+
+  // A 지점 ID
   let branchId: bigint;
+
+  // 테스트 실행 환경
   let environment: AppEnvironment;
+
+  // 시트 반영 대기열
   let sheetOutbox: SheetOutboxService;
 
+  // 컨테이너 기동, 마이그레이션 적용, 지점·동기화 실행·서비스 구성
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_family" })
@@ -89,8 +122,13 @@ describe("family booking lifecycle", () => {
     branchId = (await prisma.branch.findUniqueOrThrow({ where: { code: "CAMPUS_A" } })).id;
   });
 
+  // DB 연결 종료와 컨테이너 정지
   afterAll(async () => { await prisma?.$disconnect(); await postgres?.stop(); });
 
+  /**
+   * 공개 설명회의 OPEN 회차 생성
+   * @param withSheet true면 시트 매핑도 생성
+   */
   async function session(withSheet = false) {
     const seminar = await prisma.seminar.findFirstOrThrow({ where: { status: "PUBLISHED" } });
     const created = await prisma.seminarSession.create({ data: {
@@ -106,6 +144,10 @@ describe("family booking lifecycle", () => {
     return created;
   }
 
+  /**
+   * 지정 연락처·용도의 VERIFIED 예약 증명 생성. 새 예약 용도는 A 캠퍼스로 고정
+   * @returns 증명 원문
+   */
   async function proof(phone: string, purpose: "FAMILY_BOOKING" | "BOOKING_MANAGE") {
     const raw = randomBytes(32).toString("base64url");
     const contact = protector.protect(phone);
@@ -118,6 +160,7 @@ describe("family booking lifecycle", () => {
     return raw;
   }
 
+  // 지정 연락처를 어머니 연락처로 가진 A 재원생 생성
   async function student(
     phone: string,
     side: "MOTHER" | "FATHER",
@@ -138,6 +181,7 @@ describe("family booking lifecycle", () => {
     } });
   }
 
+  // 어머니·아버지 연락처를 모두 가진 재원생 생성
   async function studentWithParents(motherPhone: string, fatherPhone: string) {
     const mother = protector.protect(motherPhone);
     const father = protector.protect(fatherPhone);
@@ -152,6 +196,7 @@ describe("family booking lifecycle", () => {
     return created;
   }
 
+  // 학생의 활성 수강 등록 생성
   async function assignment(studentId: bigint, className: string, teacherName: string) {
     return prisma.studentClassAssignment.create({ data: {
       studentId,
@@ -165,6 +210,10 @@ describe("family booking lifecycle", () => {
     } });
   }
 
+  /**
+   * 공개 비재원생 예약 생성
+   * @returns 예약 결과, 사용한 증명 원문, 대상 회차, 멱등 키
+   */
   async function guestBooking(
     phone: string,
     target?: Awaited<ReturnType<typeof session>>,
@@ -180,6 +229,7 @@ describe("family booking lifecycle", () => {
     return { result, rawProof, target: selectedSession, key };
   }
 
+  // 비재원생 내부 번호는 충돌 없이 부여되고 재생·목록 응답은 비밀 값을 노출하지 않음
   it("creates a guest with a collision-free internal number and keeps replay/list ownership secret-safe", async () => {
     const phone = "01020001001";
     const created = await guestBooking(phone);
@@ -213,6 +263,7 @@ describe("family booking lifecycle", () => {
     expect(serialized).not.toContain(created.result.qrToken!);
   });
 
+  // 상위 설명회가 공개되지 않은 OPEN 회차는 예약 거부
   it("rejects a guessed open session whose parent seminar is not published", async () => {
     const unpublished = await prisma.seminar.create({ data: { title: `비공개 ${randomUUID()}`, status: "DRAFT" } });
     const hiddenSession = await prisma.seminarSession.create({ data: {
@@ -234,6 +285,7 @@ describe("family booking lifecycle", () => {
     expect(await prisma.familyBooking.count({ where: { sessionId: hiddenSession.id } })).toBe(0);
   });
 
+  // 어머니·아버지 연락처 소유를 정확히 확인하고 같은 연락처 동시 생성은 하나만 성공
   it("accepts exact mother or father ownership and deduplicates concurrent same-contact creates", async () => {
     for (const side of ["MOTHER", "FATHER"] as const) {
       const phone = side === "MOTHER" ? "01020002001" : "01020002002";
@@ -255,6 +307,7 @@ describe("family booking lifecycle", () => {
     expect(await prisma.familyBooking.count({ where: { sessionId: target.id, status: "RESERVED" } })).toBe(1);
   });
 
+  // 관리자 취소 유형을 추가 전용 감사 이벤트에 저장
   it("persists the constrained administrator cancellation type on the append-only audit event", async () => {
     const created = await guestBooking("01020002501");
     const actorSubject = randomUUID();
@@ -279,6 +332,7 @@ describe("family booking lifecycle", () => {
     });
   });
 
+  // 취소 문자 내용과 발신 지점은 취소 직전 활성 참가자만으로 구성
   it("builds cancellation SMS content and sender branch from only the pre-cancel active participants", async () => {
     const phone = "01020002503";
     const target = await session();
@@ -332,6 +386,7 @@ describe("family booking lifecycle", () => {
     }
   });
 
+  // 롤백 기간 형식의 취소 이벤트 삽입도 분류하되 추가 전용 제약은 유지
   it("classifies rollback-era cancellation inserts without weakening append-only audit events", async () => {
     const created = await guestBooking("01020002502");
     const booking = await prisma.familyBooking.findUniqueOrThrow({
@@ -363,6 +418,7 @@ describe("family booking lifecycle", () => {
     })).rejects.toThrow();
   });
 
+  // QR을 비밀 안전하게 재발급하고, 외래 키·시트를 유지한 채 회차 이동 후 취소
   it("rotates QR secret-safely, moves session with FK/Sheets intact, then cancels", async () => {
     const phone = "01020003001";
     const source = await session(true);
@@ -470,6 +526,7 @@ describe("family booking lifecycle", () => {
     })).toBe(0);
   });
 
+  // 비재원생 생성·변경·취소 반영을 처리하고 만료된 워커 lease를 정리
   it("drains durable guest create/update/cancel deliveries and reconciles an expired worker lease", async () => {
     const phone = "01020003501";
     const source = await session(true);
@@ -557,6 +614,7 @@ describe("family booking lifecycle", () => {
     ]);
   });
 
+  // 늦게 처리되는 이전 반영도 현재 재예약 기준으로 투영하고 둘 다 참석 비재원생 연락처는 모 열에만 기록
   it("projects the current rebooking for late old deliveries and maps a BOTH guest contact to mother only", async () => {
     const phone = "01020003601";
     const target = await session(true);
@@ -620,6 +678,7 @@ describe("family booking lifecycle", () => {
     expect(JSON.stringify(safeMetadata)).not.toContain(phone);
   });
 
+  // 현재 재원생의 어머니·아버지 연락처, 현재 반 열, 대표 담임을 사용
   it("uses both current enrolled parent phones, current class columns, and the canonical primary teacher", async () => {
     const motherPhone = "01020003701";
     const fatherPhone = "01020003702";
@@ -667,6 +726,7 @@ describe("family booking lifecycle", () => {
     })).publicId);
   });
 
+  // 과학 강사는 예약·입장 스냅샷·시트 어디서도 담임으로 쓰지 않고 추적용으로만 유지
   it("keeps science instructors traceability-only across booking, check-in snapshots, and Sheets", async () => {
     const target = await session(true);
     const createClassifiedStudent = async (input: {
@@ -762,7 +822,7 @@ describe("family booking lifecycle", () => {
     expect(createdPayloadByBooking.get(scienceBooking.familyBookingId)?.teacherName).toBeNull();
     expect(createdPayloadByBooking.get(mathBooking.familyBookingId)?.teacherName).toBe("수학담임");
 
-    // Simulate a pre-policy snapshot to prove every current-evidence read path suppresses it.
+    // 정책 이전 스냅숏을 흉내 내 현재 근거를 읽는 모든 경로가 이를 숨기는지 확인
     await prisma.familyBookingStudent.update({
       where: { id: scienceLink.id },
       data: { teacherNameSnapshot: "과거누출담임" },
@@ -849,6 +909,7 @@ describe("family booking lifecycle", () => {
     expect(storedAssignments.map((entry) => entry.teacherName)).toEqual(["과학강사", "수학강사"]);
   });
 
+  // 회차 이동·취소, 입장·취소 경합에서 최종 결과는 하나만 성공
   it("allows one terminal outcome in move/cancel and check-in/cancel races", async () => {
     const phone = "01020004001";
     const source = await session();

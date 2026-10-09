@@ -4,44 +4,129 @@ import { IdempotencyService } from "../../common/idempotency/idempotency.service
 import { PrismaService } from "../../common/prisma/prisma.service.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
+/**
+ * 지점 코드
+ */
 type BranchCode = "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
+
+/**
+ * 회차 생성·변경 입력
+ */
 interface SessionInput {
+  /**
+   * 대상 범위
+   */
   readonly scope: "ALL" | "BRANCH";
+
+  /**
+   * 지점. BRANCH일 때만
+   */
   readonly branch: BranchCode | null;
+
+  /**
+   * 시작 시각(ISO 8601)
+   */
   readonly startsAt: string;
+
+  /**
+   * 종료 시각(ISO 8601)
+   */
   readonly endsAt: string;
+
+  /**
+   * 장소
+   */
   readonly location: string;
+
+  /**
+   * 예약 시작 시각
+   */
   readonly bookingOpensAt: string;
+
+  /**
+   * 예약 마감 시각
+   */
   readonly bookingClosesAt: string;
+
+  /**
+   * 비재원생 예약 허용 여부. 생성 시 생략하면 false
+   */
   readonly guestBookingEnabled?: boolean;
 }
 
+/**
+ * 회차 예약 운영 요약
+ */
 export interface SessionOperationsSummary {
-  activeBookingCount: number;
-  checkedInBookingCount: number;
-  uncheckedBookingCount: number;
-  cancelledBookingCount: number;
-  noShowBookingCount: number;
-  /** 예약 기준 예상 참석 인원(모/부 = 2). 실제로 온 사람 수가 아니다. */
-  attendeeCount: number;
   /**
-   * **실제로 입장한 사람 수.** 게이트에서 확정한 인원의 합이다.
+   * 활성 예약 수. 예약·입장 합
+   */
+  activeBookingCount: number;
+
+  /**
+   * 입장한 예약 수
+   */
+  checkedInBookingCount: number;
+
+  /**
+   * 미입장 예약 수
+   */
+  uncheckedBookingCount: number;
+
+  /**
+   * 취소 예약 수
+   */
+  cancelledBookingCount: number;
+
+  /**
+   * 미참석 예약 수
+   */
+  noShowBookingCount: number;
+
+  /**
+   * 예약 기준 예상 참석 인원(모/부 = 2). 실제 온 사람 수가 아님
+   */
+  attendeeCount: number;
+
+  /**
+   * 실제 입장 인원. 게이트에서 확정한 인원의 합
    *
-   * attendeeCount 와 다르다: 2명 예약에 한 분만 오면 예상은 2, 실제는 1이다. 운영 중에
-   * "지금 안에 몇 명 있나"를 답하는 것은 이 값뿐이다.
+   * attendeeCount와 다름. 2명 예약에 한 명만 오면 예상 2, 실제 1
+   * 운영 중 현재 입장 인원은 이 값으로만 알 수 있음
    */
   attendedPeopleCount: number;
 }
 
-/** 세미나·회차를 조회하고 변경 요청은 {@link IdempotencyService}의 트랜잭션에서 처리한다. */
+/**
+ * 설명회·회차 조회와 관리
+ *
+ * 변경 요청은 IdempotencyService 트랜잭션 안에서 처리
+ */
 @Injectable()
 export class SeminarsService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
   ) {}
 
-  /** 출간된 세미나의 열린 회차를 시작 시각순으로 반환하고 현재 시각 기준 예약 가능 상태를 계산한다. */
+  /**
+   * 공개 회차 조회
+   *
+   * 공개된 설명회의 OPEN 회차를 시작 시각순으로 반환하고 현재 시각 기준 예약 가능 상태 계산
+   * 예약 시작·마감이 없으면 회차 시작 시각 기준
+   *
+   * @param branch 지정하면 전 지점 회차와 해당 지점 회차만
+   */
   public async listPublic(branch?: BranchCode) {
     const now = new Date();
     const rows = await this.prisma.seminarSession.findMany({
@@ -67,20 +152,30 @@ export class SeminarsService {
     };
   }
 
-  /** 관리자의 세미나 목록을 생성 역순으로 반환하며 상태가 없으면 전체 상태를 조회한다. */
+  /**
+   * 설명회 목록. 생성 역순
+   *
+   * @param status 상태 필터. 생략하면 전체
+   */
   public async list(status?: string) {
     const rows = await this.prisma.seminar.findMany({ where: status === undefined ? {} : { status }, orderBy: { createdAt: "desc" } });
     return { items: rows.map((row) => this.seminar(row)), page: this.page(rows.length) };
   }
 
-  /** 세미나 상세를 반환하며 해당 UUID가 없으면 {@link DomainError} 404를 던진다. */
+  /**
+   * 설명회 상세
+   *
+   * @throws {DomainError} 404 SEMINAR_NOT_FOUND
+   */
   public async get(seminarId: string) {
     const row = await this.prisma.seminar.findUnique({ where: { publicId: seminarId } });
     if (row === null) this.fail(404, "SEMINAR_NOT_FOUND");
     return this.seminar(row);
   }
 
-  /** 멱등 키와 생성 입력으로 세미나를 저장하고 201 응답용 투영을 반환한다. */
+  /**
+   * 설명회 생성 후 201 응답
+   */
   public create(input: { title: string; description?: string | null }, key: string) {
     return this.idempotency.execute("SEMINAR_CREATE", key, input, async (transaction) => {
       const row = await transaction.seminar.create({ data: { title: input.title, description: input.description ?? null } });
@@ -88,7 +183,13 @@ export class SeminarsService {
     }, 201);
   }
 
-  /** 버전 조건으로 보관되지 않은 세미나를 수정한다. 대상·버전이 맞지 않으면 409를 던진다. */
+  /**
+   * 설명회 변경
+   *
+   * 보관되지 않았고 버전이 같은 행만 갱신
+   *
+   * @throws {DomainError} 409 대상 없음·버전 불일치·보관됨
+   */
   public update(seminarId: string, input: { expectedVersion: number; title?: string; description?: string | null; status?: string }, key: string) {
     return this.idempotency.execute("SEMINAR_UPDATE", key, { seminarId, ...input }, async (transaction) => {
       const changed = await transaction.seminar.updateMany({
@@ -105,7 +206,11 @@ export class SeminarsService {
     });
   }
 
-  /** 기대 버전이 일치하는 세미나를 보관하고 갱신된 투영을 반환한다. 불일치 시 409를 던진다. */
+  /**
+   * 설명회 보관
+   *
+   * @throws {DomainError} 409 대상 없음·버전 불일치
+   */
   public archive(seminarId: string, expectedVersion: number, reason: string, key: string) {
     return this.idempotency.execute("SEMINAR_ARCHIVE", key, { seminarId, expectedVersion, reason }, async (transaction) => {
       const changed = await transaction.seminar.updateMany({
@@ -117,7 +222,11 @@ export class SeminarsService {
     });
   }
 
-  /** 회차와 상태별 예약 요약을 반환한다. 테스트 예약도 집계하며 세미나가 없으면 404를 던진다. */
+  /**
+   * 설명회의 회차와 상태별 예약 운영 요약
+   *
+   * @throws {DomainError} 404 설명회 없음
+   */
   public async listSessions(seminarId: string) {
     const exists = await this.prisma.seminar.count({ where: { publicId: seminarId } });
     if (exists !== 1) this.fail(404, "SEMINAR_NOT_FOUND");
@@ -126,9 +235,8 @@ export class SeminarsService {
     });
     const statusCounts = rows.length === 0 ? [] : await this.prisma.familyBooking.groupBy({
       by: ["sessionId", "status", "attendanceParty"],
-      // 테스트 예약도 집계에 **포함**한다 — 당일 전에 숫자가 실제로 움직이는지 확인해야 하고,
-      // 그 확인은 실제 화면의 실제 집계로만 된다. 확인이 끝나면 그 예약을 취소해 정리한다.
-      // (구글시트 투영과 문자 대상은 여전히 분리한다 — 그건 집계가 아니라 외부로 나가는 것이다.)
+      // 테스트 예약도 집계에 포함함. 당일 전에 실제 화면 집계가 움직이는지 확인해야 하고, 확인 후 예약을 취소해 정리
+      // 시트 반영과 문자 대상에서는 계속 분리함. 그쪽은 집계가 아니라 외부로 나가는 동작
       where: { sessionId: { in: rows.map((row) => row.id) } },
       _count: { _all: true },
       _sum: { attendedCount: true },
@@ -148,8 +256,8 @@ export class SeminarsService {
           summary.activeBookingCount += count;
           summary.checkedInBookingCount += count;
           summary.attendeeCount += statusCount.attendanceParty === "BOTH" ? count * 2 : count;
-          // 실제 입장 인원은 예약 인원에서 파생하지 않는다 — 게이트가 확정한 값만 더한다.
-          // 도입 전 입장 건은 마이그레이션이 예약 인원으로 채웠으므로 null 이 남지 않는다.
+          // 실제 입장 인원은 예약 인원에서 파생하지 않고 게이트가 확정한 값만 더함
+          // 도입 전 입장 건은 마이그레이션이 예약 인원으로 채워 null이 남지 않음
           summary.attendedPeopleCount += statusCount._sum?.attendedCount ?? 0;
           break;
         case "CANCELLED":
@@ -169,7 +277,11 @@ export class SeminarsService {
     };
   }
 
-  /** 회차 상세 투영을 반환하며 해당 UUID가 없으면 404를 던진다. */
+  /**
+   * 회차 상세
+   *
+   * @throws {DomainError} 404 SEMINAR_SESSION_NOT_FOUND
+   */
   public async getSession(sessionId: string) {
     const row = await this.prisma.seminarSession.findUnique({ where: { publicId: sessionId }, include: { seminar: true, branch: true } });
     if (row === null) this.fail(404, "SEMINAR_SESSION_NOT_FOUND");
@@ -177,9 +289,12 @@ export class SeminarsService {
   }
 
   /**
-   * 멱등 트랜잭션에서 회차를 초안으로 생성하고 201 응답용 투영을 반환한다.
-   * 세미나가 없거나 보관 중이면 404, 범위·지점 또는 시간 순서가 유효하지 않으면 400을 던진다.
-   * 관리자 식별자가 있으면 게스트 예약 정책의 생성 감사 기록을 함께 저장한다.
+   * 회차 생성. DRAFT 상태로 저장 후 201 응답
+   *
+   * 관리자 식별자가 있으면 비재원생 예약 정책 생성 감사를 함께 저장
+   *
+   * @param actorSubject 감사 주체. 없으면 null
+   * @throws {DomainError} 404 설명회 없음·보관됨, 400 범위·지점·시각 순서 오류
    */
   public createSession(seminarId: string, input: SessionInput, key: string, actorSubject: string | null = null) {
     return this.idempotency.execute("SESSION_CREATE", key, { seminarId, ...input }, async (transaction) => {
@@ -208,9 +323,13 @@ export class SeminarsService {
   }
 
   /**
-   * 멱등 트랜잭션에서 회차 행을 FOR UPDATE로 잠근 뒤 버전과 범위·지점 쌍을 검사한다.
-   * 회차 부재는 404, 버전 충돌은 409, 잘못된 범위·지점 입력은 400을 던진다.
-   * 게스트 예약 허용 값이 바뀌면 감사 기록을 저장하고 갱신된 회차를 반환한다.
+   * 회차 변경
+   *
+   * 회차 행 FOR UPDATE 잠금 후 버전 확인. 범위와 지점은 함께 지정해야 함
+   * 비재원생 예약 허용 값이 바뀌면 감사 기록
+   * 시각 변경은 순서 검사를 하지 않음
+   *
+   * @throws {DomainError} 404 회차 없음, 409 버전 충돌, 400 범위·지점 입력 오류
    */
   public updateSession(sessionId: string, input: Partial<SessionInput> & { expectedVersion: number; status?: string }, key: string, actorSubject: string | null = null) {
     return this.idempotency.execute("SESSION_UPDATE", key, { sessionId, ...input }, async (transaction) => {
@@ -253,8 +372,11 @@ export class SeminarsService {
   }
 
   /**
-   * 멱등 트랜잭션에서 회차 버전과 예약 부재를 확인해 보관한다.
-   * 회차 부재는 404, 버전 충돌 또는 예약 존재는 409를 던지며 명시적 행 잠금은 사용하지 않는다.
+   * 회차 보관
+   *
+   * 버전 일치와 예약 없음 확인. 명시적 행 잠금은 사용하지 않음
+   *
+   * @throws {DomainError} 404 회차 없음, 409 버전 충돌·예약 있음
    */
   public archiveSession(sessionId: string, expectedVersion: number, reason: string, key: string) {
     return this.idempotency.execute("SESSION_ARCHIVE", key, { sessionId, expectedVersion, reason }, async (transaction) => {
@@ -270,7 +392,12 @@ export class SeminarsService {
     });
   }
 
-  /** 전체 지점이면 null을, 지점 회차면 활성 지점 ID를 반환한다. 잘못된 쌍·지점은 400을 던진다. */
+  /**
+   * 범위·지점 조합 확인과 지점 ID
+   *
+   * @returns 전 지점이면 null, 지점 회차면 활성 지점 ID
+   * @throws {DomainError} 400 잘못된 조합·비활성 지점
+   */
   private async branchId(transaction: Prisma.TransactionClient, scope: "ALL" | "BRANCH", branch: BranchCode | null) {
     if (scope === "ALL") {
       if (branch !== null) this.fail(400, "SESSION_SCOPE_BRANCH_INVALID");
@@ -282,18 +409,26 @@ export class SeminarsService {
     return row.id;
   }
 
-  /** 회차 시작·종료와 예약 시작·종료의 각 순서만 검사하며 잘못되면 400을 던진다. */
+  /**
+   * 회차 시작<종료, 예약 시작<마감 순서 확인. 두 구간 사이 관계는 검사하지 않음
+   *
+   * @throws {DomainError} 400 SESSION_TIME_INVALID
+   */
   private validateTimes(input: SessionInput): void {
     if (new Date(input.startsAt) >= new Date(input.endsAt)
       || new Date(input.bookingOpensAt) >= new Date(input.bookingClosesAt)) this.fail(400, "SESSION_TIME_INVALID");
   }
 
-  /** 세미나 공개 ID와 숫자 버전을 관리자 응답으로 투영한다. */
+  /**
+   * 설명회 응답 변환. 버전은 숫자
+   */
   private seminar(row: { publicId: string; title: string; description: string | null; status: string; version: bigint; createdAt: Date; updatedAt: Date }) {
     return { seminarId: row.publicId, title: row.title, description: row.description, status: row.status, version: Number(row.version), createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
-  /** 회차의 공개 ID·지점·예약 기간과 숫자 버전을 응답으로 투영한다. */
+  /**
+   * 회차 응답 변환. 버전은 숫자
+   */
   private session(row: {
     publicId: string; seminar: { publicId: string }; scope: string; startsAt: Date; endsAt: Date; place: string;
     bookingOpensAt: Date | null; bookingClosesAt: Date | null; guestBookingEnabled: boolean; status: string; version: bigint;
@@ -308,7 +443,9 @@ export class SeminarsService {
     };
   }
 
-  /** 연결된 예약이 없는 회차의 운영 지표를 모두 0으로 반환한다. */
+  /**
+   * 예약이 없는 회차의 0 요약
+   */
   private emptyOperationsSummary(): SessionOperationsSummary {
     return {
       activeBookingCount: 0,
@@ -321,7 +458,15 @@ export class SeminarsService {
     };
   }
 
+  /**
+   * 단일 페이지 응답 정보
+   */
   private page(totalItems: number) { return { page: 1, pageSize: totalItems, totalItems, totalPages: totalItems === 0 ? 0 : 1 }; }
-  /** 지정한 상태와 코드의 {@link DomainError}를 던지며 정상 반환하지 않는다. */
+
+  /**
+   * 설명회 작업 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never { throw new DomainError(status, code, "The seminar operation could not be completed."); }
 }

@@ -6,16 +6,37 @@ import { Client } from "pg";
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * v2 시트 구조 지문
+ */
 const V2_SHEET_SCHEMA_FINGERPRINT = "416dd80e01708970c9c5fb2293da9caab29bf4f009c1a959dcfff53ce08e6de4";
+
+/**
+ * v3 시트 구조 지문
+ */
 const V3_SHEET_SCHEMA_FINGERPRINT = "1428b95585de0ca4734d1fadab8ae141f6f7e8c2f371e4c6f3aad1ddece7751d";
+
+/**
+ * 검증 대상 v3 마이그레이션 SQL 경로
+ */
 const migrationPath = resolve(
   apiDirectory,
   "prisma/migrations/20260718040000_google_sheets_campus_v3/migration.sql",
 );
 
+/**
+ * JSON 행 스냅샷
+ */
 type JsonRow = Record<string, unknown>;
 
+/**
+ * 매핑 행 전체 스냅샷과 행 버전
+ */
 async function snapshotMapping(client: Client, mappingId: string) {
   const result = await client.query<{ row_snapshot: JsonRow; row_version: string }>(`
     select to_jsonb(mapping) row_snapshot,
@@ -26,6 +47,9 @@ async function snapshotMapping(client: Client, mappingId: string) {
   return result.rows[0]!;
 }
 
+/**
+ * 매핑의 반영 대기열·시도 기록 스냅샷
+ */
 async function snapshotSheetHistory(client: Client, mappingId: string) {
   const outbox = await client.query<{ row_snapshot: JsonRow }>(`
     select to_jsonb(delivery) row_snapshot
@@ -47,6 +71,9 @@ async function snapshotSheetHistory(client: Client, mappingId: string) {
   };
 }
 
+/**
+ * sheet_mappings.schema_version 기본값
+ */
 async function readSchemaVersionDefault(client: Client) {
   const result = await client.query<{ schema_version_default: number }>(`
     select pg_get_expr(attribute_default.adbin,attribute_default.adrelid)::integer schema_version_default
@@ -60,10 +87,15 @@ async function readSchemaVersionDefault(client: Client) {
   return result.rows[0]!.schema_version_default;
 }
 
+// Google Sheets v3 추가 마이그레이션
 describe("Google Sheets v3 additive migration", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let client: Client;
 
+  // 컨테이너 기동과 이전 마이그레이션까지 적용
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_sheet_v3_migration" })
@@ -84,11 +116,13 @@ describe("Google Sheets v3 additive migration", () => {
     await client.connect();
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await client?.end();
     await postgres?.stop();
   });
 
+  // v2 매핑을 한 번만 올리고 대기·재시도 반영과 시도 기록은 변경하지 않음
   it("upgrades v2 once without mutating pending/retry deliveries or attempts", async () => {
     const migration = readFileSync(migrationPath, "utf8");
     await client.query("alter table sheet_mappings alter column schema_version set default 2");

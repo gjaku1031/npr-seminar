@@ -1,3 +1,4 @@
+# 매일 03:30(서울) PostgreSQL 백업 실행. 놓친 실행은 부팅 뒤 보충, 최대 15분 무작위 지연
 [Unit]
 Description=Nightly NPR PostgreSQL backup
 

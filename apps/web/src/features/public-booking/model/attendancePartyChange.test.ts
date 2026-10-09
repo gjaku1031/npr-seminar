@@ -1,10 +1,10 @@
 /**
- * 참석 학부모 변경 순수 규칙 테스트 (node:test + tsx).
+ * 참석 학부모 변경 순수 규칙 테스트 (node:test + tsx)
  *
  * 지키려는 것:
- * - 선택지는 계약 enum 순서(모·부·모/부) 그대로이고 현재 값을 정확히 표시한다.
+ * - 선택지는 계약 enum 순서(모·부·모/부) 그대로이고 현재 값을 정확히 표시함
  * - PATCH 본문은 attendanceParty + expectedVersion 만 싣고, studentIds 등 학생 변경 필드를
- *   **절대** 포함하지 않는다(좌석 수는 서버가 attendanceParty 로만 파생).
+ *   절대 포함하지 않음(좌석 수는 서버가 attendanceParty 로만 파생)
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -41,11 +41,11 @@ describe("attendancePartyUpdateRequest — 본문 형태", () => {
     const body = attendancePartyUpdateRequest("BOTH", 7) as unknown as Record<string, unknown>;
     assert.equal(body.attendanceParty, "BOTH");
     assert.equal(body.expectedVersion, 7);
-    // 학생 변경 필드가 새어 나가지 않는다 — 좌석 수는 서버가 attendanceParty 로만 파생한다.
+    // 학생 변경 필드가 새어 나가지 않음 — 좌석 수는 서버가 attendanceParty 로만 파생함
     assert.equal("studentIds" in body, false);
     assert.equal("seminarSessionId" in body, false);
     assert.equal("seatCount" in body, false);
-    // 정확히 두 키만 존재한다.
+    // 정확히 두 키만 존재함
     assert.deepEqual(Object.keys(body).sort(), ["attendanceParty", "expectedVersion"]);
   });
 });

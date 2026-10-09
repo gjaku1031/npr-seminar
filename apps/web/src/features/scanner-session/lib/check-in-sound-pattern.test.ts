@@ -1,6 +1,6 @@
 /**
- * 결과음 패턴 순수 테스트 (node:test + tsx). Web Audio·React 를 import 하지 않는다.
- * 길이(성공 딩동 0.7~1.0초)와 세 패턴의 분명한 구분을 고정한다.
+ * 결과음 패턴 순수 테스트 (node:test + tsx). Web Audio·React 를 import 하지 않음
+ * 길이(성공 딩동 0.7~1.0초)와 세 패턴의 분명한 구분을 고정함
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -10,6 +10,9 @@ import { describe, it } from "node:test";
 import type { CheckInSoundKind } from "./check-in-sound";
 import { CHECK_IN_SOUND_PATTERNS, patternDurationSeconds } from "./check-in-sound-pattern";
 
+/**
+ * 결과음 종류 전체
+ */
 const KINDS: CheckInSoundKind[] = ["success", "warning", "error"];
 
 describe("check-in-sound-pattern — 톤 무결성", () => {

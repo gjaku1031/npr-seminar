@@ -9,6 +9,9 @@ import {
   PosterService,
 } from "../../src/modules/poster/poster.service.js";
 
+/**
+ * 서명이 맞는 최소 PNG
+ */
 function png(): Buffer {
   const value = Buffer.alloc(24);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(value);
@@ -16,10 +19,16 @@ function png(): Buffer {
   return value;
 }
 
+/**
+ * 서명이 맞는 최소 JPEG
+ */
 function jpeg(): Buffer {
   return Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 }
 
+/**
+ * 서명이 맞는 최소 WebP
+ */
 function webp(): Buffer {
   const value = Buffer.alloc(16);
   value.write("RIFF", 0, "ascii");
@@ -29,17 +38,24 @@ function webp(): Buffer {
   return value;
 }
 
+/**
+ * 업로드 파일 입력
+ */
 function upload(buffer: Buffer, mimetype: string): PosterUploadFile {
   return { buffer, mimetype, size: buffer.byteLength };
 }
 
+// 포스터 파일 저장소
 describe("PosterService", () => {
+  // 테스트가 만든 임시 디렉터리
   const directories: string[] = [];
 
+  // 임시 디렉터리 삭제
   afterEach(async () => {
     await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
+  // 임시 디렉터리를 저장소로 쓰는 서비스
   async function service(): Promise<{ service: PosterService; directory: string }> {
     const directory = await mkdtemp(join(tmpdir(), "npr-poster-"));
     directories.push(directory);
@@ -49,6 +65,7 @@ describe("PosterService", () => {
     };
   }
 
+  // 매니페스트를 원자적으로 교체하고 내용 주소 기반 이미지는 유지
   it("atomically switches the manifest while retaining immutable content-addressed assets", async () => {
     const fixture = await service();
     expect(await fixture.service.current()).toEqual({ poster: null });
@@ -74,6 +91,7 @@ describe("PosterService", () => {
     expect(await readdir(join(fixture.directory, "assets"))).toHaveLength(2);
   });
 
+  // 같은 키 재요청은 파일 기반 멱등 결과를 재생하고 이전 포스터를 다시 활성화하지 않음
   it("replays the same file-backed idempotency result without reactivating an older poster", async () => {
     const fixture = await service();
     const first = await fixture.service.upload(upload(png(), "image/png"), "poster-replay-key");
@@ -86,6 +104,7 @@ describe("PosterService", () => {
       .rejects.toMatchObject({ status: 409, code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
+  // 지원하지 않는 형식, 서명 불일치, 크기 초과 거부
   it("rejects unsupported, mismatched, and oversized raster declarations", async () => {
     const fixture = await service();
     await expect(fixture.service.upload(upload(png(), "image/svg+xml"), "poster-svg-key"))
@@ -96,6 +115,7 @@ describe("PosterService", () => {
       .rejects.toMatchObject({ status: 413, code: "POSTER_SIZE_INVALID" });
   });
 
+  // 강한 버전 ETag와 조건부 요청 처리
   it("uses a strong version ETag and honors conditional immutable asset requests", async () => {
     const fixture = await service();
     const uploaded = await fixture.service.upload(upload(webp(), "image/webp"), "poster-cache-key");
@@ -108,6 +128,7 @@ describe("PosterService", () => {
     expect(fixture.service.isNotModified('"sha256-unrelated"', undefined, asset)).toBe(false);
   });
 
+  // 활성 포스터 파일 누락은 저장소 손상, 버전 직접 요청은 404 유지
   it("reports a missing active asset as storage corruption while preserving direct asset 404 semantics", async () => {
     const fixture = await service();
     const uploaded = await fixture.service.upload(upload(png(), "image/png"), "poster-missing-asset-key");

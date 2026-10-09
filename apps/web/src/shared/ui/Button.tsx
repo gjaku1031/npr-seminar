@@ -1,15 +1,21 @@
 "use client";
 
-/** DS Button — 핸드오프 components/core/Button.jsx 이식 (네임스페이스 → 모듈). */
+// 디자인 시스템 버튼
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 
+/**
+ * 크기별 높이·여백·글자 크기·간격·모서리
+ */
 const SIZES = {
   sm: { height: 36, padding: "0 16px", fontSize: 13, gap: 6, radius: "var(--radius-sm)" },
   md: { height: 44, padding: "0 22px", fontSize: 15, gap: 8, radius: "var(--radius-md)" },
   lg: { height: 54, padding: "0 30px", fontSize: 16, gap: 10, radius: "var(--radius-md)" },
 } as const;
 
+/**
+ * 변형별 기본·호버 스타일
+ */
 const VARIANTS: Record<string, { base: CSSProperties; hover: CSSProperties }> = {
   primary: {
     base: { background: "linear-gradient(135deg, var(--violet-800), var(--violet-600))", color: "var(--text-on-brand)", border: "1px solid transparent" },
@@ -33,19 +39,64 @@ const VARIANTS: Record<string, { base: CSSProperties; hover: CSSProperties }> = 
   },
 };
 
+/**
+ * 버튼 속성
+ */
 export interface ButtonProps {
+  /**
+   * 내용
+   */
   children?: ReactNode;
+
+  /**
+   * 변형. 기본 primary
+   */
   variant?: "primary" | "accent" | "secondary" | "ghost" | "danger";
+
+  /**
+   * 크기. 기본 md
+   */
   size?: "sm" | "md" | "lg";
+
+  /**
+   * 비활성 여부
+   */
   disabled?: boolean;
+
+  /**
+   * 너비 100% 여부
+   */
   fullWidth?: boolean;
+
+  /**
+   * 앞쪽 아이콘
+   */
   icon?: ReactNode;
+
+  /**
+   * 뒤쪽 아이콘
+   */
   iconRight?: ReactNode;
+
+  /**
+   * 클릭 처리
+   */
   onClick?: () => void;
+
+  /**
+   * 버튼 type. 기본 button
+   */
   type?: "button" | "submit";
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }
 
+/**
+ * 호버·누름 효과가 있는 버튼
+ */
 export function Button({
   children,
   variant = "primary",
@@ -58,6 +109,7 @@ export function Button({
   type = "button",
   style,
 }: ButtonProps) {
+  // 마우스 호버·누름 상태. 비활성이면 효과 없음
   const [hover, setHover] = useState(false);
   const [press, setPress] = useState(false);
   const s = SIZES[size] ?? SIZES.md;

@@ -1,8 +1,5 @@
-/**
- * 포털 모드 Select 메뉴 배치 규칙 테스트 (node:test + tsx). 순수 함수라 DOM 없이 검증한다.
- * 핵심 회귀: 조상 overflow 에 잘리지 않도록 fixed 로 띄우되, 좌표·폭·상하 뒤집기·가장자리
- * clamp 가 화면을 넘지 않고 낮은 화면(646px)에서도 남는 공간에 맞춰 스크롤로 넘긴다.
- */
+// 포털 모드 Select 메뉴 배치 규칙 테스트. 순수 함수라 DOM 없이 검증
+// 조상 overflow에 잘리지 않도록 fixed로 띄우되, 좌표·폭·상하 뒤집기·가장자리 고정이 화면을 넘지 않고 낮은 화면(646px)에서도 남는 공간에 맞춰 스크롤로 넘김
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -12,6 +9,10 @@ import {
   SELECT_MENU_MARGIN,
   SELECT_MENU_MIN_WIDTH,
 } from "./select-menu-position";
+
+/**
+ * 낮은 화면을 흉내 낸 뷰포트
+ */
 
 const viewport = { width: 1560, height: 646 };
 
@@ -63,7 +64,7 @@ test("아래 공간이 부족하고 위가 넓으면 위로 뒤집고 top 은 �
 });
 
 test("낮은 화면에서도 최대 높이는 남는 공간을 넘지 않고 스크롤로 넘긴다", () => {
-  // 646px 화면 한가운데 트리거 — 긴 목록이어도 아래 공간에 맞춰 잘린다.
+  // 646px 화면 한가운데 트리거 — 긴 목록이어도 아래 공간에 맞춰 잘림
   const anchor = { left: 300, top: 300, bottom: 346, width: 132 };
   const pos = computeSelectMenuPosition(anchor, viewport, 5000);
   assert.ok(pos.maxHeight > 0);

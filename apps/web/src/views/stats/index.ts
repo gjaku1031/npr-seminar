@@ -1,2 +1,2 @@
-// views/stats 공개 API (barrel). (설계 §4.1)
+// views/stats 공개 API (barrel)
 export { StatsView } from "./ui/StatsView";

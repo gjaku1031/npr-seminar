@@ -24,24 +24,86 @@ import {
   type SheetGatewayResult,
 } from "./google-sheets.gateway.js";
 
-/** 매핑·아웃박스 lease를 함께 소유한 시트 작업과 투영에 필요한 식별자. */
+/**
+ * 매핑·대기열 lease를 함께 점유한 시트 작업과 반영에 필요한 식별자
+ */
 interface ClaimedSheet {
+  /**
+   * 대기열 행 ID
+   */
   readonly id: bigint;
+
+  /**
+   * 시트 매핑 ID
+   */
   readonly mapping_id: bigint;
+
+  /**
+   * 매핑 dispatch lease 소유 토큰. 대기열 행 lease_owner와 같은 값
+   */
   readonly mapping_lease_owner: string;
+
+  /**
+   * 매핑 회차 공개 ID
+   */
   readonly seminar_session_public_id: string;
+
+  /**
+   * 스프레드시트 ID
+   */
   readonly spreadsheet_id: string;
+
+  /**
+   * 매핑 구조 지문
+   */
   readonly schema_fingerprint: string;
+
+  /**
+   * 매핑 스키마 버전
+   */
   readonly schema_version: number;
+
+  /**
+   * 예약명단 시트 제목
+   */
   readonly reservation_sheet_title: string;
+
+  /**
+   * 예약명단 시트 ID
+   */
   readonly reservation_sheet_id: number;
+
+  /**
+   * 예약 이벤트 ID
+   */
   readonly event_id: string;
+
+  /**
+   * 예약 이벤트 종류
+   */
   readonly event_type: string;
+
+  /**
+   * 가족 예약 공개 ID
+   */
   readonly family_booking_public_id: string;
+
+  /**
+   * 예약 학생 공개 ID
+   */
   readonly family_booking_student_public_id: string;
+
+  /**
+   * 이번 점유로 증가한 시도 횟수
+   */
   readonly attempt_count: number;
 }
 
+/**
+ * 반영 계획 계산에 필요한 예약 학생·가족 예약·학생 원장 조회 필드
+ *
+ * 가족 예약의 최신 운영 이벤트 1건 포함
+ */
 const projectionLinkSelect = {
   id: true,
   publicId: true,
@@ -98,11 +160,30 @@ const projectionLinkSelect = {
   },
 } satisfies Prisma.FamilyBookingStudentSelect;
 
+/**
+ * projectionLinkSelect 조회 결과 타입
+ */
 type ProjectionLink = Prisma.FamilyBookingStudentGetPayload<{ select: typeof projectionLinkSelect }>;
+
+/**
+ * 참석 보호자
+ */
 export type SheetAttendanceParty = "MOTHER" | "FATHER" | "BOTH";
+
+/**
+ * 시트가 표현하는 예약 상태
+ */
 export type SheetProjectionStatus = "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW";
 
-/** 활성 수업의 대표 수학·과학 반을 나눈다. 활성 반이 없을 때만 예약 당시 반을 사용한다. */
+/**
+ * 대표 수학·과학 반 열 값
+ *
+ * 원천 활성 수업에서 대표 반만 골라 정렬하고 과학반과 나머지(수학반)로 나눔
+ * 활성 반이 없을 때만 예약 당시 반 사용
+ *
+ * @param historicClassName 학생 원장이 없을 때 쓰는 예약 당시 반. 없으면 null
+ * @returns 쉼표로 연결한 수학반·과학반 목록
+ */
 export function sheetStudentClassColumns(
   assignments: readonly { readonly className: string; readonly sourceActive: boolean }[],
   historicClassName: string | null,
@@ -122,7 +203,11 @@ export function sheetStudentClassColumns(
   };
 }
 
-/** 예약 상태를 시트가 표현하는 네 상태로 제한한다. 알 수 없는 상태는 예외다. */
+/**
+ * 예약 상태를 시트가 표현하는 네 상태로 제한
+ *
+ * @throws {Error} SHEET_BOOKING_STATUS_INVALID 알 수 없는 상태
+ */
 export function sheetProjectionStatus(value: string): SheetProjectionStatus {
   if (["RESERVED", "CHECKED_IN", "CANCELLED", "NO_SHOW"].includes(value)) {
     return value as SheetProjectionStatus;
@@ -130,7 +215,9 @@ export function sheetProjectionStatus(value: string): SheetProjectionStatus {
   throw new Error("SHEET_BOOKING_STATUS_INVALID");
 }
 
-/** 예약이 다른 회차로 이동했으면 기존 회차의 시트에서는 취소 상태로 표현한다. */
+/**
+ * 가족 예약 상태. 다른 회차로 옮긴 예약은 기존 회차 시트에서 취소로 표현
+ */
 export function sheetFamilyProjectionStatus(
   familySessionPublicId: string,
   workbookSessionPublicId: string,
@@ -141,7 +228,11 @@ export function sheetFamilyProjectionStatus(
     : "CANCELLED";
 }
 
-/** 비재원생의 검증된 연락처 하나를 참석 보호자 열에 배치한다. BOTH도 모 연락처 열만 채운다. */
+/**
+ * 비재원생의 검증된 연락처 하나를 참석 보호자 열에 배치
+ *
+ * BOTH도 모 연락처 열만 채움
+ */
 export function guestContactColumns(
   attendanceParty: SheetAttendanceParty,
   contact: string,
@@ -149,12 +240,14 @@ export function guestContactColumns(
   switch (attendanceParty) {
     case "MOTHER": return { mother: contact, father: "" };
     case "FATHER": return { mother: "", father: contact };
-    // A BOTH guest has one verified contact, so it is intentionally written to the mother column only.
+    // BOTH 비재원생은 검증된 연락처가 하나뿐이라 의도적으로 모 열에만 기록
     case "BOTH": return { mother: contact, father: "" };
   }
 }
 
-/** 예약·입장·취소 상태와 참석 보호자 수를 시트 표시 문구로 만든다. */
+/**
+ * 예약 상태 표시 문구. `상태 (보호자) · N명`
+ */
 export function sheetReservationState(
   status: SheetProjectionStatus,
   party: SheetAttendanceParty,
@@ -168,7 +261,11 @@ export function sheetReservationState(
   return `${statusLabel} (${partyLabel}) · ${personCount}명`;
 }
 
-/** 예약 당시 지점 코드를 한국어 캠퍼스 이름으로 바꾼다. 미지원 코드는 예외다. */
+/**
+ * 예약 당시 지점 코드를 캠퍼스 이름으로 변환
+ *
+ * @throws {Error} SHEET_BRANCH_CODE_INVALID 미지원 코드
+ */
 export function sheetCampus(branchCodeAtBooking: string | null): "A" | "B" | "C" {
   switch (branchCodeAtBooking) {
     case "CAMPUS_A": return "A";
@@ -178,19 +275,52 @@ export function sheetCampus(branchCodeAtBooking: string | null): "A" | "B" | "C"
   }
 }
 
-/** 예약 이벤트 아웃박스를 현재 DB 상태로 투영해 Google Sheets에 반영하고 시도 결과를 기록한다. */
+/**
+ * 시트 반영 워커
+ *
+ * 예약 이벤트 대기열을 현재 DB 상태로 다시 투영해 Google Sheets에 반영하고 시도 결과 기록
+ * 매핑당 동시에 한 작업만 처리하고 매핑별 1초 간격 유지
+ */
 @Injectable()
 export class SheetWorkerService {
+  /**
+   * 다음 매핑 재검증 시각(epoch 밀리초)
+   */
   private nextMappingValidationAt = 0;
 
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * 워커 DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 연락처 복호화
+     */
     private readonly protector: PhoneProtector,
+
+    /**
+     * Google Sheets 게이트웨이
+     */
     private readonly gateway: GoogleSheetsGateway,
+
+    /**
+     * 실행 환경. 시트 사용 여부
+     */
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
-  /** 매핑 검증·만료 lease 복구 후 최대 한 작업을 처리한다. 반환값은 성공 여부가 아닌 claim 건수다. */
+  /**
+   * 한 번의 반복 처리
+   *
+   * 주기가 됐으면 매핑 재검증, 만료 lease 복구 후 작업 최대 1건 처리
+   * 계획 계산 실패는 DEAD, 게이트웨이 예외는 RETRY로 기록
+   *
+   * @returns 성공 여부가 아니라 점유한 작업 수(0 또는 1)
+   */
   public async runOnce(): Promise<number> {
     await this.refreshActiveMappingsIfDue();
     await this.reconcileExpiredLease();
@@ -213,7 +343,14 @@ export class SheetWorkerService {
     return 1;
   }
 
-  /** 활성·회로 CLOSED·스키마 일치 매핑과 PENDING/RETRY 행을 잠가 120초 lease를 함께 부여한다. */
+  /**
+   * 작업 1건 점유
+   *
+   * 활성·회로 CLOSED·스키마 일치·lease 없음·직전 반영 후 1초 경과·처리할 행이 있는 매핑을 SKIP LOCKED로 잠그고
+   * 그 매핑의 가장 이른 PENDING·RETRY 행과 함께 120초 lease 부여, 시도 횟수 증가
+   *
+   * @returns 점유한 작업. 없으면 undefined
+   */
   private async claim(): Promise<ClaimedSheet | undefined> {
     const rows = await this.prisma.$queryRaw<ClaimedSheet[]>`
       with mapping_candidate as (
@@ -253,7 +390,12 @@ export class SheetWorkerService {
     return rows[0];
   }
 
-  /** 만료된 CLAIMED를 재조정 필요 RETRY로 옮기고 매핑 lease를 해제한다. 외부 적용 여부는 단정하지 않는다. */
+  /**
+   * 만료 lease 복구
+   *
+   * 만료된 CLAIMED는 외부 반영 여부를 단정할 수 없어 재조정 필요 RETRY로 옮기고 시도 기록 추가
+   * 만료된 매핑 dispatch lease 해제
+   */
   private async reconcileExpiredLease(): Promise<void> {
     await this.prisma.$executeRaw`
       with expired as (
@@ -273,9 +415,15 @@ export class SheetWorkerService {
   }
 
   /**
-   * 현재 예약·학생·이벤트를 다시 읽어 한 작업의 행·가족·이벤트 투영을 만든다.
-   * DB 원천이 없거나 상태가 유효하지 않으면 예외이며 {@link runOnce}가 DEAD로 기록한다.
-   * 복호화한 연락처는 계획의 셀 값에만 담고 이 서비스의 로그에는 남기지 않는다.
+   * 작업 1건의 예약명단·예약집계·로그 반영 계획 생성
+   *
+   * 대기열 스냅샷 대신 현재 예약·학생·이벤트를 다시 읽어 최신 상태 기준으로 투영
+   * DB 원천이 없거나 상태가 유효하지 않으면 예외. runOnce가 DEAD로 기록
+   * 복호화한 연락처는 계획의 셀 값에만 담고 로그에 남기지 않음
+   *
+   * 1. 같은 회차의 같은 학생(비재원생은 연락처·이름) 후보 중 현재 예약 행 선택
+   * 2. 반영할 예약 이벤트가 같은 예약·종류인지 확인
+   * 3. 학생 행·가족 행·이벤트 행 값 계산
    */
   private async plan(row: ClaimedSheet): Promise<SheetDispatchPlan> {
     const source = await this.prisma.familyBookingStudent.findUnique({
@@ -288,9 +436,8 @@ export class SheetWorkerService {
     const identityCandidates = await this.identityCandidates(source, row.seminar_session_public_id);
     const candidates = identityCandidates.length === 0 ? [source] : identityCandidates;
     const selected = this.selectCurrentProjection(candidates);
-    // The V4 student-row idempotency key is the currently selected
-    // familyBookingStudentId. Source student numbers are display data only and
-    // are never used to locate or replace an existing workbook row.
+    // 예약명단 행의 멱등 키는 현재 선택된 예약 학생 ID
+    // 학번은 표시용이며 기존 행을 찾거나 대체하는 데 쓰지 않음
     const marker = selected.publicId;
     const latestEvent = selected.familyBooking.bookingEvents[0];
     if (latestEvent === undefined) throw new Error("SHEET_PROJECTION_EVENT_MISSING");
@@ -311,6 +458,7 @@ export class SheetWorkerService {
       throw new Error("SHEET_PROJECTION_EVENT_SOURCE_MISSING");
     }
 
+    // 학생 행 상태: 회차가 바뀌었거나 해제된 학생은 취소로 표현
     const belongsToWorkbook = selected.familyBooking.session.publicId === row.seminar_session_public_id
       && selected.active;
     const effectiveStatus = belongsToWorkbook
@@ -331,6 +479,7 @@ export class SheetWorkerService {
       projectedEvent.eventType as OperationalBookingEventType,
       projectedEvent.actorSubject,
     );
+    // 가족 행: 좌석 수 검증, 활성 학생(없으면 마지막 해제 학생)을 지점·이름·학번 순 정렬
     const family = source.familyBooking;
     const familyStatus = sheetFamilyProjectionStatus(
       family.session.publicId,
@@ -358,6 +507,7 @@ export class SheetWorkerService {
       familyLatestEvent.actorSubject,
     );
 
+    // 학생 행·가족 행·이벤트 행 계획 조립. 문자열 셀은 수식 해석 방지 처리
     return {
       workbook: sheetWorkbookExpectation({
         spreadsheetId: row.spreadsheet_id,
@@ -427,7 +577,13 @@ export class SheetWorkerService {
     };
   }
 
-  /** 같은 회차의 학생 원장 ID 또는 비재원생 연락처 해시·이름으로 현재 행 후보를 찾는다. */
+  /**
+   * 같은 회차의 현재 행 후보
+   *
+   * 재원생은 학생 원장 ID, 비재원생은 지점·연락처 다이제스트·정규화 이름이 같은 예약 학생
+   *
+   * @throws {Error} 재원생 원장 누락·참여 유형 오류
+   */
   private async identityCandidates(source: ProjectionLink, sessionPublicId: string): Promise<ProjectionLink[]> {
     if (source.participantType === "ENROLLED") {
       if (source.studentId === null) throw new Error("SHEET_ENROLLED_STUDENT_MISSING");
@@ -454,7 +610,13 @@ export class SheetWorkerService {
     return possible.filter((candidate) => this.identityText(candidate.studentNameSnapshot) === sourceName);
   }
 
-  /** 활성·미취소 예약을 우선하고 생성 시각과 ID로 동률을 정해 한 행을 고른다. 후보가 없으면 예외다. */
+  /**
+   * 후보 중 현재 반영할 행 선택
+   *
+   * 활성·미취소 예약 우선, 이후 예약 생성 시각·예약 ID·행 ID 내림차순
+   *
+   * @throws {Error} SHEET_PROJECTION_CANDIDATE_MISSING 후보 없음
+   */
   private selectCurrentProjection(candidates: readonly ProjectionLink[]): ProjectionLink {
     const sorted = [...candidates].sort((left, right) => {
       const leftCurrent = left.active && left.familyBooking.status !== "CANCELLED" ? 1 : 0;
@@ -469,7 +631,11 @@ export class SheetWorkerService {
     return selected;
   }
 
-  /** 시트에 쓸 모·부 연락처를 메모리에서만 복호화한다. 비재원생은 참석 보호자 열을 따른다. */
+  /**
+   * 시트에 쓸 모·부 연락처를 메모리에서만 복호화
+   *
+   * 재원생은 원장의 모·부 번호, 비재원생은 예약 연락처를 참석 보호자 열에 배치
+   */
   private projectionPhones(link: ProjectionLink): { readonly mother: string; readonly father: string } {
     if (link.participantType === "ENROLLED") {
       return {
@@ -481,14 +647,25 @@ export class SheetWorkerService {
     return guestContactColumns(link.familyBooking.attendanceParty as SheetAttendanceParty, contact);
   }
 
+  /**
+   * 선택 연락처 복호화와 표시 형식. 없으면 빈 문자열
+   */
   private revealOptional(ciphertext: Uint8Array | null): string {
     return ciphertext === null ? "" : this.formatPhone(this.protector.reveal(ciphertext));
   }
 
+  /**
+   * 참석 보호자 표시 문구
+   */
   private attendancePartyLabel(party: SheetAttendanceParty): "모" | "부" | "모/부" {
     return party === "MOTHER" ? "모" : party === "FATHER" ? "부" : "모/부";
   }
 
+  /**
+   * 예약 경로 표시 문구
+   *
+   * @throws {Error} SHEET_BOOKING_SOURCE_INVALID 알 수 없는 경로
+   */
   private bookingSourceLabel(source: string): "웹앱" | "전화" | "선생님" | "현장" {
     switch (source) {
       case "WEB_APP": return "웹앱";
@@ -499,6 +676,11 @@ export class SheetWorkerService {
     }
   }
 
+  /**
+   * 이벤트 시점 예약·입장 인원
+   *
+   * 입장은 둘 다 좌석 수, 생성·변경은 예약 인원만, 취소·미참석은 0
+   */
   private eventPersonCounts(eventType: string, seatCount: number): {
     readonly reservationPeople: number;
     readonly checkedInPeople: number;
@@ -510,6 +692,9 @@ export class SheetWorkerService {
     return { reservationPeople: 0, checkedInPeople: 0 };
   }
 
+  /**
+   * 이벤트 종류별 예약 상태 표시 문구
+   */
   private eventReservationState(eventType: string, party: SheetAttendanceParty): string {
     if (eventType === "CHECKED_IN") return sheetReservationState("CHECKED_IN", party);
     if (eventType === "CANCELLED") return sheetReservationState("CANCELLED", party);
@@ -517,6 +702,11 @@ export class SheetWorkerService {
     return sheetReservationState("RESERVED", party);
   }
 
+  /**
+   * 이벤트 처리자 표시
+   *
+   * 입장은 QR 스캐너, 주체 없음은 웹앱, UUID 주체는 관리자, 그 외는 시스템
+   */
   private eventActor(eventType: string, actorSubject: string | null): "웹앱" | "관리자" | "QR 스캐너" | "시스템" {
     if (eventType === "CHECKED_IN") return "QR 스캐너";
     if (actorSubject === null) return "웹앱";
@@ -526,6 +716,11 @@ export class SheetWorkerService {
     return "시스템";
   }
 
+  /**
+   * 지점 정렬 순서. A·B·C
+   *
+   * @throws {Error} SHEET_BRANCH_CODE_INVALID 미지원 코드
+   */
   private branchOrder(value: string): number {
     switch (value) {
       case "CAMPUS_A": return 0;
@@ -535,12 +730,21 @@ export class SheetWorkerService {
     }
   }
 
+  /**
+   * 마지막 해제 시각에 해제된 학생들
+   */
   private latestReleasedChildren<T extends { readonly releasedAt: Date | null }>(children: readonly T[]): T[] {
     const latest = Math.max(...children.map((child) => child.releasedAt?.getTime() ?? -1));
     return children.filter((child) => (child.releasedAt?.getTime() ?? -1) === latest);
   }
 
-  /** 설정한 검증 주기가 지났을 때만 외부 시트 설정·스키마를 확인하고, 불일치나 기능 비활성 시 매핑 회로를 차단한다. */
+  /**
+   * 검증 주기가 지났을 때 활성 매핑 재검증
+   *
+   * 1. 스키마 버전·지문이 현재 코드와 다른 활성 매핑 차단
+   * 2. 시트 사용이 꺼져 있으면 활성 매핑 전체 차단
+   * 3. 남은 매핑의 외부 공유·구조 검증. 성공은 검증 시각 갱신, BLOCKED·DEAD는 차단, RETRY는 그대로 둠
+   */
   private async refreshActiveMappingsIfDue(): Promise<void> {
     const now = Date.now();
     if (now < this.nextMappingValidationAt) return;
@@ -606,8 +810,12 @@ export class SheetWorkerService {
   }
 
   /**
-   * 현재 lease 소유자만 결과와 시도 내역을 함께 커밋한다. RETRY는 지수 지연하며 총 시도 8회에 도달하면 DEAD다.
-   * 차단 결과의 openCircuit 표식은 매핑을 비활성화한다. {@link GoogleSheetsGateway.apply}는 이 커밋 전에 끝난다.
+   * 작업 결과 확정
+   *
+   * 현재 lease 소유자일 때만 결과·시도 기록·매핑 lease 해제를 한 트랜잭션으로 커밋
+   * GoogleSheetsGateway.apply는 이 커밋 전에 끝남
+   * RETRY는 지수 지연(5초×2^시도+0~4초 지터, 최대 300초), 총 8회 도달 시 DEAD
+   * 차단 결과의 openCircuit 표식이 있으면 매핑 비활성화
    */
   private async finish(row: ClaimedSheet, result: SheetGatewayResult): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
@@ -637,21 +845,35 @@ export class SheetWorkerService {
     });
   }
 
+  /**
+   * 비재원생 이름 비교용 정규화. NFKC·공백 제거·소문자
+   */
   private identityText(value: string): string {
     return value.normalize("NFKC").trim().toLocaleLowerCase("ko-KR");
   }
 
+  /**
+   * 시트 셀 값 정규화
+   *
+   * `= + - @`로 시작하면 수식으로 해석되지 않도록 앞에 작은따옴표를 붙임
+   */
   private safe(value: string): string {
     const normalized = value.normalize("NFKC");
     return /^[=+\-@]/.test(normalized) ? `'${normalized}` : normalized;
   }
 
+  /**
+   * 전화번호 표시 형식. 10·11자리는 하이픈 구분, 그 외는 그대로
+   */
   private formatPhone(digits: string): string {
     if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
     if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
     return digits;
   }
 
+  /**
+   * 서울 시간 `YYYY-MM-DD HH:mm:ss` 표기
+   */
   private kst(date: Date): string {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Seoul",

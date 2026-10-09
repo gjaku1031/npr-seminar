@@ -1,60 +1,61 @@
 "use client";
 
-/**
- * durable 변경의 Idempotency-Key 수명 관리.
- *
- * 문제: 어댑터가 호출마다 새 UUID를 만들면, 응답이 유실된 뒤의 재시도가 서버에는
- * **다른 조작**으로 보여 중복 변경(코드 2개 발급, 이중 체크인)이 생긴다.
- *
- * 규칙:
- * - 키는 "사용자가 의도한 조작 1건" 단위로 만들고, 결과가 미상인 동안 계속 재사용한다.
- * - 확정 성공 또는 확정 4xx 에서만 버린다. 네트워크 실패·취소·5xx 는 결과 미상이므로 유지한다.
- * - ref(메모리)에만 둔다 — 웹 스토리지에 쓰지 않는다.
- */
+// 변경 요청 Idempotency-Key 수명 관리
+// 어댑터가 호출마다 새 UUID를 만들면 응답 유실 후 재시도가 서버에는 다른 조작으로 보여 중복 변경(코드 2개 발급, 이중 체크인)이 생김
+// - 키는 사용자가 의도한 조작 1건 단위로 만들고 결과를 모르는 동안 계속 재사용
+// - 확정 성공 또는 확정 4xx에서만 버림. 네트워크 실패·취소·5xx는 결과를 몰라 유지
+// - ref(메모리)에만 두고 웹 스토리지에 쓰지 않음
 
 import { useCallback, useMemo, useRef } from "react";
 import { isApiError } from "./problem";
 
 /**
- * 모듈 내부 전용 — 밖으로 내보내지 않는다.
- * 조작마다 즉석에서 키를 만드는 것이 바로 중복 durable 변경의 원인이므로,
- * 키 생성은 수명을 관리하는 아래 훅들만 할 수 있게 한다.
+ * 새 조작 키(UUID) 생성. 모듈 내부 전용
+ *
+ * 조작마다 즉석에서 키를 만드는 것이 중복 변경의 원인이라 수명을 관리하는 아래 훅만 생성 가능
  */
 function newOperationKey(): string {
   return crypto.randomUUID();
 }
 
 /**
- * 서버가 요청을 확정적으로 거절했는가?
- * 4xx 는 재시도해도 같은 결과이므로 키를 놓아준다.
- * network/aborted(status 0)·5xx 는 서버가 이미 처리했을 수 있어 키를 유지해야 한다.
+ * 서버가 요청을 확정적으로 거절했는지 여부
+ *
+ * 4xx는 재시도해도 같은 결과라 키를 놓아줌. 네트워크·취소(status 0)·5xx는 서버가 이미 처리했을 수 있어 키 유지
  */
 export function isDefinitiveFailure(error: unknown): boolean {
   return isApiError(error) && error.status >= 400 && error.status < 500;
 }
 
-/**
- * 결과 미상 — 서버가 변경을 이미 적용했을 수도, 아닐 수도 있다(network·abort·5xx).
- * 이 경우 **절대** 새 키로 재시도하면 안 되고, 성공/실패를 단정하기 전에
- * 서버 상태를 되물어야 한다 (`reconcileScanner*`).
- *
- * 별도 함수를 두지 않고 `!isDefinitiveFailure(error)` 로 판정한다 — 두 술어가
- * 엇갈릴 여지를 없앤다.
- */
+// 결과 불명(network·abort·5xx): 서버가 변경을 이미 적용했을 수도 아닐 수도 있음
+// 이때는 새 키로 재시도하면 안 되고, 성공·실패를 단정하기 전에 서버 상태를 다시 조회해야 함(reconcileScanner*)
+// 별도 함수 없이 `!isDefinitiveFailure(error)`로 판정해 두 술어가 어긋날 여지를 없앰
 
+/**
+ * 단일 조작 키 핸들
+ */
 export interface OperationKeyHandle {
-  /** 이번 시도에 쓸 키 — 미확정 재시도는 같은 값을 받는다. */
-  current: () => string;
-  /** 새 조작을 시작할 때 명시적으로 버린다. */
-  reset: () => void;
   /**
-   * 시도 결과를 반영한다.
-   * `settle()` (인자 없음) = 확정 성공, `settle(error)` = 실패.
-   * 확정 실패(4xx)면 버리고, 결과 미상이면 유지한다.
+   * 이번 시도에 쓸 키. 미확정 재시도는 같은 값을 받음
+   */
+  current: () => string;
+
+  /**
+   * 새 조작을 시작할 때 키를 명시적으로 버림
+   */
+  reset: () => void;
+
+  /**
+   * 시도 결과 반영. 인자 없음은 확정 성공, error는 실패
+   *
+   * 확정 실패(4xx)면 버리고 결과 불명이면 유지
    */
   settle: (error?: unknown) => void;
 }
 
+/**
+ * 조작 1건의 Idempotency-Key 관리 훅
+ */
 export function useOperationKey(): OperationKeyHandle {
   const keyRef = useRef<string | null>(null);
 
@@ -71,82 +72,73 @@ export function useOperationKey(): OperationKeyHandle {
     if (error === undefined || isDefinitiveFailure(error)) keyRef.current = null;
   }, []);
 
-  // 참조 안정성 — 이 핸들을 deps 에 넣는 useCallback 이 매 렌더 재생성되지 않게 한다.
+  // 참조 안정성: 이 핸들을 의존성에 넣는 useCallback이 매 렌더 재생성되지 않게 함
   return useMemo(() => ({ current, reset, settle }), [current, reset, settle]);
 }
 
-/**
- * 페이로드별 키 — 같은 대상(QR 토큰·예약 id)에 대한 재시도는 같은 키를 다시 쓰고,
- * 다른 대상은 별개 조작으로 취급한다.
- *
- * 메모리(ref) 전용이다. 키도, 키를 만드는 식별자(QR 토큰)도 저장·로깅하지 않는다.
- *
- * ── 미확정 키는 절대 자동 축출하지 않는다 ─────────────────────────────────────
- * `settle` 이 확정 성공·확정 4xx 에서 항목을 지우므로, 이 맵에 남아 있는 항목은 **전부
- * 결과 미상**이다. 따라서 "가장 오래된 항목 축출"은 곧 미확정 키 폐기이고, 그 대상이
- * 나중에 재시도되면 새 키가 나가 durable 조작이 중복된다(이중 체크인).
- *
- * 대신 상한은 안전 장치로만 둔다: 상한에 닿으면 **새 페이로드에 키를 내주지 않는다**.
- * 호출부는 그때 mutation 을 보내지 않고 사용자에게 미확정 건을 먼저 정리하라고 알린다.
- * 기존 미확정 키 조회는 상한과 무관하게 항상 성공한다.
- */
+// 대상별 키
+// 같은 대상(QR 토큰·예약 ID) 재시도는 같은 키를 다시 쓰고 다른 대상은 별개 조작으로 취급
+// 메모리(ref) 전용. 키와 키를 만드는 식별자(QR 토큰)를 저장·로깅하지 않음
+// 미확정 키는 자동 축출하지 않음: settle이 확정 성공·확정 4xx에서 항목을 지우므로 맵에 남은 항목은 모두 결과 불명
+// 가장 오래된 항목 축출은 미확정 키 폐기와 같고, 그 대상이 나중에 재시도되면 새 키가 나가 이중 체크인이 생김
+// 상한은 안전장치로만 둠. 상한에 닿으면 새 대상에 키를 내주지 않고, 호출부는 변경 요청을 보내지 않고 미확정 건 정리를 안내
+// 기존 미확정 키 조회는 상한과 무관하게 항상 성공
 
-/** 키 조회 결과 — 실패를 예외가 아니라 타입으로 드러낸다. */
+/**
+ * 키 조회 결과. 실패를 예외가 아니라 타입으로 표현
+ */
 export type OperationKeyLookup =
   | { ok: true; key: string }
+
   /**
-   * 미확정 조작이 상한만큼 쌓여 새 조작을 시작할 수 없다.
-   * 기존 미확정 조작을 재시도/정리해 확정시키면 자리가 난다.
+   * 미확정 조작이 상한만큼 쌓여 새 조작을 시작할 수 없음. 기존 조작을 재시도·정리해 확정하면 자리가 남
    */
   | { ok: false; reason: "capacity" };
 
+/**
+ * 대상별 키 핸들
+ */
 export interface KeyedOperationKeys {
   /**
-   * 이 식별자에 대한 키.
-   * - 이미 미확정 키가 있으면 항상 `{ ok: true }` (상한과 무관하게 재시도 가능).
-   * - 새 식별자인데 상한에 닿았으면 `{ ok: false, reason: "capacity" }` — 키를 만들지 않는다.
+   * 식별자별 키 조회
+   *
+   * 이미 미확정 키가 있으면 상한과 무관하게 ok. 새 식별자인데 상한에 닿았으면 capacity이고 키를 만들지 않음
    */
   keyFor: (id: string) => OperationKeyLookup;
-  /** 확정 성공(`settle(id)`) 또는 확정 4xx 에서만 버린다. */
+
+  /**
+   * 확정 성공(`settle(id)`) 또는 확정 4xx에서만 키를 버림
+   */
   settle: (id: string, error?: unknown) => void;
+
+  /**
+   * 대상의 키를 명시적으로 버림
+   */
   reset: (id: string) => void;
 }
 
-/** 안전 상한 — 무한 증가를 막되, 도달 시 축출이 아니라 신규 발급 거부로 동작한다. */
+/**
+ * 안전 상한. 무한 증가를 막되 도달 시 축출이 아니라 신규 발급 거부로 동작
+ */
 const DEFAULT_MAX_KEYS = 50;
 
-/* ── 의도 고정 키 ───────────────────────────────────────────────────────── */
+// 의도 고정 키
+// 키만 붙잡아서는 부족하고 무엇에 대한 키인지도 붙잡아야 함
+// useKeyedOperationKeys는 대상별로 키를 유지하는데, 결과 불명으로 키가 남은 동안 사용자가 다른 내용을 보내면(참석 보호자 변경, 변경 대신 취소)
+// 같은 키에 다른 본문이 나가 서버의 멱등 불일치나, 첫 요청이 이미 적용됐는데 두 번째 의도가 덮어쓰는 중복 변경이 생김
+// 그래서 키와 불변 의도 본문을 함께 붙잡음
+// - 결과 불명이면 그때 보낸 본문을 키와 함께 그대로 보관
+// - 같은 의도로 다시 오면 그 키 재사용(진짜 재시도)
+// - 다른 의도로 오면 키를 내주지 않고, 호출부는 보내지 않고 사용자에게 안내
+// - 확정 성공·확정 4xx면 키와 의도를 함께 버림
+// 메모리(ref) 전용. 의도에 연락처 원문이 있을 수 있어 문자열로 굳혀 저장·로깅하지 않고 구조 비교만 함
 
 /**
- * 키를 붙잡아 두는 것만으로는 부족하다 — **무엇에 대한 키인지**도 붙잡아야 한다.
+ * 두 의도가 정확히 같은지 구조 비교
  *
- * 위의 `useKeyedOperationKeys` 는 대상(id)별로 키를 유지한다. 그런데 결과 미상으로 키가
- * 남아 있는 동안 사용자가 *다른 내용*을 보내면(참석을 모→부로 바꿨거나, 변경 대신 취소를
- * 골랐거나) **같은 키에 다른 페이로드**가 나간다. 서버 입장에서 그건 idempotency 불일치이거나,
- * 더 나쁘게는 "첫 요청은 이미 적용됐는데 두 번째 의도가 덮어쓰는" 중복 durable 변경이다.
- *
- * 그래서 여기서는 키와 **불변 의도 페이로드**를 함께 붙잡는다:
- * - 결과 미상이면 그때 보낸 그 페이로드를 키와 함께 그대로 들고 있는다.
- * - 똑같은 의도로 다시 오면 그 키를 재사용한다 (진짜 재시도).
- * - 다른 의도로 오면 **키를 내주지 않는다** — 호출부가 보내지 않고 사용자에게 알린다.
- * - 확정 성공·확정 4xx 면 키와 의도를 함께 놓아준다.
- *
- * ★ 메모리(ref) 전용이다. 의도에는 연락처 원문이 들어 있을 수 있으므로 문자열로 굳혀
- *   저장하거나 로깅하지 않는다 — 구조 비교만 한다.
- */
-
-/**
- * 두 의도가 **정확히 같은가** — 순수 구조 비교다.
- *
- * 의도는 계약 요청 본문이 될 값이므로 JSON 스칼라·배열·평범한 객체만 온다. 그래서 여기서
- * 다루는 것도 그뿐이다 (Date·Map·순환 참조는 계약 본문에 없다).
- *
- * 객체 키 순서는 의미가 없으므로 무시하고, 배열 순서는 의미가 있으므로 지킨다.
- * 값이 `undefined` 인 키는 계약 본문에서 "없는 키"와 같으므로 그렇게 취급한다 —
- * `{ grade: undefined }` 와 `{}` 는 같은 요청이다.
- *
- * `JSON.stringify` 비교가 아닌 이유가 둘 있다: 키 순서만 달라도 같은 의도가 달라 보이고,
- * 연락처가 통째로 담긴 문자열을 만들어 들고 다니게 된다.
+ * 의도는 계약 요청 본문이라 JSON 스칼라·배열·일반 객체만 옴(Date·Map·순환 참조 없음)
+ * 객체 키 순서는 무시하고 배열 순서는 지킴. undefined 값 키는 계약 본문의 없는 키와 같아 `{ grade: undefined }`와 `{}`는 같음
+ * JSON.stringify 비교를 쓰지 않는 이유: 키 순서만 달라도 다르게 보이고, 연락처가 통째로 담긴 문자열을 만들게 됨
  */
 export function sameOperationIntent(left: unknown, right: unknown): boolean {
   if (left === right) return true;
@@ -157,6 +149,7 @@ export function sameOperationIntent(left: unknown, right: unknown): boolean {
     return left.every((item, index) => sameOperationIntent(item, right[index]));
   }
 
+  // undefined가 아닌 키 목록을 비교하고 각 값을 재귀 비교
   const keysOf = (value: object) =>
     Object.keys(value).filter((key) => (value as Record<string, unknown>)[key] !== undefined);
   const leftKeys = keysOf(left);
@@ -171,16 +164,11 @@ export function sameOperationIntent(left: unknown, right: unknown): boolean {
 }
 
 /**
- * 붙잡을 의도를 **호출부 객체와 완전히 분리된 불변 스냅샷**으로 굳힌다.
+ * 붙잡을 의도를 호출부 객체와 분리된 불변 스냅샷으로 복제
  *
- * 왜: 호출부가 넘긴 객체는 대화상자 상태와 연결돼 있어 begin 이후에도 편집될 수 있다. 그 참조를
- * 그대로 들고 있으면 첫 전송·재시도가 **지금 화면 값**을 몰래 실어 보내게 된다. 그래서 begin 이
- * 새 의도를 받을 때 이 함수로 재귀 복제 + 재귀 동결한 detached 스냅샷을 만들어 붙잡고, 첫 전송과
- * 재시도 모두 그 스냅샷만 쓴다.
- *
- * 의도는 계약 요청 본문이 될 값이라 JSON 스칼라·배열·평범한 객체만 온다(Date·Map·순환 없음).
- * 그래서 `JSON.stringify` 없이 구조만 복제한다 — 연락처가 통째로 담긴 문자열을 만들지 않는다.
- * `undefined` 값은 그대로 옮긴다(계약 본문에서 "없는 키"이고, 비교는 그렇게 취급한다).
+ * 호출부 객체는 대화상자 상태와 연결돼 begin 이후에도 편집될 수 있음. 참조를 그대로 들고 있으면 첫 전송·재시도가 현재 화면 값을 실어 보냄
+ * 그래서 begin이 새 의도를 받을 때 재귀 복제·재귀 동결한 스냅샷을 붙잡고 첫 전송과 재시도 모두 그 값만 사용
+ * JSON.stringify 없이 구조만 복제해 연락처가 담긴 문자열을 만들지 않음. undefined 값은 그대로 옮김
  */
 export function detachOperationIntent<T>(value: T): T {
   if (value === null || typeof value !== "object") return value;
@@ -198,42 +186,68 @@ export function detachOperationIntent<T>(value: T): T {
   return Object.freeze(copy) as unknown as T;
 }
 
-/** 의도까지 맞춰 본 키 조회 결과. */
+/**
+ * 의도까지 대조한 키 조회 결과
+ */
 export type OperationIntentLookup<I> =
   | {
-      ok: true;
-      key: string;
       /**
-       * 붙잡힌 **불변 스냅샷**. 첫 전송과 재시도는 호출부의 (편집될 수 있는) 객체가 아니라 이
-       * 값으로만 나가야 한다 — 보내는 것과 붙잡는 것이 갈라지지 않게 한다.
+       * 키 발급 성공
+       */
+      ok: true;
+
+      /**
+       * 이번 시도에 쓸 키
+       */
+      key: string;
+
+      /**
+       * 붙잡힌 불변 스냅샷. 첫 전송과 재시도는 편집될 수 있는 호출부 객체가 아니라 이 값으로만 보내 보내는 값과 붙잡은 값이 갈라지지 않게 함
        */
       intent: I;
     }
   | { ok: false; reason: "capacity" }
+
   /**
-   * 이 대상에 **결과 미상인 다른 의도**가 붙잡혀 있다. 지금 의도는 보내면 안 된다 —
-   * 사용자는 이전 결과를 확인하거나 그 의도 그대로 재시도해야 한다.
+   * 이 대상에 결과 불명인 다른 의도가 붙잡혀 있음. 지금 의도는 보내면 안 되고, 사용자는 이전 결과를 확인하거나 그 의도 그대로 재시도해야 함
    */
   | { ok: false; reason: "diverged" };
 
+/**
+ * 대상별 의도 고정 키 핸들
+ */
 export interface KeyedOperationIntents<I> {
   /**
-   * 이 대상·이 의도로 보낼 키와 **붙잡힌 불변 스냅샷**.
-   * - 붙잡힌 의도가 없으면 새 키를 만들고, 의도의 detached 스냅샷을 함께 기록해 그대로 돌려준다.
-   * - 붙잡힌 의도와 **같으면** 그 키와 이미 붙잡힌 스냅샷을 그대로 (진짜 재시도).
-   * - 붙잡힌 의도와 **다르면** `diverged` — 키를 내주지 않는다.
+   * 이 대상·의도로 보낼 키와 붙잡힌 불변 스냅샷
+   *
+   * 붙잡힌 의도가 없으면 새 키를 만들고 의도 스냅샷을 함께 기록해 반환
+   * 붙잡힌 의도와 같으면 그 키와 스냅샷 반환(진짜 재시도), 다르면 diverged로 키를 내주지 않음
    */
   begin: (id: string, intent: I) => OperationIntentLookup<I>;
+
   /**
-   * 붙잡혀 있는 미확정 의도 (없으면 null) — 화면이 "그대로 재시도"를 정직하게 내주는 자리.
-   * 재귀 동결된 스냅샷을 그대로 돌려준다 — 받은 쪽이 이 값을 바꿔도 붙잡힌 스냅샷은 흔들리지 않는다.
+   * 붙잡힌 미확정 의도. 없으면 null
+   *
+   * 화면이 그대로 재시도를 제공하는 데 사용. 재귀 동결된 스냅샷이라 받은 쪽이 바꿀 수 없음
    */
   retained: (id: string) => I | null;
-  /** 확정 성공(`settle(id)`) 또는 확정 4xx 에서만 키와 의도를 함께 버린다. */
+
+  /**
+   * 확정 성공(`settle(id)`) 또는 확정 4xx에서만 키와 의도를 함께 버림
+   */
   settle: (id: string, error?: unknown) => void;
+
+  /**
+   * 대상의 키와 의도를 명시적으로 버림
+   */
   reset: (id: string) => void;
 }
 
+/**
+ * 대상별 의도 고정 Idempotency-Key 관리 훅
+ *
+ * @param maxEntries 미확정 대상 상한. 기본 50
+ */
 export function useKeyedOperationIntents<I>(maxEntries: number = DEFAULT_MAX_KEYS): KeyedOperationIntents<I> {
   const entriesRef = useRef<Map<string, { key: string; intent: I }>>(new Map());
 
@@ -243,18 +257,16 @@ export function useKeyedOperationIntents<I>(maxEntries: number = DEFAULT_MAX_KEY
       const existing = entries.get(id);
 
       if (existing !== undefined) {
-        // 같은 의도의 재시도만 같은 키를 탄다. 다른 의도면 이 키로 나갈 수 없다.
-        // 비교는 호출부 객체로 하되, 나가는 건 **붙잡힌 스냅샷**이다.
+        // 같은 의도의 재시도만 같은 키를 씀. 비교는 호출부 객체로 하지만 보내는 값은 붙잡힌 스냅샷
         return sameOperationIntent(existing.intent, intent)
           ? { ok: true, key: existing.key, intent: existing.intent }
           : { ok: false, reason: "diverged" };
       }
 
-      // 상한 도달 — 자리를 만들려고 미확정 키를 버리는 대신 새 조작을 거절한다.
+      // 상한 도달 시 자리를 만들려고 미확정 키를 버리지 않고 새 조작을 거부
       if (entries.size >= maxEntries) return { ok: false, reason: "capacity" };
 
-      // 호출부 참조가 아니라 detached·재귀 동결 스냅샷을 붙잡는다 — begin 이후 화면이 값을
-      // 편집해도 첫 전송·재시도는 이 스냅샷 그대로 나간다.
+      // 호출부 참조가 아닌 분리·동결 스냅샷을 붙잡아 begin 이후 화면 편집과 무관하게 같은 값을 전송
       const snapshot = detachOperationIntent(intent);
       const key = newOperationKey();
       entries.set(id, { key, intent: snapshot });
@@ -273,10 +285,15 @@ export function useKeyedOperationIntents<I>(maxEntries: number = DEFAULT_MAX_KEY
     entriesRef.current.delete(id);
   }, []);
 
-  // 참조 안정성 — 이 핸들을 deps 에 넣는 useCallback 이 매 렌더 재생성되지 않게 한다.
+  // 참조 안정성: 이 핸들을 의존성에 넣는 useCallback이 매 렌더 재생성되지 않게 함
   return useMemo(() => ({ begin, retained, settle, reset }), [begin, retained, settle, reset]);
 }
 
+/**
+ * 대상별 Idempotency-Key 관리 훅
+ *
+ * @param maxEntries 미확정 대상 상한. 기본 50
+ */
 export function useKeyedOperationKeys(maxEntries: number = DEFAULT_MAX_KEYS): KeyedOperationKeys {
   const keysRef = useRef<Map<string, string>>(new Map());
 
@@ -284,11 +301,11 @@ export function useKeyedOperationKeys(maxEntries: number = DEFAULT_MAX_KEYS): Ke
     (id: string): OperationKeyLookup => {
       const keys = keysRef.current;
 
-      // 기존 미확정 키는 언제나 그대로 돌려준다 — 재시도가 새 키를 만들면 안 된다.
+      // 기존 미확정 키는 항상 그대로 반환. 재시도가 새 키를 만들면 안 됨
       const existing = keys.get(id);
       if (existing) return { ok: true, key: existing };
 
-      // 상한 도달 — 자리를 만들려고 미확정 키를 버리는 대신 새 조작을 거절한다.
+      // 상한 도달 시 자리를 만들려고 미확정 키를 버리지 않고 새 조작을 거부
       if (keys.size >= maxEntries) return { ok: false, reason: "capacity" };
 
       const key = newOperationKey();
@@ -306,6 +323,6 @@ export function useKeyedOperationKeys(maxEntries: number = DEFAULT_MAX_KEYS): Ke
     keysRef.current.delete(id);
   }, []);
 
-  // 참조 안정성 — 이 핸들을 deps 에 넣는 useCallback 이 매 렌더 재생성되지 않게 한다.
+  // 참조 안정성: 이 핸들을 의존성에 넣는 useCallback이 매 렌더 재생성되지 않게 함
   return useMemo(() => ({ keyFor, settle, reset }), [keyFor, settle, reset]);
 }

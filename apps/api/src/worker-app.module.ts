@@ -5,6 +5,11 @@ import { PrismaModule } from "./common/prisma/prisma.module.js";
 import { GoogleSheetsWorkerModule } from "./modules/google-sheets/google-sheets-worker.module.js";
 import { SmsWorkerModule } from "./modules/sms/sms-worker.module.js";
 
+/**
+ * 워커 프로세스 루트 모듈
+ *
+ * HTTP·세션·Redis 없이 DB와 문자·시트 워커만 구성
+ */
 @Module({
   imports: [
     ConfigModule.forRoot({

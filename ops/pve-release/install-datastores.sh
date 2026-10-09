@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# 릴리스 VM 데이터 저장소 설치. PostgreSQL 18·Redis 데이터를 /srv 로 옮기고 설정·백업·스왑 구성, 비밀값 생성, DB 역할·권한·Redis ACL 설정 후 점검
+# 실행: pve-release(Ubuntu resolute)에서 root 로 install-datastores.sh <스테이징 디렉터리>
+#   스테이징 디렉터리에 이 저장소의 postgresql·redis·sysctl·systemd·백업 파일 사본을 정해진 이름으로 둠. 여러 번 실행해도 기존 비밀값은 유지
+# 종료 코드: 0 완료, 1 root·호스트·OS·스테이징 파일·패키지 누락·스왑 파일 충돌·기동 실패, 그 밖은 점검 명령 실패
 set -Eeuo pipefail
 
+# root·호스트·OS·스테이징 파일·패키지 확인
 if [[ ${EUID} -ne 0 ]]; then
   echo "run as root" >&2
   exit 1
@@ -30,6 +35,7 @@ if ! dpkg-query -W postgresql-18 redis-server >/dev/null 2>&1; then
   exit 1
 fi
 
+# 서비스를 멈추고 데이터 디렉터리를 /srv 로 옮김(처음 한 번만 복사)
 backup_stamp=$(date +%Y%m%d-%H%M%S)
 
 systemctl stop redis-server.service
@@ -49,6 +55,7 @@ if [[ -d /var/lib/redis && -z $(find /srv/redis -mindepth 1 -maxdepth 1 -print -
 fi
 chown -R redis:redis /srv/redis
 
+# PostgreSQL·Redis 설정 설치. 원래 redis.conf 는 한 번 백업하고 include 한 줄만 추가
 install -d -o root -g postgres -m 0750 /etc/postgresql/18/main/conf.d
 install -o root -g postgres -m 0640 "${staging_dir}/postgresql.conf" /etc/postgresql/18/main/conf.d/99-npr.conf
 
@@ -60,6 +67,7 @@ if ! grep -qxF 'include /etc/redis/npr.conf' /etc/redis/redis.conf; then
   printf '\n# NPR release overrides\ninclude /etc/redis/npr.conf\n' >> /etc/redis/redis.conf
 fi
 
+# systemd·sysctl·백업 파일 설치
 install -d -o root -g root -m 0755 /etc/systemd/system/redis-server.service.d
 install -o root -g root -m 0644 "${staging_dir}/redis-override.conf" /etc/systemd/system/redis-server.service.d/override.conf
 install -o root -g root -m 0644 "${staging_dir}/disable-thp.service" /etc/systemd/system/disable-transparent-huge-pages.service
@@ -69,8 +77,8 @@ install -o root -g root -m 0755 "${staging_dir}/backup-postgres.sh" /usr/local/s
 install -o root -g root -m 0644 "${staging_dir}/backup.service" /etc/systemd/system/npr-postgres-backup.service
 install -o root -g root -m 0644 "${staging_dir}/backup.timer" /etc/systemd/system/npr-postgres-backup.timer
 
-# Keep a small emergency swap area so a transient app spike does not make the
-# kernel kill PostgreSQL. swappiness=1 keeps normal database traffic in RAM.
+# 순간적인 앱 메모리 급증으로 커널이 PostgreSQL 을 죽이지 않도록 작은 비상 스왑을 둠
+# swappiness=1 이라 평소 DB 트래픽은 RAM 에 머묾
 swap_file=/swapfile.npr
 if [[ ! -e ${swap_file} ]]; then
   fallocate -l 4G "${swap_file}"
@@ -87,12 +95,14 @@ if ! swapon --show=NAME --noheadings | grep -qx "${swap_file}"; then
   swapon "${swap_file}"
 fi
 
+# 앱 공용 그룹·계정과 설정 디렉터리
 getent group npr >/dev/null || groupadd --system npr
 if ! id npr >/dev/null 2>&1; then
   useradd --system --gid npr --home-dir /srv/npr --create-home --shell /usr/sbin/nologin npr
 fi
 install -d -o root -g npr -m 0750 /etc/npr-seminar
 
+# runtime.env 가 없을 때만 DB·Redis 비밀번호와 앱 비밀키를 생성. 연동은 모두 끈 상태
 runtime_env=/etc/npr-seminar/runtime.env
 if [[ ! -f ${runtime_env} ]]; then
   umask 0027
@@ -153,10 +163,12 @@ if [[ ! -f ${runtime_env} ]]; then
   chmod 0640 "${runtime_env}"
 fi
 
+# 비밀값을 환경으로 읽음
 set -a
 source "${runtime_env}"
 set +a
 
+# Redis 관리자 계정 비밀번호(root 전용 파일)
 admin_env=/etc/npr-seminar/admin.env
 if [[ ! -f ${admin_env} ]]; then
   redis_admin_password=$(openssl rand -hex 32)
@@ -170,6 +182,7 @@ set -a
 source "${admin_env}"
 set +a
 
+# Redis ACL. 앱 계정은 npr: 키와 필요한 명령만, 관리자 계정은 전체 권한
 install -o root -g redis -m 0640 /dev/null /etc/redis/users.acl
 {
   printf 'user default off\n'
@@ -179,10 +192,12 @@ install -o root -g redis -m 0640 /dev/null /etc/redis/users.acl
 chown root:redis /etc/redis/users.acl
 chmod 0640 /etc/redis/users.acl
 
+# 커널 설정 반영, THP 끄기
 sysctl --system >/dev/null
 systemctl daemon-reload
 systemctl enable --now disable-transparent-huge-pages.service
 
+# 새 데이터 디렉터리로 설정이 해석되는지 확인 후 PostgreSQL 기동·준비 대기
 sudo -u postgres /usr/lib/postgresql/18/bin/postgres \
   -D /srv/postgresql/18/main \
   -C data_directory \
@@ -201,6 +216,7 @@ for attempt in {1..30}; do
   sleep 1
 done
 
+# DB 역할·DB 생성, 접속 권한, UTC 시간대·역할별 시간 제한
 sudo -u postgres psql -X --set=ON_ERROR_STOP=1 postgres >/dev/null <<SQL
 DO \$do\$
 BEGIN
@@ -243,6 +259,7 @@ ALTER ROLE npr_readonly SET default_transaction_read_only = on;
 ALTER ROLE npr_readonly SET statement_timeout = '30s';
 SQL
 
+# 스키마 권한과 이후 생성될 객체의 기본 권한. 앱 계정은 삭제 권한 없음
 sudo -u postgres psql -X --set=ON_ERROR_STOP=1 npr_seminar >/dev/null <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 ALTER SCHEMA public OWNER TO npr_migrator;
@@ -269,6 +286,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE npr_migrator IN SCHEMA public
   GRANT SELECT ON SEQUENCES TO npr_readonly;
 SQL
 
+# Redis 기동·준비 대기
 systemctl enable redis-server.service
 systemctl start redis-server.service
 for attempt in {1..30}; do
@@ -282,6 +300,7 @@ for attempt in {1..30}; do
   sleep 1
 done
 
+# 앱 계정 ACL 로 실제 사용하는 명령이 모두 되는지 임시 키로 점검
 redis_app_cli() {
   REDISCLI_AUTH="${REDIS_PASSWORD}" redis-cli --user npr -h 127.0.0.1 --no-auth-warning "$@" 2>/dev/null
 }
@@ -299,6 +318,7 @@ redis_eval_probe="if redis.call('EXISTS',KEYS[1])==1 then return 0 end; redis.ca
 [[ $(redis_app_cli DEL "${redis_probe}:counter" "${redis_probe}:set") == 2 ]]
 unset -f redis_app_cli
 
+# 모든 역할의 세션 시간대가 UTC 인지 확인하고 백업 타이머 시작
 sudo -u postgres psql -X -d postgres -Atqc 'show timezone' | grep -qx UTC
 PGPASSWORD="${DB_MIGRATOR_PASSWORD}" psql -X -h 127.0.0.1 -U npr_migrator -d npr_seminar -Atqc 'show timezone' | grep -qx UTC
 PGPASSWORD="${DB_APP_PASSWORD}" psql -X -h 127.0.0.1 -U npr_app -d npr_seminar -Atqc 'show timezone' | grep -qx UTC

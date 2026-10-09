@@ -13,75 +13,231 @@ import { SessionRosterService } from "../../src/modules/family-bookings/session-
 import { SessionStatisticsService } from "../../src/modules/family-bookings/session-statistics.service.js";
 import { StudentsService } from "../../src/modules/students/students.service.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
+
+/**
+ * 테스트 회차 공개 ID
+ */
 const sessionPublicId = "00000000-0000-4000-8000-000000000102";
+
+/**
+ * 관리자 주체
+ */
 const adminSubject = "00000000-0000-4000-8000-000000000901";
+
+/**
+ * 스캐너 주체
+ */
 const scannerSubject = "scanner:integration-roster";
 
+/**
+ * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+ */
 function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
   copy.set(value);
   return copy;
 }
 
+/**
+ * 기준 시각(2026-07-17 01:00 UTC)에서 분 단위로 떨어진 시각
+ */
 function at(minute: number): Date {
   return new Date(Date.UTC(2026, 6, 17, 1, minute));
 }
 
+/**
+ * 테스트 학생
+ */
 type TestStudent = {
+  /**
+   * 학생 ID
+   */
   readonly id: bigint;
+
+  /**
+   * 학생 공개 ID
+   */
   readonly publicId: string;
+
+  /**
+   * 학번
+   */
   readonly sourceStudentNo: string;
+
+  /**
+   * 이름
+   */
   readonly name: string;
+
+  /**
+   * 대표 반
+   */
   readonly className: string;
+
+  /**
+   * 학교
+   */
   readonly schoolName: string | null;
+
+  /**
+   * 학년
+   */
   readonly grade: string | null;
+
+  /**
+   * 담임
+   */
   readonly teacherName: string | null;
+
+  /**
+   * 단위
+   */
   readonly unitName: string | null;
 };
 
+/**
+ * 예약 상태
+ */
 type BookingStatus = "RESERVED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW";
+
+/**
+ * 예약 이벤트 종류
+ */
 type BookingEventType = "CREATED" | "UPDATED" | "CANCELLED" | "QR_ISSUED" | "CHECKED_IN" | "MARKED_NO_SHOW";
 
+/**
+ * 예약 참가자 입력
+ */
 interface TestChild {
+  /**
+   * 참여 유형
+   */
   readonly participantType: "ENROLLED" | "GUEST";
+
+  /**
+   * 재원생 학생
+   */
   readonly student?: TestStudent;
+
+  /**
+   * 비재원생 이름
+   */
   readonly name?: string;
+
+  /**
+   * 캠퍼스
+   */
   readonly branch?: "CAMPUS_A" | "CAMPUS_B" | "CAMPUS_C";
+
+  /**
+   * 학번 표시
+   */
   readonly sourceStudentNo?: string;
+
+  /**
+   * 반
+   */
   readonly className?: string;
+
+  /**
+   * 학교
+   */
   readonly schoolName?: string;
+
+  /**
+   * 학년
+   */
   readonly grade?: string;
+
+  /**
+   * 담임 스냅샷
+   */
   readonly teacherName?: string;
+
+  /**
+   * 단위 스냅샷
+   */
   readonly unitName?: string;
 }
 
+/**
+ * 예약 이벤트 입력
+ */
 interface TestEvent {
+  /**
+   * 이벤트 종류
+   */
   readonly eventType: BookingEventType;
+
+  /**
+   * 처리 주체
+   */
   readonly actorSubject?: string | null;
+
+  /**
+   * 발생 시각
+   */
   readonly occurredAt: Date;
 }
 
+// 관리자 회차 명단 통합 테스트. PostgreSQL 컨테이너 사용
 describe("ADMIN seminar session roster", () => {
+  // PostgreSQL 컨테이너
   let postgres: StartedTestContainer;
+
+  // DB 클라이언트
   let prisma: PrismaService;
+
+  // 연락처 보호
   let protector: PhoneProtector;
+
+  // 명단 서비스
   let service: SessionRosterService;
+
+  // 통계 서비스
   let statisticsService: SessionStatisticsService;
+
+  // 학생 서비스
   let studentsService: StudentsService;
+
+  // DB 연결 URL
   let databaseUrl: string;
+
+  // 테스트 회차 ID
   let sessionInternalId: bigint;
+
+  // 동기화 실행 ID
   let syncRunId: bigint;
+
+  // A 지점 ID
   let campusABranchId: bigint;
+
+  // B 지점 ID
   let campusBBranchId: bigint;
+
+  // C 지점 ID
   let campusCBranchId: bigint;
 
+  // 키별 테스트 학생
   const students = new Map<string, TestStudent>();
+
+  // 키별 테스트 예약
   const bookings = new Map<string, Awaited<ReturnType<typeof createBooking>>>();
+
+  // 예약 없는 학생의 어머니 연락처
   const unbookedMother = "01021110001";
+
+  // 예약 없는 학생의 아버지 연락처
   const unbookedFather = "01021110002";
+
+  // 비재원생 예약 연락처
   const guestContact = "01027778888";
 
+  // 컨테이너 기동, 마이그레이션, 학생·예약·이벤트 시나리오 데이터 구성
   beforeAll(async () => {
     postgres = await new GenericContainer("postgres:18-alpine")
       .withEnvironment({ POSTGRES_PASSWORD: "integration_only", POSTGRES_DB: "npr_roster" })
@@ -306,11 +462,13 @@ describe("ADMIN seminar session roster", () => {
     }
   });
 
+  // 연결 종료와 컨테이너 정지
   afterAll(async () => {
     await prisma?.$disconnect();
     await postgres?.stop();
   });
 
+  // 재원생 참가자 입력. 단위 스냅샷은 원본 값으로 둠
   function enrolledChild(student: TestStudent): TestChild {
     return {
       participantType: "ENROLLED",
@@ -320,6 +478,7 @@ describe("ADMIN seminar session roster", () => {
     };
   }
 
+  // 학생 원장 행 생성
   async function createStudent(input: {
     readonly sourceStudentNo: string;
     readonly name: string;
@@ -360,6 +519,7 @@ describe("ADMIN seminar session roster", () => {
     } });
   }
 
+  // 학생의 활성 수강 등록 생성
   async function createAssignment(student: TestStudent, className: string, teacherName: string) {
     return prisma.studentClassAssignment.create({ data: {
       studentId: student.id,
@@ -376,6 +536,7 @@ describe("ADMIN seminar session roster", () => {
     } });
   }
 
+  // 참가자·이벤트를 포함한 예약 생성
   async function createBooking(input: {
     readonly phone: string;
     readonly status: BookingStatus;
@@ -442,6 +603,7 @@ describe("ADMIN seminar session roster", () => {
     });
   }
 
+  // 운영 표시 열 백필은 표시 열만 채우고 재실행해도 결과 동일
   it("backfills only operational display columns and remains idempotent", async () => {
     const unbooked = await prisma.student.findUniqueOrThrow({
       where: { sourceStudentNo: "ROSTER-001" },
@@ -462,6 +624,7 @@ describe("ADMIN seminar session roster", () => {
     expect(staging.unitName).toBe("원본단위");
   });
 
+  // 예약과 연결된 형제·종료·재예약·중복 제거된 비재원생 행만 반환하고 QR 이벤트는 제외
   it("returns only booking-linked sibling, terminal, rebooked, and deduplicated guest rows without QR noise", async () => {
     const result = await service.list(sessionPublicId, {
       branch: "CAMPUS_A", unitGroup: "ALL", page: 1, pageSize: 100,
@@ -533,6 +696,7 @@ describe("ADMIN seminar session roster", () => {
     expect(guest.guestContact === guestContact).toBe(true);
   });
 
+  // 캠퍼스·단위·담임·검색어·연락처·비재원생·페이지 필터가 부작용 없이 적용
   it("applies branch, unit, teacher, text/contact, guest, and pagination filters without side effects", async () => {
     const middleOne = await service.list(sessionPublicId, { branch: "CAMPUS_A", unitGroup: "MIDDLE_1", page: 1, pageSize: 100 });
     expect(middleOne.items).toEqual([]);
@@ -595,6 +759,7 @@ describe("ADMIN seminar session roster", () => {
     expect(await prisma.sheetOutbox.count()).toBe(0);
   });
 
+  // 비재원생 가족 예약은 요약·경로·전체 단위에 포함하고 개별 단위는 재원생만
   it("counts guest family bookings in summary, channels, and the ALL unit while concrete units stay enrolled-only", async () => {
     const operations = await statisticsService.operationsSummary(sessionPublicId);
     expect(operations).toEqual({
@@ -692,6 +857,7 @@ describe("ADMIN seminar session roster", () => {
     });
   });
 
+  // 엑셀은 화면 페이지와 무관하게 필터 결과 전체와 운영 열·전체 연락처를 포함
   it("exports every filtered row independently of UI pagination with operational columns and full parent phones", async () => {
     const output = await service.exportXlsx(sessionPublicId, {
       branch: "CAMPUS_A",
@@ -742,6 +908,7 @@ describe("ADMIN seminar session roster", () => {
     expect(contactSheet.getRow(2).getCell(6).text).toBe("형제 하나");
   });
 
+  // 학생 상태 정렬을 페이지 전에 적용하고 공통 단위 그룹 필터 사용
   it("sorts student status before pagination and applies the shared unit-group filter", async () => {
     const result = await studentsService.list({ unitGroup: "ALL", sourceActive: true, page: 1, pageSize: 100 });
     expect(result.facets.teachers).toEqual([

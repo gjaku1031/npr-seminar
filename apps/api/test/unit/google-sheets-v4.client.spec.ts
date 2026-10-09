@@ -14,10 +14,26 @@ import {
 } from "../../src/modules/google-sheets/google-sheets.gateway.js";
 import { GoogleSheetsV4Client } from "../../src/modules/google-sheets/google-sheets-v4.client.js";
 
+/**
+ * 테스트가 만든 임시 디렉터리. 테스트 후 삭제
+ */
 const directories: string[] = [];
+
+/**
+ * 테스트 서비스 계정 이메일
+ */
 const serviceAccountEmail = "npr-sheets@example-project.iam.gserviceaccount.com";
+
+/**
+ * 테스트 스프레드시트 ID
+ */
 const spreadsheetId = "test-spreadsheet-identifier-0001";
 
+/**
+ * 임시 디렉터리에 0600 권한 서비스 계정 자격 증명 파일 생성
+ *
+ * @returns 자격 증명 파일 경로
+ */
 async function credentials(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "npr-sheets-client-"));
   directories.push(directory);
@@ -31,6 +47,11 @@ async function credentials(): Promise<string> {
   return path;
 }
 
+/**
+ * 시트 반영이 켜진 워커 실행 환경
+ *
+ * @param allowPublicWriterInDevelopment 개발 환경 공개 편집 허용 여부
+ */
 function environment(path: string, allowPublicWriterInDevelopment = false): AppEnvironment {
   return {
     appEnv: "test", processRole: "worker", port: 4000, trustProxy: 0, tongSyncEnabled: false,
@@ -43,29 +64,102 @@ function environment(path: string, allowPublicWriterInDevelopment = false): AppE
   };
 }
 
+/**
+ * 가짜 스프레드시트의 시트 정의
+ */
 interface SheetDefinition {
+  /**
+   * 시트 ID
+   */
   readonly sheetId: number;
+
+  /**
+   * 시트 제목
+   */
   readonly title: string;
+
+  /**
+   * 열 수
+   */
   readonly columnCount: number;
 }
 
+/**
+ * 가짜 Google API 상태
+ */
 interface ProjectionFetchState {
+  /**
+   * 시트 목록
+   */
   sheets: SheetDefinition[];
+
+  /**
+   * 범위별 머리글 행
+   */
   rows: Map<string, string[]>;
+
+  /**
+   * 기술 표식 열 보호 안전 여부
+   */
   technicalSafe: boolean;
+
+  /**
+   * 보호 범위 편집자 사용자
+   */
   technicalUsers: string[];
+
+  /**
+   * 보호 범위 편집자 그룹
+   */
   technicalGroups: string[];
+
+  /**
+   * 도메인 사용자 편집 허용 여부
+   */
   domainUsersCanEdit: boolean;
+
+  /**
+   * 구조 변경 요청 기록
+   */
   structuralWrites: unknown[][];
 }
 
+/**
+ * 예약명단 시트 정의
+ */
 const reservationSheet: SheetDefinition = { sheetId: 1777564107, title: "예약명단", columnCount: 30 };
+
+/**
+ * 예약집계 시트 정의
+ */
 const summarySheet: SheetDefinition = { sheetId: 202607180, title: "예약집계", columnCount: 26 };
+
+/**
+ * 로그 시트 정의
+ */
 const logSheet: SheetDefinition = { sheetId: 1415280656, title: "로그", columnCount: 26 };
+
+/**
+ * 표식 머리글이 빈 예약명단 머리글
+ */
 const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 16 }, () => ""), ""];
+
+/**
+ * 예약집계 머리글
+ */
 const summaryHeader = [...FAMILY_SUMMARY_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), FAMILY_SUMMARY_TECHNICAL_MARKER_HEADER];
+
+/**
+ * 로그 머리글
+ */
 const logHeader = [...BOOKING_LOG_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), BOOKING_LOG_TECHNICAL_MARKER_HEADER];
 
+/**
+ * Drive·Sheets API를 흉내 내는 fetch 대역
+ *
+ * @param overrides 기본 상태에 덮어쓸 값
+ * @returns 상태와 fetch 대역
+ */
 function createProjectionFetch(overrides: Partial<ProjectionFetchState> = {}) {
   const state: ProjectionFetchState = {
     sheets: [reservationSheet, logSheet],
@@ -175,12 +269,15 @@ function createProjectionFetch(overrides: Partial<ProjectionFetchState> = {}) {
   return { state, fetchMock };
 }
 
+// 전역 fetch 복원과 임시 디렉터리 삭제
 afterEach(async () => {
   vi.unstubAllGlobals();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
+// Drive 공유 설정 안전성 검사
 describe("GoogleSheetsV4Client Drive sharing gate", () => {
+  // 링크 공개 편집·도메인·그룹 권한은 안전하지 않은 공유로 거부
   it.each([
     ["anyone", "writer", "WORKBOOK_LINK_WRITER_ACCESS"],
     ["domain", "reader", "WORKBOOK_DOMAIN_ACCESS"],
@@ -206,6 +303,7 @@ describe("GoogleSheetsV4Client Drive sharing gate", () => {
       .rejects.toMatchObject({ code });
   });
 
+  // 링크 공개 읽기·댓글 권한도 거부
   it.each(["reader", "commenter"] as const)("fails closed for public %s access", async (role) => {
     const path = await credentials();
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -227,6 +325,7 @@ describe("GoogleSheetsV4Client Drive sharing gate", () => {
       .rejects.toMatchObject({ code: "WORKBOOK_PUBLIC_ACCESS" });
   });
 
+  // 개발 예외 설정이 있을 때만 링크 공개 편집 허용(활성화·반영 모두)
   it.each(["ACTIVATION", "DISPATCH"] as const)(
     "allows an anyone writer only with the explicit development override during %s",
     async (access) => {
@@ -252,6 +351,7 @@ describe("GoogleSheetsV4Client Drive sharing gate", () => {
     },
   );
 
+  // 개발 예외 설정이 있어도 공개 읽기·소유자·도메인·그룹 권한은 계속 거부
   it.each([
     ["anyone", "reader", "WORKBOOK_PUBLIC_ACCESS"],
     ["anyone", "owner", "WORKBOOK_LINK_WRITER_ACCESS"],
@@ -280,7 +380,9 @@ describe("GoogleSheetsV4Client Drive sharing gate", () => {
   });
 });
 
+// v4 스프레드시트 준비
 describe("GoogleSheetsV4Client v4 workbook preparation", () => {
+  // 예약집계 생성, 빈 로그 머리글 초기화, 세 표식 열 보호를 멱등하게 수행
   it("creates 예약집계, initializes blank 로그, and protects all three marker columns idempotently", async () => {
     const path = await credentials();
     const { state, fetchMock } = createProjectionFetch();
@@ -305,6 +407,7 @@ describe("GoogleSheetsV4Client v4 workbook preparation", () => {
       && column.requestingUserCanEdit && column.editorsRestrictedToServiceAccount)).toBe(true);
   });
 
+  // 시트 누락·열 수 불일치·ID 불일치·제목 충돌은 준비 쓰기 전에 차단
   it.each([
     ["missing reservation", [logSheet]],
     ["wrong reservation width", [{ ...reservationSheet, columnCount: 31 }, logSheet]],
@@ -322,6 +425,7 @@ describe("GoogleSheetsV4Client v4 workbook preparation", () => {
     expect(state.structuralWrites).toHaveLength(0);
   });
 
+  // 비어 있지 않은 다른 로그 머리글은 덮어쓰지 않고 거부
   it("rejects nonblank conflicting log headers without overwriting them", async () => {
     const path = await credentials();
     const { state, fetchMock } = createProjectionFetch();
@@ -335,6 +439,7 @@ describe("GoogleSheetsV4Client v4 workbook preparation", () => {
     expect(state.structuralWrites).toHaveLength(0);
   });
 
+  // 관계없는 편집자에게 권한을 준 기존 표식 보호 범위는 거부
   it("rejects an existing protected marker that grants an unrelated editor access", async () => {
     const path = await credentials();
     const { fetchMock } = createProjectionFetch({

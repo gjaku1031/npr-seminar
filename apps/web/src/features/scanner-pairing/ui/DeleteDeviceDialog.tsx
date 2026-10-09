@@ -1,33 +1,57 @@
 "use client";
 
 /**
- * 기기 하드 삭제 확인 — 되돌릴 수 없으므로 무엇이 사라지고 무엇이 남는지 먼저 말한다.
- * 계약 DELETE /api/v1/admin/scanner-devices/{deviceId} 는 204(멱등)이고 사유를 받지 않는다.
+ * 기기 하드 삭제 확인 — 되돌릴 수 없으므로 무엇이 사라지고 무엇이 남는지 먼저 말함
+ * 계약 DELETE /api/v1/admin/scanner-devices/{deviceId} 는 204(멱등)이고 사유를 받지 않음
  *
- * 예전 revoke 다이얼로그의 자유 입력 사유 흐름은 제거했다 — 하드 삭제는 사유를 저장할
- * 기기 이력 자체가 남지 않으므로 사유를 받는 것이 거짓 약속이 된다.
+ * 사유 입력은 받지 않음. 하드 삭제는 사유를 저장할 기기 이력 자체가 남지 않으므로
+ * 사유를 받는 것이 거짓 약속이 됨
  */
 
 import { ConfirmDialog } from "@/shared/ui";
 import { BRANCH_LABELS, type ScannerDevice } from "@/shared/api";
 
+/**
+ * 기기 삭제 확인 창 속성
+ */
 export interface DeleteDeviceDialogProps {
-  /** null 이면 닫힌 상태. */
+  /**
+   * null 이면 닫힌 상태
+   */
   device: ScannerDevice | null;
+
+  /**
+   * 처리 중 여부
+   */
   busy: boolean;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
   /**
-   * 결과 미상으로 남은 삭제 요청이 있는가.
+   * 결과 미상으로 남은 삭제 요청이 있는가
    *
-   * 삭제는 멱등이라 사유 같은 본문이 없어 "본문 고정"이 필요 없다 — 호출부(useOperationKey)가
-   * 같은 Idempotency-Key 를 유지한 채 재시도하면 서버가 리플레이로 처리한다. 여기서는
-   * 확인 문구만 재시도로 바꾼다.
+   * 삭제는 멱등이라 사유 같은 본문이 없어 "본문 고정"이 필요 없음 — 호출부(useOperationKey)가
+   * 같은 Idempotency-Key 를 유지한 채 재시도하면 서버가 리플레이로 처리함. 여기서는
+   * 확인 문구만 재시도로 바꿈
    */
   pending?: boolean;
+
+  /**
+   * 확인 처리
+   */
   onConfirm: () => void;
+
+  /**
+   * 취소 처리
+   */
   onCancel: () => void;
 }
 
+/**
+ * 기기 하드 삭제 확인 창
+ */
 export function DeleteDeviceDialog({
   device,
   busy,

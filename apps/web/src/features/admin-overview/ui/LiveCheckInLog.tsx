@@ -1,28 +1,37 @@
 "use client";
 
 /**
- * 실시간 입장 로그 — 게이트에서 일어나는 일을 운영 화면에서 새로고침 없이 본다.
+ * 실시간 입장 로그 — 게이트에서 일어나는 일을 운영 화면에서 새로고침 없이 봄
  *
- * 터미널처럼 그린다: 한 줄 한 사건, 새 줄은 아래에 붙는다. 운영 중에 실제로 묻는 것은
- * "방금 그 가족 처리됐나"라서, 표보다 흐르는 로그가 맞다.
+ * 터미널처럼 그림: 한 줄 한 사건, 새 줄은 아래에 붙음. 운영 중에 실제로 묻는 것은
+ * "방금 그 가족 처리됐나"라서, 표보다 흐르는 로그가 맞음
  *
- * 전송은 **커서 폴링**이다(3초, afterSequence). 이벤트 원장이 단조 증가 sequence 를 주므로
- * 마지막 줄 뒤만 다시 물으면 새 줄만 온다 — 같은 줄을 두 번 그릴 일도, 놓칠 일도 없다.
- * SSE/웹소켓을 붙일 이유가 아직 없다: 게이트 처리량은 분당 수십 건이고, 3초 폴링 한 번은
- * 로그 몇 줄짜리 응답이다.
+ * 전송은 커서 폴링임(3초, afterSequence). 이벤트 원장이 단조 증가 sequence 를 주므로
+ * 마지막 줄 뒤만 다시 물으면 새 줄만 옴 — 같은 줄을 두 번 그릴 일도, 놓칠 일도 없음
+ * SSE/웹소켓을 붙일 이유가 아직 없음: 게이트 처리량은 분당 수십 건이고, 3초 폴링 한 번은
+ * 로그 몇 줄짜리 응답임
  *
- * 실패는 조용히 넘긴다 — 다음 폴링이 같은 커서로 다시 묻는다. 로그가 잠깐 늦는 것은
- * 사고가 아니지만, 오류 배너가 3초마다 깜빡이는 것은 운영 방해다.
+ * 실패는 조용히 넘김 — 다음 폴링이 같은 커서로 다시 물음. 로그가 잠깐 늦는 것은
+ * 사고가 아니지만, 오류 배너가 3초마다 깜빡이는 것은 운영 방해임
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listAdminCheckInEvents, type CheckInAuditEvent } from "@/shared/api/admin-operations";
 import type { CheckInResult } from "@/shared/api";
 
-/** 화면에 유지하는 최대 줄 수 — 그 이상은 오래된 줄부터 버린다(전체 이력은 원장에 있다). */
+/**
+ * 화면에 유지하는 최대 줄 수 — 그 이상은 오래된 줄부터 버림(전체 이력은 원장에 있음)
+ */
 const MAX_LINES = 300;
+
+/**
+ * 입장 로그 폴링 간격(ms)
+ */
 const POLL_MS = 3000;
 
+/**
+ * 체크인 결과 표시 문구
+ */
 const RESULT_LABELS: Readonly<Record<CheckInResult, string>> = {
   CHECKED_IN: "입장",
   PARTY_SELECTION_REQUIRED: "인원 확인 대기",
@@ -36,6 +45,9 @@ const RESULT_LABELS: Readonly<Record<CheckInResult, string>> = {
   NOT_AUTHORIZED: "권한 없음",
 };
 
+/**
+ * 체크인 결과별 글자색
+ */
 function resultColor(result: CheckInResult): string {
   if (result === "CHECKED_IN") return "var(--mint-400)";
   if (result === "PARTY_SELECTION_REQUIRED") return "var(--status-warning-on-dark)";
@@ -43,6 +55,9 @@ function resultColor(result: CheckInResult): string {
   return "var(--status-danger)";
 }
 
+/**
+ * 입장 로그 한 줄의 시각·출입구·본문 문구
+ */
 function formatLine(event: CheckInAuditEvent): { time: string; gate: string; body: string } {
   const time = new Date(event.occurredAt).toLocaleTimeString("ko-KR", { hour12: false });
   const gate = event.scannerGateCode ?? event.scannerDeviceName ?? "-";
@@ -53,11 +68,12 @@ function formatLine(event: CheckInAuditEvent): { time: string; gate: string; bod
   return { time, gate, body: `${name}${attended} — ${RESULT_LABELS[event.result]}` };
 }
 
+/**
+ * 선택 회차의 실시간 입장 로그. 새 줄만 폴링해 덧붙임
+ */
 export function LiveCheckInLog({ seminarSessionId }: { seminarSessionId: string }) {
-  /**
-   * 줄에 **어느 회차의 것인지**를 함께 들고 있는다. 회차를 바꾸면 이전 줄은 곧바로 남의
-   * 로그다 — effect 에서 비우는 대신 키를 대조해 파생하면 그 사이 한 프레임도 새지 않는다.
-   */
+  // 줄에 어느 회차의 것인지를 함께 들고 있음. 회차를 바꾸면 이전 줄은 곧바로 남의
+  // 로그임 — effect 에서 비우는 대신 키를 대조해 파생하면 그 사이 한 프레임도 새지 않음
   const [log, setLog] = useState<{ sessionId: string; lines: CheckInAuditEvent[] } | null>(null);
   const lines = useMemo(
     () => (log !== null && log.sessionId === seminarSessionId ? log.lines : []),
@@ -68,13 +84,13 @@ export function LiveCheckInLog({ seminarSessionId }: { seminarSessionId: string 
   useEffect(() => {
     let stopped = false;
     const controller = new AbortController();
-    /** 다음 폴링이 이어받을 커서 — state 로 두면 interval 콜백이 낡은 값을 본다. */
+    // 다음 폴링이 이어받을 커서 — state 로 두면 interval 콜백이 낡은 값을 봄
     let cursor: string | undefined;
 
     const pull = async () => {
       try {
-        // 원장은 오름차순이라 첫 회는 처음부터 끝까지 비운다(페이지당 200줄).
-        // 회차 하나의 이벤트는 수백 건 규모라 몇 페이지면 끝난다.
+        // 원장은 오름차순이라 첫 회는 처음부터 끝까지 비움(페이지당 200줄)
+        // 회차 하나의 이벤트는 수백 건 규모라 몇 페이지면 끝남
         for (;;) {
           const page = await listAdminCheckInEvents(
             { sessionId: seminarSessionId, afterSequence: cursor, limit: 200 },
@@ -91,7 +107,7 @@ export function LiveCheckInLog({ seminarSessionId }: { seminarSessionId: string 
           if (!page.page.hasMore) return;
         }
       } catch {
-        // 다음 폴링이 같은 커서로 다시 묻는다.
+        // 다음 폴링이 같은 커서로 다시 물음
       }
     };
 
@@ -104,7 +120,7 @@ export function LiveCheckInLog({ seminarSessionId }: { seminarSessionId: string 
     };
   }, [seminarSessionId]);
 
-  // 새 줄이 붙으면 바닥으로 — 위로 올려 둔 상태(과거 확인 중)면 건드리지 않는다.
+  // 새 줄이 붙으면 바닥으로 — 위로 올려 둔 상태(과거 확인 중)면 건드리지 않음
   useEffect(() => {
     const box = scrollRef.current;
     if (box === null) return;

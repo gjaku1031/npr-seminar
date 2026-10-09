@@ -1,5 +1,5 @@
 /**
- * 개인 링크 fragment 파서 순수 테스트 (node:test + tsx). DOM·클라이언트 컴포넌트를 import 하지 않는다.
+ * 개인 링크 fragment 파서 순수 테스트 (node:test + tsx). DOM·클라이언트 컴포넌트를 import 하지 않음
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { initBookingAccessFragment, parseBookingAccessFragment } from "./booking-access-fragment";
 
-// 정확히 43자 base64url.
+// 정확히 43자 base64url
 const VALID = "abcDEF012345678901234567890123456789012_-XY";
 
 describe("parseBookingAccessFragment — 정상", () => {
@@ -61,7 +61,7 @@ describe("parseBookingAccessFragment — 거절", () => {
 });
 
 describe("initBookingAccessFragment — 첫 mount 초기화 정리", () => {
-  // pathname+search 로만 정리되고 fragment 는 어디에도 옮기지 않는지 본다.
+  // pathname+search 로만 정리되고 fragment 는 어디에도 옮기지 않는지 봄
   const at = (hash: string) => ({ hash, pathname: "/booking/access", search: "?ref=sms" });
 
   it("유효 fragment → ready + 원문 토큰 캐시 + 정확히 pathname+search 로 정리", () => {

@@ -1,10 +1,13 @@
 /**
- * 간담회 예약 — 미구현 placeholder (명세 §7, flows ADMIN-F5).
- * 요구사항 확정 시 도메인부터 설계 §10 절차로 재도입한다. 무상태 — 서버 컴포넌트로 렌더 가능.
+ * 간담회 예약 자리표시 화면. 기능 미구현
+ * 무상태라 서버 컴포넌트로 렌더 가능
  */
 
 import { Badge, Card, Icons } from "@/shared/ui";
 
+/**
+ * 간담회 예약 자리표시 화면
+ */
 export function CounselView() {
   return (
     <div data-screen-label="간담회 예약">

@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * 관리자 포스터 관리 패널 — 설명회 운영 화면(`/sessions`) 하단에 얹는 콤팩트 카드(신규 라우트가 아니다).
+ * 관리자 포스터 관리 패널 — 설명회 운영 화면(`/sessions`) 하단에 얹는 콤팩트 카드(신규 라우트가 아님)
  *
- * 현재 포스터 상태를 정직하게 구분해 보여 준다: 불러오는 중 · 오류 · 없음(공개 루트가 대신 쓰는
- * **기본 포스터**를 그대로 미리보기) · 있음(게시본 미리보기). 접근 가능한 파일 선택 → 로컬
- * 미리보기 → 교체 업로드를 제공한다. **삭제 UI 는 없다.**
+ * 현재 포스터 상태를 정직하게 구분해 보여 줌: 불러오는 중 · 오류 · 없음(공개 루트가 대신 쓰는
+ * 기본 포스터를 그대로 미리보기) · 있음(게시본 미리보기). 접근 가능한 파일 선택 → 로컬
+ * 미리보기 → 교체 업로드를 제공함. 삭제 UI 는 없음
  *
- * 이미지 규칙: 실제 자산만 쓴다(브랜드 로고·서버 포스터·기본 포스터). CSS/HTML 아트·가짜 플레이스홀더 없음.
- * 미리보기는 `contain` 으로 담고, object URL 은 훅이 교체·성공·언마운트에서 revoke 한다.
+ * 이미지 규칙: 실제 자산만 씀(브랜드 로고·서버 포스터·기본 포스터). CSS/HTML 아트·가짜 플레이스홀더 없음
+ * 미리보기는 `contain` 으로 담고, object URL 은 훅이 교체·성공·언마운트에서 revoke 함
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -19,10 +19,13 @@ import { useAdminPoster } from "../model/useAdminPoster";
 
 /**
  * 등록된 포스터가 없을 때 공개 루트(`/`)가 대신 보여 주는 기본 포스터 — PosterEntranceView 와
- * **같은 자산**이다. 사용자가 준 포스터와 바이트 동일이라, "없음"을 빈 화면이 아니라 이걸로 보여 준다.
+ * 같은 자산임. 사용자가 준 포스터와 바이트 동일이라, "없음"을 빈 화면이 아니라 이걸로 보여 줌
  */
 const DEFAULT_POSTER_IMAGE_URL = "/posters/default-admission-poster-v2.png";
 
+/**
+ * 패널 카드 스타일
+ */
 const PANEL_STYLE = {
   maxWidth: 640,
   padding: "var(--card-pad)",
@@ -32,7 +35,9 @@ const PANEL_STYLE = {
   boxShadow: "var(--shadow-card)",
 } as const;
 
-/** 담아 보여 주는 미리보기 — 자기 로드 실패 상태를 갖는다(깨진 이미지를 정직하게 말한다). */
+/**
+ * 담아 보여 주는 미리보기 — 자기 로드 실패 상태를 가짐(깨진 이미지를 정직하게 말함)
+ */
 function BoundedPreview({ src, alt }: { src: string; alt: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -51,7 +56,7 @@ function BoundedPreview({ src, alt }: { src: string; alt: string }) {
         background: "var(--surface-sunken)",
       }}
     >
-      {/* 폭·높이 메타데이터가 없어 반응형 네이티브 이미지를 담아(contain) 보여 준다. */}
+      {/* 폭·높이 메타데이터가 없어 반응형 네이티브 이미지를 담아(contain) 보여 줌 */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -63,6 +68,9 @@ function BoundedPreview({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+/**
+ * 현재 게시 포스터의 정보 표시
+ */
 function CurrentPosterMeta({ descriptor }: { descriptor: PosterDescriptor }) {
   const sizeKb = Math.max(1, Math.round(descriptor.sizeBytes / 1024));
   return (
@@ -77,17 +85,20 @@ function CurrentPosterMeta({ descriptor }: { descriptor: PosterDescriptor }) {
   );
 }
 
+/**
+ * 공개 진입면 포스터 관리 패널
+ */
 export function PosterAdminPanel() {
   const { meta, reload, file, previewUrl, selectFile, uploading, uploadError, successNotice, upload } = useAdminPoster();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 선택이 비워지면(성공·취소·검증 실패) 입력 요소도 비워 같은 파일을 다시 고를 수 있게 한다.
+  // 선택이 비워지면(성공·취소·검증 실패) 입력 요소도 비워 같은 파일을 다시 고를 수 있게 함
   useEffect(() => {
     if (file === null && inputRef.current) inputRef.current.value = "";
   }, [file]);
 
-  // 게시본이 있거나(ready) 기본 포스터가 대신 보이는 중(empty)이면 화면엔 늘 포스터가 있다 —
-  // 그래서 1차 버튼은 "등록"이 아니라 "교체"라고 정직하게 말할 수 있다.
+  // 게시본이 있거나(ready) 기본 포스터가 대신 보이는 중(empty)이면 화면엔 늘 포스터가 있음 —
+  // 그래서 1차 버튼은 "등록"이 아니라 "교체"라고 정직하게 말할 수 있음
   const hasVisiblePoster = meta.status === "ready" || meta.status === "empty";
   const uploadLabel = useMemo(() => {
     if (uploading) return "업로드 중…";
@@ -158,7 +169,7 @@ export function PosterAdminPanel() {
 
       {/* 파일 선택 + 교체 업로드 */}
       <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-hairline)" }}>
-        {/* 숨긴 입력은 버튼이 프로그램적으로 연다 — 탭 정지는 버튼 하나뿐(포커스 링이 보인다). */}
+        {/* 숨긴 입력은 버튼이 프로그램적으로 엶 — 탭 정지는 버튼 하나뿐(포커스 링이 보임) */}
         <input
           ref={inputRef}
           type="file"
@@ -181,7 +192,7 @@ export function PosterAdminPanel() {
             <Icons.image size={15} /> {file ? "이미지 변경" : "이미지 선택"}
           </button>
 
-          {/* 선택 상태 — 스크린리더가 낭독하도록 live 영역에 파일명을 둔다. */}
+          {/* 선택 상태 — 스크린리더가 낭독하도록 live 영역에 파일명을 둠 */}
           <span role="status" aria-live="polite" style={{ fontSize: 12.5, color: file ? "var(--text-body)" : "var(--text-faint)", wordBreak: "break-all" }}>
             {file ? `선택됨: ${file.name}` : "선택된 파일이 없습니다."}
           </span>

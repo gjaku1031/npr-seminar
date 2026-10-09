@@ -6,9 +6,14 @@ import {
   SHEET_SCHEMA_VERSION,
 } from "../../src/modules/google-sheets/google-sheets.gateway.js";
 
+/**
+ * api 패키지 디렉터리
+ */
 const apiDirectory = resolve(import.meta.dirname, "../..");
 
+// 시트 매핑 스키마 버전
 describe("SheetMapping schema version", () => {
+  // Prisma 기본값이 실행 코드 v4와 최신 반 열 마이그레이션 값과 일치
   it("keeps the Prisma default aligned with the canonical v4 runtime and latest class-column migration", () => {
     const prismaSchema = readFileSync(resolve(apiDirectory, "prisma/schema.prisma"), "utf8");
     const sheetMappingModel = prismaSchema.match(/model SheetMapping \{[\s\S]*?\n\}/u)?.[0];

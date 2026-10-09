@@ -2,7 +2,9 @@
 
 import { useEffect } from "react";
 
-/** 기존 `/admin` 북마크를 인증 게이트 통과 뒤 실제 콘솔 홈으로 이동시킨다. */
+/**
+ * 기존 `/admin` 북마크를 인증 게이트 통과 뒤 실제 콘솔 홈으로 이동시킴
+ */
 export default function AdminHubPage() {
   useEffect(() => {
     window.location.replace("/sessions/");

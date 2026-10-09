@@ -20,29 +20,86 @@ import {
   type SheetsValueRange,
 } from "../../src/modules/google-sheets/google-sheets-v4.client.js";
 
+/**
+ * 허용 목록에 올린 테스트 스프레드시트 ID
+ */
 const spreadsheetId = "EXAMPLE_SHEET_ID_xxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+/**
+ * 표식 머리글이 빈 예약명단 머리글
+ */
 const reservationHeader = [...SHEET_BUSINESS_HEADERS, ...Array.from({ length: 16 }, () => ""), ""];
+
+/**
+ * 예약집계 머리글
+ */
 const summaryHeader = [...FAMILY_SUMMARY_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), FAMILY_SUMMARY_TECHNICAL_MARKER_HEADER];
+
+/**
+ * 로그 머리글
+ */
 const logHeader = [...BOOKING_LOG_BUSINESS_HEADERS, ...Array.from({ length: 12 }, () => ""), BOOKING_LOG_TECHNICAL_MARKER_HEADER];
 
+/**
+ * 메모리 스프레드시트로 동작하는 가짜 클라이언트
+ *
+ * 쓰기 전후 오류 주입과 쓰기 후 값 변조로 반영·재검증 경로 재현
+ */
 class FakeSheetsClient extends SheetsClient {
+  /**
+   * 시트 제목별 행
+   */
   public readonly rows = new Map<string, string[][]>([
     ["예약명단", [[...reservationHeader]]],
     ["로그", [[]]],
   ]);
+
+  /**
+   * 시트 목록. 예약집계는 준비 단계에서 추가됨
+   */
   public sheets = [
     { sheetId: 1777564107, title: "예약명단", columnCount: 30 },
     { sheetId: 1415280656, title: "로그", columnCount: 26 },
   ];
+
+  /**
+   * 표식 열 보호 완료 여부
+   */
   public safe = false;
+
+  /**
+   * 준비 단계 구조 변경 횟수
+   */
   public prepareMutations = 0;
+
+  /**
+   * 다음 batchUpdate에서 던질 오류
+   */
   public nextError: SheetsClientError | null = null;
+
+  /**
+   * true면 기록을 반영한 뒤 오류를 던짐(커밋 후 결과 불명 재현)
+   */
   public commitBeforeError = false;
+
+  /**
+   * 기록 직후 실행할 변조 함수
+   */
   public corruptAfterWrite: (() => void) | null = null;
+
+  /**
+   * 기록한 범위 순서
+   */
   public readonly writes: string[] = [];
 
+  /**
+   * 공유 검사는 항상 통과
+   */
   public assertSafeSharing(): Promise<void> { return Promise.resolve(); }
 
+  /**
+   * 현재 시트·표식 열 상태
+   */
   public metadata(): Promise<SheetsMetadata> {
     return Promise.resolve({
       locale: "ko_KR",
@@ -62,6 +119,9 @@ class FakeSheetsClient extends SheetsClient {
     });
   }
 
+  /**
+   * 예약집계 생성과 머리글·표식 준비. 두 번째 호출은 변경 없음
+   */
   public ensureTechnicalMarkerColumn(_id: string, marker: string): Promise<void> {
     if (marker !== SHEET_TECHNICAL_MARKER_HEADER) {
       throw new SheetsClientError(400, "GOOGLE_SHEETS_TECHNICAL_HEADER_CONFLICT");
@@ -92,6 +152,9 @@ class FakeSheetsClient extends SheetsClient {
     return Promise.resolve();
   }
 
+  /**
+   * 범위의 시트 전체 행 반환
+   */
   public batchGet(_id: string, ranges: readonly string[]): Promise<Readonly<Record<string, readonly (readonly string[])[]>>> {
     return Promise.resolve(Object.fromEntries(ranges.map((range) => {
       const title = range.split("!")[0]!;
@@ -99,6 +162,9 @@ class FakeSheetsClient extends SheetsClient {
     })));
   }
 
+  /**
+   * 오류 주입 설정에 따라 기록 전후 실패
+   */
   public batchUpdate(_id: string, data: readonly SheetsValueRange[]): Promise<void> {
     if (this.nextError !== null && !this.commitBeforeError) {
       const error = this.nextError;
@@ -119,6 +185,9 @@ class FakeSheetsClient extends SheetsClient {
     return Promise.resolve();
   }
 
+  /**
+   * A1 범위 한 행 기록
+   */
   private write(entry: SheetsValueRange): void {
     const [title, a1 = ""] = entry.range.split("!");
     const match = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+)?)?$/u.exec(a1);
@@ -134,6 +203,9 @@ class FakeSheetsClient extends SheetsClient {
     }
   }
 
+  /**
+   * 열 문자를 0부터 시작하는 위치로 변환
+   */
   private column(value: string): number {
     let result = 0;
     for (const character of value) result = result * 26 + character.charCodeAt(0) - 64;
@@ -141,6 +213,9 @@ class FakeSheetsClient extends SheetsClient {
   }
 }
 
+/**
+ * 허용 스프레드시트와 시트 반영이 설정된 실행 환경
+ */
 function environment(): AppEnvironment {
   return {
     appEnv: "test", processRole: "worker", port: 4000, trustProxy: 0, tongSyncEnabled: false,
@@ -151,6 +226,11 @@ function environment(): AppEnvironment {
   };
 }
 
+/**
+ * 학생·가족·이벤트 반영 계획
+ *
+ * @param overrides 덮어쓸 row·family·event
+ */
 function plan(overrides: Partial<Pick<SheetDispatchPlan, "row" | "family" | "event">> = {}): SheetDispatchPlan {
   const base: SheetDispatchPlan = {
     workbook: {
@@ -222,13 +302,18 @@ function plan(overrides: Partial<Pick<SheetDispatchPlan, "row" | "family" | "eve
   };
 }
 
+/**
+ * 준비를 마친 게이트웨이
+ */
 async function prepared(client: FakeSheetsClient): Promise<GoogleSheetsGateway> {
   const gateway = new GoogleSheetsGateway(environment(), client);
   await expect(gateway.prepare(plan().workbook)).resolves.toEqual({ kind: "SUCCEEDED" });
   return gateway;
 }
 
+// v4 시트 반영 게이트웨이
 describe("Google Sheets v4 projection gateway", () => {
+  // 세 시트 v4 구조 지문과 독립된 기술 표식 고정
   it("pins the three-tab v4 schema and independent technical markers", () => {
     expect(SHEET_SCHEMA_VERSION).toBe(4);
     expect(SHEET_SCHEMA_DESCRIPTOR).toContain("sheet:예약명단#1777564107");
@@ -238,6 +323,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(SHEET_SCHEMA_FINGERPRINT).toMatch(/^[0-9a-f]{64}$/u);
   });
 
+  // 예약집계·빈 로그를 한 번만 준비하고 재실행은 변경 없음
   it("prepares missing 예약집계 and blank 로그 once, then replays as a no-op", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -249,6 +335,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.prepareMutations).toBe(mutations);
   });
 
+  // 학생 현재·가족 현재·가족 이벤트를 한 번의 반영으로 기록
   it("writes student-current, family-current, and family-event projections in one dispatch", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -268,6 +355,7 @@ describe("Google Sheets v4 projection gateway", () => {
     ]);
   });
 
+  // 초기화로 숨김 표식만 남은 행은 첫 빈 행으로 재사용
   it("reuses the first visibly empty row when a reset left only hidden markers", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -298,6 +386,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.writes).not.toContain("예약명단!A7:M7");
   });
 
+  // 같은 이벤트의 고아 표식은 첫 빈 행으로 옮겨 복구
   it("repairs a matching orphan event marker into the first empty row", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -316,6 +405,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.writes).toContain("로그!A2:M2");
   });
 
+  // 형제 두 명의 반영이 같은 가족·이벤트를 공유해도 둘 다 참석 인원 2 유지
   it("keeps BOTH family counts at 2 when two sibling deliveries share familyBookingId/eventId", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -328,6 +418,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.rows.get("로그")?.filter((row) => row[25] === "event-1")).toHaveLength(1);
   });
 
+  // 같은 학번의 다른 예약 행은 덮어쓰지 않음
   it("never overwrites another booking row that has the same source student number", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -354,6 +445,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(reservationRows.map((row) => row[3])).toEqual(["'=FORMULA", "같은 학생의 다른 회차"]);
   });
 
+  // 같은 가족 행을 갱신하고 새 이벤트 표식은 추가
   it("updates the same family row and appends a new event marker", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -387,6 +479,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.rows.get("로그")?.filter((row) => ["event-1", "event-2"].includes(row[25] ?? ""))).toHaveLength(2);
   });
 
+  // 공급자 결과 불명이지만 커밋된 쓰기는 재시도 시 가족·이벤트 행 중복 없이 정리
   it("reconciles a provider-unknown committed write without duplicate family/event rows", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -398,6 +491,7 @@ describe("Google Sheets v4 projection gateway", () => {
     expect(client.rows.get("로그")?.filter((row) => row[25] === "event-1")).toHaveLength(1);
   });
 
+  // 추가 전용 이벤트 표식이 중복이면 행을 더하지 않고 차단
   it("blocks a duplicate append-only event marker instead of adding another row", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);
@@ -410,6 +504,7 @@ describe("Google Sheets v4 projection gateway", () => {
     });
   });
 
+  // 기록 후 가족 행이 바뀌면 재조회 검증 실패
   it("fails post-verification if the family projection drifts after write", async () => {
     const client = new FakeSheetsClient();
     const gateway = await prepared(client);

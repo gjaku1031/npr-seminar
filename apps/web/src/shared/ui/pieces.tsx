@@ -1,13 +1,13 @@
 "use client";
 
-/**
- * 콘솔 공용 조각 — 통계 카드·빈 상태·KV.
- * 핸드오프 ui_kits/npr-admin/shared.jsx 이식 (window 전역 → 모듈).
- * shared 는 도메인(entities)을 모른다 (설계 §4.1).
- */
+// 콘솔 공용 조각. 통계 카드·빈 상태·라벨-값 행
+// shared 레이어라 도메인(entities)을 알지 못함
 
 import type { ReactNode } from "react";
 
+/**
+ * 색조별 강조 색
+ */
 const STAT_TONES: Record<string, string> = {
   brand: "var(--violet-800)",
   accent: "var(--mint-600)",
@@ -16,6 +16,9 @@ const STAT_TONES: Record<string, string> = {
   neutral: "var(--text-muted)",
 };
 
+/**
+ * 지표 하나를 크게 보여 주는 통계 카드. onClick이 있으면 선택 가능한 필터 카드로 동작
+ */
 export function StatCard({
   label,
   value,
@@ -26,13 +29,44 @@ export function StatCard({
   onClick,
   active,
 }: {
+  /**
+   * 라벨
+   */
   label: ReactNode;
+
+  /**
+   * 값
+   */
   value: ReactNode;
+
+  /**
+   * 값 뒤 단위
+   */
   suffix?: ReactNode;
+
+  /**
+   * 강조 색조
+   */
   tone?: keyof typeof STAT_TONES;
+
+  /**
+   * 라벨 앞 아이콘
+   */
   icon?: ReactNode;
+
+  /**
+   * 등장 애니메이션 지연(밀리초)
+   */
   delay?: number;
+
+  /**
+   * 클릭 처리
+   */
   onClick?: () => void;
+
+  /**
+   * 선택 상태
+   */
   active?: boolean;
 }) {
   return (
@@ -58,6 +92,9 @@ export function StatCard({
   );
 }
 
+/**
+ * 빈 목록 안내
+ */
 export function EmptyState({ children }: { children?: ReactNode }) {
   return (
     <div style={{ padding: "44px 0", textAlign: "center", color: "var(--text-faint)", fontSize: 14, animation: "ds-fade-in var(--dur-base) both" }}>
@@ -66,7 +103,9 @@ export function EmptyState({ children }: { children?: ReactNode }) {
   );
 }
 
-/** 필드 라벨 + 값 (읽기 전용 행) */
+/**
+ * 읽기 전용 라벨-값 행
+ */
 export function KV({ k, v }: { k: ReactNode; v: ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>

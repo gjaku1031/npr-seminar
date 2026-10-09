@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * 새 iPad 연결 슬롯 — 시각안 1(카드 중심)의 네 번째 점선 카드.
- * 빈 슬롯 → 발급 폼 → 코드·카운트다운 대기 상태로 자연스럽게 바뀐다.
+ * 새 iPad 연결 슬롯 — 시각안 1(카드 중심)의 네 번째 점선 카드
+ * 빈 슬롯 → 발급 폼 → 코드·카운트다운 대기 상태로 자연스럽게 바뀜
  *
- * 원문 코드는 props 로 잠깐 받아 그리기만 한다 — 저장하지 않는다.
+ * 원문 코드는 props 로 잠깐 받아 그리기만 함 — 저장하지 않음
  */
 
 import { useEffect, useId } from "react";
@@ -14,34 +14,105 @@ import { useCountdown } from "@/shared/lib/useCountdown";
 import { BRANCH_OPTIONS, type Branch, type PairingCodeMetadata } from "@/shared/api";
 import type { PairingCodeStatus } from "../model/usePairingCode";
 
+/**
+ * 페어링 코드 발급 입력값
+ */
 export interface PairingFormValue {
+  /**
+   * 캠퍼스
+   */
   branch: Branch;
+
+  /**
+   * 출입구 코드
+   */
   gateCode: string;
+
+  /**
+   * 등록 예정 기기 이름
+   */
   intendedDeviceName: string;
 }
 
+/**
+ * 페어링 코드 발급 슬롯 카드 속성
+ */
 export interface PairingSlotCardProps {
+  /**
+   * 슬롯 상태
+   */
   status: PairingCodeStatus;
+
+  /**
+   * 원문 코드. 신규 발급 직후에만 있음
+   */
   code: string | null;
+
+  /**
+   * 발급된 코드 정보. 없으면 null
+   */
   pairing: PairingCodeMetadata | null;
+
+  /**
+   * 안내 문구. 없으면 null
+   */
   notice: string | null;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
-  /** 활성 코드를 소유하지 않은 상태에서만 참 (훅이 결정한다). */
+  /**
+   * 활성 코드를 소유하지 않은 상태에서만 참 (훅이 결정함)
+   */
   canIssue: boolean;
-  /** 결과 미상 구간 — 페이로드가 바뀌지 못하게 폼을 잠근다. */
+  /**
+   * 결과 미상 구간 — 페이로드가 바뀌지 못하게 폼을 잠금
+   */
   formLocked: boolean;
-  /** 카운트다운·만료의 단일 기준 (발급 코드의 expiresAt 또는 미상 구간의 TTL 마감). */
+  /**
+   * 카운트다운·만료의 단일 기준 (발급 코드의 expiresAt 또는 미상 구간의 TTL 마감)
+   */
   deadlineIso: string | null;
+
+  /**
+   * 발급 입력값
+   */
   form: PairingFormValue;
+
+  /**
+   * 입력값 변경 처리
+   */
   onFormChange: (value: PairingFormValue) => void;
+
+  /**
+   * 발급 요청
+   */
   onIssue: () => void;
-  /** 미상 구간에서 원본 페이로드를 같은 키로 재시도. */
+  /**
+   * 미상 구간에서 원본 페이로드를 같은 키로 재시도
+   */
   onRetryUnknown: () => void;
+
+  /**
+   * 발급 취소 요청
+   */
   onCancel: () => void;
+
+  /**
+   * 카운트다운 만료 처리
+   */
   onExpire: () => void;
+
+  /**
+   * 등장 애니메이션 지연(ms)
+   */
   animationDelayMs?: number;
 }
 
+/**
+ * 입력 칸 스타일
+ */
 const fieldStyle: React.CSSProperties = {
   height: 42,
   width: "100%",
@@ -55,6 +126,9 @@ const fieldStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+/**
+ * 라벨 스타일
+ */
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
@@ -64,7 +138,9 @@ const labelStyle: React.CSSProperties = {
   textAlign: "left",
 };
 
-/** 시각적으로 숨기되 스크린리더에는 남긴다 — 카운트다운 낭독용. */
+/**
+ * 시각적으로 숨기되 스크린리더에는 남김 — 카운트다운 낭독용
+ */
 const srOnlyStyle: React.CSSProperties = {
   position: "absolute",
   width: 1,
@@ -77,6 +153,9 @@ const srOnlyStyle: React.CSSProperties = {
   border: 0,
 };
 
+/**
+ * 페어링 코드 발급 슬롯 카드. 입력·코드·카운트다운 표시
+ */
 export function PairingSlotCard({
   status,
   code,
@@ -98,10 +177,8 @@ export function PairingSlotCard({
   const gateId = useId();
   const nameId = useId();
 
-  /**
-   * 코드를 소유했거나 소유했을 수 있는 상태.
-   * 취소 중·결과 미상에도 카운트다운은 계속 돈다 — TTL 이 지나면 서버에서도 무효라 슬롯이 풀린다.
-   */
+  // 코드를 소유했거나 소유했을 수 있는 상태
+  // 취소 중·결과 미상에도 카운트다운은 계속 돔 — TTL 이 지나면 서버에서도 무효라 슬롯이 풀림
   const owningCode = status === "issued" || status === "cancelling" || status === "unknown-create";
   const countdown = useCountdown(deadlineIso);
 
@@ -115,7 +192,7 @@ export function PairingSlotCard({
   const unknownCreate = status === "unknown-create";
   const formFilled =
     form.gateCode.trim().length > 0 && form.intendedDeviceName.trim().length > 0;
-  // 기기 수 상한이 없다 — 활성 코드를 소유하지 않는 한 언제든 발급할 수 있다.
+  // 기기 수 상한이 없음 — 활성 코드를 소유하지 않는 한 언제든 발급할 수 있음
   const issueEnabled = canIssue && !formLocked && formFilled;
   const fieldsDisabled = formLocked;
 
@@ -182,7 +259,7 @@ export function PairingSlotCard({
         새 iPad 연결
       </div>
 
-      {/* 발급된 코드 — 라이브 리전으로 한 번 알린다 */}
+      {/* 발급된 코드 — 라이브 리전으로 한 번 알림 */}
       {showCode && (
         <div style={{ marginTop: 10 }}>
           <p
@@ -216,10 +293,10 @@ export function PairingSlotCard({
               }}
             >
               <Clock size={12} aria-hidden="true" />
-              {/* 초 단위 시각 표시는 낭독하지 않는다 */}
+              {/* 초 단위 시각 표시는 낭독하지 않음 */}
               <span aria-hidden="true">{countdown.label} 남음</span>
             </span>
-            {/* 낭독은 분 단위로만 바뀐다 */}
+            {/* 낭독은 분 단위로만 바뀜 */}
             <span style={srOnlyStyle} aria-live="polite">
               {countdown.announcement}
             </span>
@@ -232,7 +309,7 @@ export function PairingSlotCard({
         </div>
       )}
 
-      {/* 코드를 소유했지만 원문을 표시할 수 없는 경우(미상·리플레이·취소 중) — 상태만 알린다 */}
+      {/* 코드를 소유했지만 원문을 표시할 수 없는 경우(미상·리플레이·취소 중) — 상태만 알림 */}
       {owningCode && !showCode && (
         <p aria-live="polite" style={{ margin: "12px 0 0", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.55 }}>
           {unknownCreate
@@ -299,7 +376,7 @@ export function PairingSlotCard({
 
       <div style={{ flex: 1 }} />
 
-      {/* 상태 안내 — 색만으로 전달하지 않고 문구로 함께 알린다 */}
+      {/* 상태 안내 — 색만으로 전달하지 않고 문구로 함께 알림 */}
       {(error || notice) && (
         <p
           role={error ? "alert" : undefined}
@@ -318,8 +395,8 @@ export function PairingSlotCard({
 
       <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
         {/*
-          활성 코드를 소유했거나 소유했을 수 있는 동안에는 발급 버튼을 아예 렌더하지 않는다.
-          두 번째 유효 코드가 동시에 존재할 수 있는 경로를 UI 에서 제거한다.
+          활성 코드를 소유했거나 소유했을 수 있는 동안에는 발급 버튼을 아예 렌더하지 않음
+          두 번째 유효 코드가 동시에 존재할 수 있는 경로를 UI 에서 제거함
         */}
         {!owningCode && (
           <Button size="sm" fullWidth onClick={onIssue} disabled={!issueEnabled}>
@@ -327,16 +404,16 @@ export function PairingSlotCard({
           </Button>
         )}
 
-        {/* 미상 구간 — 원본 페이로드·원본 키로만 재시도한다 (새 코드를 만들지 않는다). */}
+        {/* 미상 구간 — 원본 페이로드·원본 키로만 재시도함 (새 코드를 만들지 않음) */}
         {unknownCreate && (
           <Button size="sm" fullWidth onClick={onRetryUnknown}>
             발급 결과 다시 확인
           </Button>
         )}
 
-        {/* 메타데이터를 되찾은 뒤에만 불투명 id 로 취소할 수 있다. */}
+        {/* 메타데이터를 되찾은 뒤에만 불투명 id 로 취소할 수 있음 */}
         {pairing && (status === "issued" || cancelling) && (
-          /* 취소가 결과 미상으로 끝나면(error) 같은 키로 재시도할 수 있어야 한다. */
+          /* 취소가 결과 미상으로 끝나면(error) 같은 키로 재시도할 수 있어야 함 */
           <Button
             size="sm"
             fullWidth

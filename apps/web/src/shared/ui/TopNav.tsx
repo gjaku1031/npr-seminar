@@ -1,16 +1,29 @@
 "use client";
 
-/** DS TopNav — 핸드오프 components/navigation/TopNav.jsx 이식. 슬라이딩 필 탭바. */
+// 디자인 시스템 상단 탐색. 선택 탭 뒤로 미끄러지는 배경 필 표시
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BrandMark } from "./BrandMark";
 import { brandHomeLabel } from "./brand";
 
+/**
+ * 탐색 항목
+ */
 export interface TopNavItem {
+  /**
+   * 표시 문구
+   */
   label: string;
+
+  /**
+   * 값
+   */
   value: string;
 }
 
+/**
+ * 브랜드 링크와 탭 목록이 있는 상단 탐색 막대
+ */
 export function TopNav({
   brand = "입시설명회",
   items = [],
@@ -20,18 +33,47 @@ export function TopNav({
   right = null,
   sticky = true,
 }: {
+  /**
+   * 브랜드 문구. 기본 `입시설명회`
+   */
   brand?: string;
+
+  /**
+   * 탭 항목
+   */
   items?: TopNavItem[];
+
+  /**
+   * 선택 탭 값
+   */
   value?: string;
+
+  /**
+   * 탭 선택 처리
+   */
   onChange?: (value: string) => void;
+
+  /**
+   * 브랜드 클릭 처리. 있으면 홈 버튼 역할과 접근성 이름 부여
+   */
   onBrandClick?: () => void;
+
+  /**
+   * 오른쪽 영역
+   */
   right?: ReactNode;
+
+  /**
+   * 상단 고정 여부
+   */
   sticky?: boolean;
 }) {
+  // 탭 요소 참조, 선택 필 위치, 호버 탭
   const refs = useRef<Record<string, HTMLAnchorElement | null>>({});
   const [pill, setPill] = useState({ left: 0, width: 0 });
   const [hover, setHover] = useState<string | null>(null);
 
+  // 선택 탭이 바뀌면 필을 그 탭 위치·너비로 이동
   useEffect(() => {
     const el = value ? refs.current[value] : null;
     if (el) setPill({ left: el.offsetLeft, width: el.offsetWidth });

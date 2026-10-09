@@ -1,19 +1,19 @@
 "use client";
 
 /**
- * 공개 진입면 (루트 `/`) — **포스터 우선**.
+ * 공개 진입면 (루트 `/`) — 포스터 우선
  *
- * 업로드된 포스터는 가변 비율 이미지다: `object-fit: contain` + 자연 비율로 **전체**를 보여 주며,
- * 절대 자르거나(crop) 배경으로 깔거나 그 위에 HTML 텍스트를 얹지 않는다. 상단 브랜드/제목 헤더는
- * 두지 않는다 — 진입면은 **포스터와 하단 액션만** 담아 포스터의 세로 존재감을 최대한 키운다. 폭·높이
- * 메타데이터가 없으므로 반응형 네이티브 이미지로 자연 크기를 지키고 가로 넘침을 막는다.
+ * 업로드된 포스터는 가변 비율 이미지임: `object-fit: contain` + 자연 비율로 전체를 보여 주며,
+ * 절대 자르거나(crop) 배경으로 깔거나 그 위에 HTML 텍스트를 얹지 않음. 상단 브랜드/제목 헤더는
+ * 두지 않음 — 진입면은 포스터와 하단 액션만 담아 포스터의 세로 존재감을 최대한 키움. 폭·높이
+ * 메타데이터가 없으므로 반응형 네이티브 이미지로 자연 크기를 지키고 가로 넘침을 막음
  *
- * 예약 플로우 자체는 `/reserve` 로 옮겨졌다(이 화면은 진입·안내만 한다). 하단 액션:
+ * 예약 플로우 자체는 `/reserve` 로 옮겨졌음(이 화면은 진입·안내만 함). 하단 액션:
  * - 1차 `설명회 예약하기` → `/reserve`
  * - 2차 `이미 예약했나요? 예약 조회 · 변경 · 취소` → `/reserve?mode=manage` (기존 관리 플로우)
  *
  * 상태: 불러오는 중 · 없음(200/null) · 오류(네트워크/5xx/깨진 메타데이터) · 이미지 로드 실패를
- * 각각 정직하게 구분하고 오류/실패에는 재시도를 준다.
+ * 각각 정직하게 구분하고 오류/실패에는 재시도를 줌
  */
 
 import Link from "next/link";
@@ -21,14 +21,24 @@ import { useState } from "react";
 import { Icons } from "@/shared/ui";
 import { usePublicPoster } from "@/features/public-poster";
 
-/** 고정 대체 텍스트 — 어떤 포스터든 같은 값(개인정보·회차 정보를 담지 않는다). */
+/**
+ * 고정 대체 텍스트 — 어떤 포스터든 같은 값(개인정보·회차 정보를 담지 않음)
+ */
 const POSTER_ALT = "설명회 안내 포스터";
+
+/**
+ * 업로드한 포스터가 없을 때 보여 줄 기본 포스터
+ */
 const DEFAULT_POSTER_IMAGE_URL = "/posters/default-admission-poster-v2.png";
 
-/** 앱 뷰포트 폭 — ReserveView(480)와 같은 절제된 최대폭. 데스크톱에서도 가운데 정렬. */
+/**
+ * 앱 뷰포트 폭 — ReserveView(480)와 같은 절제된 최대폭. 데스크톱에서도 가운데 정렬
+ */
 const APP_MAX_WIDTH = 480;
 
-/** 상태 카드(불러오는 중·없음·오류·이미지 실패) 공용 컨테이너. */
+/**
+ * 상태 카드(불러오는 중·없음·오류·이미지 실패) 공용 컨테이너
+ */
 const PANEL_STYLE = {
   padding: "22px 20px",
   borderRadius: "var(--radius-lg)",
@@ -37,6 +47,9 @@ const PANEL_STYLE = {
   boxShadow: "var(--shadow-card)",
 } as const;
 
+/**
+ * 다시 시도 버튼 스타일
+ */
 const RETRY_BUTTON_STYLE = {
   display: "inline-flex",
   alignItems: "center",
@@ -53,6 +66,9 @@ const RETRY_BUTTON_STYLE = {
   fontFamily: "var(--font-body)",
 } as const;
 
+/**
+ * 공개 진입면. 포스터와 예약·조회 버튼
+ */
 export function PosterEntranceView() {
   const { state, reload } = usePublicPoster();
 
@@ -62,7 +78,7 @@ export function PosterEntranceView() {
       style={{
         maxWidth: APP_MAX_WIDTH,
         margin: "0 auto",
-        // 동적 뷰포트 높이에 정확히 고정 — iOS Safari 주소창 개폐(dvh)까지 반영해 페이지 세로 스크롤을 없앤다.
+        // 동적 뷰포트 높이에 정확히 고정 — iOS Safari 주소창 개폐(dvh)까지 반영해 페이지 세로 스크롤을 없앰
         height: "100dvh",
         overflow: "hidden",
         background: "var(--surface-page)",
@@ -70,8 +86,8 @@ export function PosterEntranceView() {
         flexDirection: "column",
       }}
     >
-      {/* 상단 헤더 없음 — 포스터가 곧바로 뷰포트 맨 위에서 세로로 최대한 크게 펼쳐진다. */}
-      {/* minHeight:0 이 없으면 flex 자식이 min-content(=포스터 자연 높이) 아래로 못 줄어 스크롤이 생긴다. */}
+      {/* 상단 헤더 없음 — 포스터가 곧바로 뷰포트 맨 위에서 세로로 최대한 크게 펼쳐짐 */}
+      {/* minHeight:0 이 없으면 flex 자식이 min-content(=포스터 자연 높이) 아래로 못 줄어 스크롤이 생김 */}
       <main
         style={{
           flex: 1,
@@ -98,7 +114,9 @@ export function PosterEntranceView() {
   );
 }
 
-/** 포스터 이미지 — 자연 비율 반응형 네이티브 이미지. 로드/디코드 실패는 별도 상태 + 재시도. */
+/**
+ * 포스터 이미지 — 자연 비율 반응형 네이티브 이미지. 로드/디코드 실패는 별도 상태 + 재시도
+ */
 function PosterImage({ imageUrl }: { imageUrl: string }) {
   const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
   const [attempt, setAttempt] = useState(0);
@@ -138,11 +156,11 @@ function PosterImage({ imageUrl }: { imageUrl: string }) {
           </p>
         </div>
       )}
-      {/* 폭·높이 메타데이터가 없어 next/image 대신 반응형 네이티브 이미지를 쓴다. 검증된 same-origin URL 만 온다. */}
+      {/* 폭·높이 메타데이터가 없어 next/image 대신 반응형 네이티브 이미지를 씀. 검증된 same-origin URL 만 옴 */}
       {/*
-        가용 높이·폭 안에서 자연 비율을 유지하며 축소만 한다:
+        가용 높이·폭 안에서 자연 비율을 유지하며 축소만 함:
         max-*:100% 는 정의된 높이를 가진 flex 부모(main) 기준으로 해석되고, width/height:auto 로
-        이미지 상자가 실제 이미지 크기에 밀착(shrink-wrap)해 테두리가 여백 없이 감싼다. 절대 crop/왜곡 없음.
+        이미지 상자가 실제 이미지 크기에 밀착(shrink-wrap)해 테두리가 여백 없이 감쌈. 절대 crop/왜곡 없음
       */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -169,6 +187,9 @@ function PosterImage({ imageUrl }: { imageUrl: string }) {
   );
 }
 
+/**
+ * 포스터 불러오는 중 표시
+ */
 function PendingPanel() {
   return (
     <div style={PANEL_STYLE}>
@@ -179,6 +200,9 @@ function PendingPanel() {
   );
 }
 
+/**
+ * 포스터 조회 오류와 다시 시도 버튼
+ */
 function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div style={PANEL_STYLE}>
@@ -196,7 +220,9 @@ function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-/** 하단 safe-area 인지 액션 영역 — overflow-hidden 100dvh flex 루트 안에서 정상 흐름의 비축소 행으로 고정한다. */
+/**
+ * 하단 safe-area 인지 액션 영역 — overflow-hidden 100dvh flex 루트 안에서 정상 흐름의 비축소 행으로 고정함
+ */
 function ActionRegion() {
   return (
     <div

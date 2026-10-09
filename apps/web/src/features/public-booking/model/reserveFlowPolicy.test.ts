@@ -1,5 +1,5 @@
 /**
- * 예약 플로우 정책 순수 테스트 (node:test + tsx). 클라이언트 훅·컴포넌트를 import 하지 않는다.
+ * 예약 플로우 정책 순수 테스트 (node:test + tsx). 클라이언트 훅·컴포넌트를 import 하지 않음
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -23,6 +23,9 @@ import {
   type MoveSourceBooking,
 } from "./reserveFlowPolicy";
 
+/**
+ * 테스트 공개 회차 생성
+ */
 function session(overrides: Partial<PublicSeminarSession> = {}): PublicSeminarSession {
   return {
     seminarId: "sem-1",
@@ -120,12 +123,18 @@ describe("isSessionBookableForType", () => {
   });
 });
 
+/**
+ * 테스트 참가자 생성
+ */
 function participant(
   overrides: Partial<PublicMaskedFamilyBookingParticipant> = {},
 ): Pick<PublicMaskedFamilyBookingParticipant, "participantType" | "branch"> {
   return { participantType: "ENROLLED", branch: "CAMPUS_A", ...overrides };
 }
 
+/**
+ * 테스트 이동 원본 예약 생성
+ */
 function booking(overrides: Partial<MoveSourceBooking> = {}): MoveSourceBooking {
   return { seminarSessionId: "current", participants: [participant()], ...overrides };
 }

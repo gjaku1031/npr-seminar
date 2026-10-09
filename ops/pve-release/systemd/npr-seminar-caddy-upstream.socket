@@ -1,3 +1,5 @@
+# WireGuard 주소(10.10.10.165:3001)에서 GCP 게이트웨이 Caddy 요청을 받는 소켓
+# 연결이 오면 npr-seminar-caddy-upstream.service 가 web(127.0.0.1:3000)으로 중계함
 [Unit]
 Description=NPR Seminar WireGuard Caddy upstream socket
 After=network-online.target

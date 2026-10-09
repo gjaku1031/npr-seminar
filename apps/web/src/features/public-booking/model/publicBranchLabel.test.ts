@@ -1,5 +1,5 @@
 /**
- * 공개 예약 캠퍼스 라벨 순수 테스트 (node:test + tsx).
+ * 공개 예약 캠퍼스 라벨 순수 테스트 (node:test + tsx)
  *
  * 실행: pnpm --dir apps/web test
  */

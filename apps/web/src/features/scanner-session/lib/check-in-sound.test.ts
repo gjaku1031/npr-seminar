@@ -1,5 +1,5 @@
 /**
- * 체크인 결과음 분류 순수 테스트 (node:test + tsx). Web Audio·React·클라이언트 훅을 import 하지 않는다.
+ * 체크인 결과음 분류 순수 테스트 (node:test + tsx). Web Audio·React·클라이언트 훅을 import 하지 않음
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -10,7 +10,9 @@ import type { CheckInOutcome, CheckInResult } from "../../../shared/api/contract
 import type { CheckInPanel } from "../model/useQrCheckIn";
 import { outcomeSoundKind, panelSoundKind } from "./check-in-sound";
 
-/** 결과만 있으면 분류가 결정된다 — 나머지 필드는 소리와 무관하므로 최소 스텁만 둔다. */
+/**
+ * 결과만 있으면 분류가 결정됨 — 나머지 필드는 소리와 무관하므로 최소 스텁만 둠
+ */
 function outcomePanel(result: CheckInResult): CheckInPanel {
   return { kind: "outcome", outcome: { result } as CheckInOutcome };
 }
@@ -41,7 +43,7 @@ describe("outcomeSoundKind — 결과별 소리 갈래", () => {
 });
 
 describe("outcomeSoundKind — 전체 결과 표(회귀 고정)", () => {
-  // 계약 CheckInResult 전체를 소리 갈래에 고정한다 — 결과가 늘면 여기서 분류를 강제한다.
+  // 계약 CheckInResult 전체를 소리 갈래에 고정함 — 결과가 늘면 여기서 분류를 강제함
   const table: Array<[CheckInResult, "success" | "warning" | "error"]> = [
     ["CHECKED_IN", "success"],
     ["ALREADY_CHECKED_IN", "warning"],

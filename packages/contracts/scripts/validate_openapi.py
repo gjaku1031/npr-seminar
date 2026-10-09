@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# 계약(openapi.yaml) 구조·도메인 불변식 검사기. PyYAML 외 의존성 없음
+# 실행: packages/contracts 에서 `python3 scripts/validate_openapi.py [openapi.yaml]`(pnpm run validate)
+# 종료 코드: 0 통과, 1 계약 위반·파일 오류. 모듈 docstring 은 --help 설명으로 쓰이므로 바꾸지 않음
 """Dependency-light structural validation for the NPR Seminar OpenAPI contract."""
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from typing import Any
 import yaml
 
 
+# OpenAPI 의 HTTP 메서드 키
 HTTP_METHODS = {
     "get",
     "put",
@@ -23,9 +27,13 @@ HTTP_METHODS = {
     "patch",
     "trace",
 }
+# 상태를 바꾸는 메서드
 MUTATING_METHODS = {"put", "post", "delete", "patch"}
+# 경로 템플릿의 {이름} 자리
 PATH_PARAMETER_RE = re.compile(r"{([^{}]+)}")
+# 페어링 코드 형식. 혼동 문자(0·1·I·O)를 뺀 대문자 6자
 PAIRING_CODE_PATTERN = r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$"
+# Problem 응답 필수 필드(RFC 9457 + code·traceId)
 PROBLEM_REQUIRED = {
     "type",
     "title",
@@ -35,6 +43,7 @@ PROBLEM_REQUIRED = {
     "code",
     "traceId",
 }
+# 반드시 계약에 있어야 하는 핵심 operationId
 CRITICAL_OPERATION_IDS = {
     "getCsrfToken",
     "loginProjectSession",
@@ -108,6 +117,7 @@ CRITICAL_OPERATION_IDS = {
     "listGoogleSheetsDeliveries",
     "getGoogleSheetsDelivery",
 }
+# 시간순 추가 전용(append-only)이라고 설명해야 하는 감사 조회 operationId
 AUDIT_OPERATION_IDS = {
     "listFamilyBookingEvents",
     "listAdminCheckInEvents",
@@ -118,10 +128,10 @@ AUDIT_OPERATION_IDS = {
     "getSmsMessage",
     "getGoogleSheetsDelivery",
 }
+# 체크인 결과 enum 기대값. DB CHECK 제약과도 같아야 함
 EXPECTED_CHECK_IN_RESULTS = {
     "CHECKED_IN",
-    # Neither an entry nor a failure: a two-parent booking scanned without an
-    # attendedCount. Nothing is mutated; the gate operator answers and retries.
+    # 입장도 실패도 아님. 2명 예약을 attendedCount 없이 스캔한 경우로, 아무것도 바꾸지 않고 스태프가 답한 뒤 재요청함
     "PARTY_SELECTION_REQUIRED",
     "ALREADY_CHECKED_IN",
     "CANCELLED",
@@ -132,11 +142,13 @@ EXPECTED_CHECK_IN_RESULTS = {
     "RESERVATION_NOT_FOUND",
     "NOT_AUTHORIZED",
 }
+# 학생 동기화 충돌 유형 기대값
 EXPECTED_SYNC_CONFLICTS = {
     "DUPLICATE_STUDENT_ASSIGNMENT_KEY",
     "STUDENT_IDENTITY_MISMATCH",
     "CROSS_BRANCH_STUDENT_NO",
 }
+# 문자 용도 기대값
 EXPECTED_SMS_PURPOSES = {
     "OTP",
     "BOOKING_CONFIRMED",
@@ -145,6 +157,7 @@ EXPECTED_SMS_PURPOSES = {
     "FIRST_CHECK_IN",
     "ADMIN_GROUP",
 }
+# 문자 배송 상태 기대값
 EXPECTED_SMS_DELIVERY_STATUSES = {
     "PENDING",
     "CLAIMED",
@@ -157,6 +170,7 @@ EXPECTED_SMS_DELIVERY_STATUSES = {
     "DEAD",
     "CANCELLED",
 }
+# 문자 발송 시도 결과 기대값
 EXPECTED_SMS_ATTEMPT_RESULTS = {
     "SENT",
     "BLOCKED_DISABLED",
@@ -166,6 +180,7 @@ EXPECTED_SMS_ATTEMPT_RESULTS = {
     "DELIVERY_UNKNOWN",
     "DEAD",
 }
+# 시트 발송 상태 기대값
 EXPECTED_SHEETS_DELIVERY_STATUSES = {
     "PENDING",
     "CLAIMED",
@@ -174,7 +189,9 @@ EXPECTED_SHEETS_DELIVERY_STATUSES = {
     "DEAD",
     "BLOCKED",
 }
+# 시트 발송 시도 결과 기대값
 EXPECTED_SHEETS_ATTEMPT_RESULTS = {"SUCCEEDED", "RETRY", "DEAD", "BLOCKED"}
+# 초기 스냅숏 대조 기준 건수. 계약 예시값과 같아야 함
 CANONICAL_CONSTANTS = {
     "rawFetchedAssignmentCount": 10021,
     "bracketExcludedAssignmentCount": 6222,
@@ -187,18 +204,22 @@ CANONICAL_CONSTANTS = {
     "noClassAmbiguousCount": 3,
     "ambiguousStudentCount": 4,
 }
+# 관리자 예약의 회차 범위별 학생 허용 규칙
 BOOKING_SCOPE_AUTHORIZATION = {
     "ALL": "selected-students-may-span-branches",
     "BRANCH": "every-selected-student-must-match-session-branch",
 }
+# 공개 예약 생성의 회차 범위별 허용 규칙
 PUBLIC_BOOKING_CREATE_SCOPE_AUTHORIZATION = {
     "ALL": "all-auto-linked-students-belong-to-proof-selected-campus",
     "BRANCH": "proof-selected-campus-must-match-session-branch",
 }
+# 공개 예약 변경의 회차 범위별 허용 규칙
 PUBLIC_BOOKING_UPDATE_SCOPE_AUTHORIZATION = {
     "ALL": "immutable-proof-selected-campus-family",
     "BRANCH": "immutable-family-campus-must-match-session-branch",
 }
+# 스캐너 체크인의 회차 범위별 허용 규칙
 SCANNER_SCOPE_AUTHORIZATION = {
     "ALL": "any-scanner-device-branch",
     "BRANCH": "scanner-device-branch-must-match-session-branch",
@@ -206,17 +227,18 @@ SCANNER_SCOPE_AUTHORIZATION = {
 
 
 class ContractValidationError(Exception):
-    """Raised for a contract invariant violation."""
+    """계약 불변식 위반"""
 
 
 class DuplicateKeyError(ContractValidationError):
-    """Raised before YAML construction can silently overwrite a mapping key."""
+    """YAML 매핑 키 중복. 값이 조용히 덮어써지기 전에 발생"""
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
-    """PyYAML SafeLoader that rejects duplicate mapping keys."""
+    """매핑 키 중복을 거부하는 PyYAML SafeLoader"""
 
 
+# 매핑 키가 중복되면 덮어쓰기 전에 DuplicateKeyError 를 내는 PyYAML 매핑 생성자
 def _construct_unique_mapping(
     loader: UniqueKeyLoader, node: yaml.nodes.MappingNode, deep: bool = False
 ) -> dict[Any, Any]:
@@ -251,10 +273,12 @@ UniqueKeyLoader.add_constructor(
 )
 
 
+# 계약 위반 예외를 던짐
 def fail(message: str) -> None:
     raise ContractValidationError(message)
 
 
+# 중복 키를 거부하며 YAML 을 읽음. 루트는 매핑이어야 함
 def load_contract(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as stream:
@@ -266,6 +290,7 @@ def load_contract(path: Path) -> dict[str, Any]:
     return document
 
 
+# 모든 노드를 JSON Pointer 와 함께 순회
 def walk(value: Any, pointer: str = "#") -> Iterable[tuple[str, Any]]:
     yield pointer, value
     if isinstance(value, Mapping):
@@ -277,6 +302,7 @@ def walk(value: Any, pointer: str = "#") -> Iterable[tuple[str, Any]]:
             yield from walk(child, f"{pointer}/{index}")
 
 
+# 내부 JSON Pointer 참조($ref)를 따라가 값을 찾음. 외부 참조는 거부
 def resolve_ref(document: Mapping[str, Any], reference: str) -> Any:
     if not isinstance(reference, str) or not reference.startswith("#/"):
         fail(f"only internal JSON Pointer references are allowed: {reference!r}")
@@ -300,6 +326,7 @@ def resolve_ref(document: Mapping[str, Any], reference: str) -> Any:
     return current
 
 
+# 직접 $ref 사슬을 끝까지 풀어 실제 값을 돌려줌. 순환이면 실패
 def dereference(document: Mapping[str, Any], value: Any) -> Any:
     seen: set[str] = set()
     current = value
@@ -312,6 +339,7 @@ def dereference(document: Mapping[str, Any], value: Any) -> Any:
     return current
 
 
+# paths 의 모든 (경로, 메서드, operation, path item) 순회
 def iter_operations(
     document: Mapping[str, Any],
 ) -> Iterable[tuple[str, str, Mapping[str, Any], Mapping[str, Any]]]:
@@ -331,11 +359,13 @@ def iter_operations(
             yield path, method, operation, path_item
 
 
+# 오류 메시지용 operation 표기
 def operation_label(path: str, method: str, operation: Mapping[str, Any]) -> str:
     operation_id = operation.get("operationId", "<missing>")
     return f"{method.upper()} {path} ({operation_id})"
 
 
+# path item 과 operation 의 parameters 를 참조를 풀어 합침
 def merged_parameters(
     document: Mapping[str, Any],
     path_item: Mapping[str, Any],
@@ -353,6 +383,7 @@ def merged_parameters(
     return result
 
 
+# 지정 헤더가 필수 파라미터로 있는지(대소문자 무시)
 def has_required_header(parameters: Iterable[Mapping[str, Any]], name: str) -> bool:
     expected = name.casefold()
     return any(
@@ -363,6 +394,7 @@ def has_required_header(parameters: Iterable[Mapping[str, Any]], name: str) -> b
     )
 
 
+# operation 이 요구하는 보안 스킴 이름 집합
 def operation_security_names(operation: Mapping[str, Any]) -> set[str]:
     security = operation.get("security")
     if not isinstance(security, list):
@@ -374,6 +406,7 @@ def operation_security_names(operation: Mapping[str, Any]) -> set[str]:
     return names
 
 
+# 문서 최상위 구조 검사. OpenAPI 3.1.0, info, components 하위 맵
 def validate_document_shape(document: Mapping[str, Any]) -> None:
     if document.get("openapi") != "3.1.0":
         fail("openapi must be exactly 3.1.0")
@@ -388,6 +421,7 @@ def validate_document_shape(document: Mapping[str, Any]) -> None:
             fail(f"components.{required} must be a mapping")
 
 
+# 모든 $ref 가 내부에서 해석되는지 검사
 def validate_internal_references(document: Mapping[str, Any]) -> None:
     for pointer, value in walk(document):
         if isinstance(value, Mapping) and "$ref" in value:
@@ -398,6 +432,9 @@ def validate_internal_references(document: Mapping[str, Any]) -> None:
                 raise ContractValidationError(f"{pointer}: {exc}") from exc
 
 
+# operation 공통 규칙 검사. 중복 없는 operationId, 명시적 security, 경로 파라미터 일치,
+# 변경 요청의 durable/ephemeral 구분과 멱등 키, 쿠키 인증 변경의 CSRF·Origin 헤더 등
+# (operation 수, durable 수, ephemeral 수)를 돌려줌
 def validate_operations(document: Mapping[str, Any]) -> tuple[int, int, int]:
     operation_ids: dict[str, str] = {}
     durable_count = 0
@@ -560,6 +597,7 @@ def validate_operations(document: Mapping[str, Any]) -> tuple[int, int, int]:
     return len(operation_ids), durable_count, ephemeral_count
 
 
+# 보안 스킴 이름·위치가 고정 wire 계약과 같고, 옛 bearer/JWT 스킴이 없는지 검사
 def validate_security(document: Mapping[str, Any]) -> None:
     schemes = document["components"]["securitySchemes"]
     expected = {
@@ -590,6 +628,7 @@ def validate_security(document: Mapping[str, Any]) -> None:
                     fail(f"{label}: unknown security scheme {scheme_name!r}")
 
 
+# 이름으로 컴포넌트 스키마를 찾음
 def schema(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     value = document["components"]["schemas"].get(name)
     if not isinstance(value, Mapping):
@@ -597,6 +636,7 @@ def schema(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     return value
 
 
+# 스키마의 properties
 def schema_properties(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     value = dereference(document, schema(document, name))
     properties = value.get("properties") if isinstance(value, Mapping) else None
@@ -605,6 +645,7 @@ def schema_properties(document: Mapping[str, Any], name: str) -> Mapping[str, An
     return properties
 
 
+# operationId 가 정확히 하나인 operation
 def operation_by_id(
     document: Mapping[str, Any], operation_id: str
 ) -> tuple[str, str, Mapping[str, Any], Mapping[str, Any]]:
@@ -618,6 +659,7 @@ def operation_by_id(
     return matches[0]
 
 
+# 속성이 정확히 Branch 또는 null 인지 검사
 def validate_nullable_branch_property(
     value: Any, *, label: str
 ) -> None:
@@ -639,6 +681,7 @@ def validate_nullable_branch_property(
         fail(f"{label} must be exactly Branch or null")
 
 
+# scope 가 ALL 이면 branch=null, BRANCH 면 구체 Branch 를 요구하는 allOf 조건 검사
 def validate_scope_conditionals(
     value: Mapping[str, Any], *, scope_field: str, branch_field: str, label: str
 ) -> None:
@@ -676,6 +719,9 @@ def validate_scope_conditionals(
         fail(f"{label}: BRANCH must require a concrete Branch")
 
 
+# 업무 불변식 검사. 금지 경로, Problem 필드, 로그 마스킹 대상, 핵심 operation, 체크인·동기화·문자·시트 enum,
+# 예약·스캐너·통계·명단·포스터 등 화면이 의존하는 요청·응답 필드와 권한 규칙
+# 각 검사는 실패 메시지로 어떤 불변식인지 설명함
 def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     paths = document["paths"]
     legacy_path = "/api/v1/admin/bookings/{bookingId}"
@@ -912,8 +958,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         "cancelledBookingCount",
         "noShowBookingCount",
         "attendeeCount",
-        # 예상 참석 인원(attendeeCount)과 실제 입장 인원은 다른 값이다 — 2명 예약에 한 분만
-        # 오면 예상은 2, 실제는 1이다. 운영 화면이 둘을 섞지 않도록 계약에서 갈라 둔다.
+        # 예상 참석 인원(attendeeCount)과 실제 입장 인원은 다른 값임. 2명 예약에 한 분만 오면 예상 2, 실제 1
+        # 운영 화면이 둘을 섞지 않도록 계약에서 갈라 둠
         "attendedPeopleCount",
     }
     operations_schema = schema(document, "SessionOperationsSummary")
@@ -1530,9 +1576,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
     ):
         fail("family child snapshot is missing Sheets projection identity fields")
 
-    # attendedCount is the operator's own answer at the gate, not scanner context, so it
-    # is the one field a client may add. Everything else about the scanner (device,
-    # session, gate, branch) stays server-derived and must never be client-supplied.
+    # attendedCount 는 스캐너 맥락이 아니라 현장 스태프의 답이므로 클라이언트가 추가할 수 있는 유일한 필드임
+    # 기기·회차·출입구·지점 등 나머지 스캐너 맥락은 서버가 정하고 클라이언트가 보내면 안 됨
     qr_request_properties = set(schema_properties(document, "QrCheckInRequest"))
     if qr_request_properties != {"qrToken", "attendedCount"}:
         fail("QR check-in request may contain only qrToken and attendedCount; scanner context is server-derived")
@@ -1996,8 +2041,8 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
                 "message",
                 "title",
                 "previewToken",
-                # 예약 발송 시각. 대상 선택(branch·audience·session)이 아니라 **언제 나갈지**라
-                # 이 목록에 함께 둔다 — 발송 요청이 받는 필드의 전부가 여기여야 한다.
+                # 예약 발송 시각. 대상 선택(branch·audience·session)이 아니라 언제 나갈지라 이 목록에 함께 둠
+                # 발송 요청이 받는 필드 전부가 여기 있어야 함
                 "scheduledAt",
             },
         ),
@@ -2280,6 +2325,7 @@ def validate_domain_invariants(document: Mapping[str, Any]) -> None:
         fail("pairing code TTL must be exactly five minutes (300 seconds)")
 
 
+# 감사 조회 operation 설명에 append-only 또는 immutable 이 있는지 검사
 def validate_append_only_descriptions(document: Mapping[str, Any]) -> None:
     by_id = {
         operation["operationId"]: operation
@@ -2294,6 +2340,7 @@ def validate_append_only_descriptions(document: Mapping[str, Any]) -> None:
             fail(f"{operation_id} must state append-only or immutable chronology")
 
 
+# 명령행 인자. 계약 파일 경로(기본 openapi.yaml)
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -2306,6 +2353,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# 진입점. 모든 검사를 돌리고 요약 출력
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
@@ -2333,15 +2381,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _validate_check_in_result_database_constraint(contract_results: set[str]) -> None:
-    """The database has the final say on CheckInResult, so it must agree with the contract.
+    """체크인 결과 enum 이 DB CHECK 제약(check_in_events_result_check)과 같은지 검사
 
-    check_in_events.result carries a CHECK constraint listing every allowed value. Adding a
-    result to the contract without widening that constraint compiles, typechecks, passes the
-    contract audit, deploys — and then throws a 500 the first time the new result is written,
-    because the row is rejected at INSERT. That happened once; this exists so it cannot happen
-    silently again.
+    CheckInResult 의 최종 판정은 DB 가 함. 계약에만 결과를 추가하고 제약을 넓히지 않으면
+    컴파일·타입 검사·계약 감사·배포까지 통과한 뒤 그 결과를 처음 쓰는 순간 INSERT 가 거부돼 500 이 됨
+    실제로 한 번 발생했고, 다시 조용히 생기지 않도록 둔 검사임
 
-    The newest migration that defines the constraint wins, mirroring how migrations replay.
+    마이그레이션 재생 순서와 같게 제약을 정의한 가장 최근 마이그레이션을 기준으로 함
     """
     repository = Path(__file__).resolve().parents[3]
     migrations = sorted((repository / "apps" / "api" / "prisma" / "migrations").glob("*/migration.sql"))
@@ -2354,7 +2400,7 @@ def _validate_check_in_result_database_constraint(contract_results: set[str]) ->
     if not definitions:
         fail("no migration defines check_in_events_result_check")
     latest = definitions[-1]
-    # 제약 정의 이후 구간의 대문자 리터럴만 읽는다 — 그 앞의 주석·다른 구문은 보지 않는다.
+    # 제약 정의 이후 구간의 대문자 리터럴만 읽음. 그 앞의 주석·다른 구문은 보지 않음
     tail = latest[latest.lower().rindex("check_in_events_result_check"):]
     allowed = set(re.findall(r"'([A-Z_]+)'", tail))
     if allowed != contract_results:

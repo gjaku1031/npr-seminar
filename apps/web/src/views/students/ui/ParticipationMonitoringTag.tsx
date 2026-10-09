@@ -11,18 +11,28 @@ import { createPortal } from "react-dom";
 import type { ParticipationMonitoring } from "@/shared/api";
 import { Tag } from "@/shared/ui";
 
+/**
+ * 팝오버 너비(px)
+ */
 const POPOVER_WIDTH = 244;
+
+/**
+ * 화면 가장자리 여백(px)
+ */
 const VIEWPORT_GUTTER = 12;
 
+/**
+ * 숫자 표시. 없으면 —
+ */
 function count(value: number | undefined): string {
   return value === undefined ? "—" : `${value.toLocaleString("ko-KR")}명`;
 }
 
 /**
- * 선택된 캠퍼스 필터를 참석 규모 요약 트리거로 확장한다.
+ * 선택된 캠퍼스 필터를 참석 규모 요약 트리거로 확장함
  *
- * 마우스 hover·키보드 focus 에서는 잠깐 확인할 수 있고, 클릭·터치는 팝오버를 고정한다.
- * 필터 행은 자체 가로 스크롤 영역이어서 팝오버를 body portal 로 띄워 잘리지 않게 한다.
+ * 마우스 hover·키보드 focus 에서는 잠깐 확인할 수 있고, 클릭·터치는 팝오버를 고정함
+ * 필터 행은 자체 가로 스크롤 영역이어서 팝오버를 body portal 로 띄워 잘리지 않게 함
  */
 export function ParticipationMonitoringTag({
   label,
@@ -31,10 +41,29 @@ export function ParticipationMonitoringTag({
   onSelect,
   style,
 }: {
+  /**
+   * 표시 문구
+   */
   label: string;
+
+  /**
+   * 선택 여부
+   */
   selected: boolean;
+
+  /**
+   * 명단 모니터링 수치. 없으면 —
+   */
   monitoring: ParticipationMonitoring | undefined;
+
+  /**
+   * 선택 처리
+   */
   onSelect: () => void;
+
+  /**
+   * 추가 스타일
+   */
   style?: CSSProperties;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);

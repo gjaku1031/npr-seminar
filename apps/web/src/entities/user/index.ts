@@ -1,4 +1,4 @@
-// entities/user 공개 API (barrel). (설계 §4.1)
+// entities/user 공개 API (barrel)
 export {
   ALL_MODULES,
   canAccessModule,

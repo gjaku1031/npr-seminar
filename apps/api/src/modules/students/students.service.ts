@@ -13,97 +13,325 @@ import {
 } from "../student-sync/student-classification.js";
 import { UNIT_NAMES_BY_GROUP, type StudentUnitGroup } from "../student-sync/student-unit-group.js";
 
+/**
+ * 관리자 학생 목록 필터
+ */
 interface StudentFilters {
+  /**
+   * 캠퍼스
+   */
   readonly branch?: string;
+
+  /**
+   * 검색어
+   */
   readonly query?: string;
-  /** @deprecated Use unitGroup. */
+
+  /**
+   * 학년
+   *
+   * @deprecated unitGroup 사용
+   */
   readonly grade?: string;
+
+  /**
+   * 단위 그룹
+   */
   readonly unitGroup?: StudentUnitGroup;
+
+  /**
+   * 대표 반 이름
+   */
   readonly representativeClass?: string;
+
+  /**
+   * 수학 담임
+   */
   readonly teacherName?: string;
+
+  /**
+   * 단위 이름
+   */
   readonly unitName?: string;
+
+  /**
+   * 대표 반 판정 결과
+   */
   readonly resolution?: string;
+
+  /**
+   * 원천 재원 여부
+   */
   readonly sourceActive?: boolean;
+
+  /**
+   * 수학·과학 반 보유 학생만
+   */
   readonly categorizedOnly?: boolean;
+
+  /**
+   * 예약 정보를 붙일 회차 ID
+   */
   readonly seminarSessionId?: string;
+
+  /**
+   * 페이지 번호
+   */
   readonly page: number;
+
+  /**
+   * 페이지 크기
+   */
   readonly pageSize: number;
 }
 
+/**
+ * 검토 필요 학생 필터
+ */
 interface StudentReviewFilters {
+  /**
+   * 캠퍼스
+   */
   readonly branch?: string;
+
+  /**
+   * 페이지 번호
+   */
   readonly page: number;
+
+  /**
+   * 페이지 크기
+   */
   readonly pageSize: number;
 }
 
+/**
+ * 학생 목록 요약 집계 행
+ */
 interface StudentSummaryRow {
+  /**
+   * 학생 수
+   */
   readonly unique_student_count: bigint;
+
+  /**
+   * 활성 수강 등록이 여러 개인 학생 수
+   */
   readonly multi_assignment_student_count: bigint;
+
+  /**
+   * 정규 반 하나로 판정된 학생 수
+   */
   readonly regular_representative_count: bigint;
+
+  /**
+   * 과학 반만으로 판정된 학생 수
+   */
   readonly science_alias_representative_count: bigint;
+
+  /**
+   * 정규 반 여러 개로 판정 불가한 학생 수
+   */
   readonly multiple_regular_ambiguous_count: bigint;
+
+  /**
+   * 반 없음으로 판정 불가한 학생 수
+   */
   readonly no_class_ambiguous_count: bigint;
+
+  /**
+   * 활성 대표 수학 반이 있는 학생 수
+   */
   readonly math_regular_student_count: bigint;
+
+  /**
+   * 활성 대표 과학 반이 있는 학생 수
+   */
   readonly science_regular_student_count: bigint;
+
+  /**
+   * 수학·과학 반 중 하나라도 있는 학생 수
+   */
   readonly eligible_unique_student_count: bigint;
+
+  /**
+   * 수학 반 학생 수
+   */
   readonly math_student_count: bigint;
+
+  /**
+   * 과학 반만 있는 학생 수
+   */
   readonly science_only_student_count: bigint;
 }
 
+/**
+ * 건수 조회 행
+ */
 interface StudentCountRow {
+  /**
+   * 건수
+   */
   readonly count: bigint;
 }
 
+/**
+ * 담임 선택지 조회 행
+ */
 interface StudentTeacherFacetRow {
+  /**
+   * 정렬된 대표 담임 목록
+   */
   readonly teachers: string[];
 }
 
+/**
+ * 학생별 선택 회차 예약 조회 행
+ */
 interface StudentBookingProjectionRow {
+  /**
+   * 학생 ID
+   */
   readonly student_id: bigint;
+
+  /**
+   * 가족 예약 공개 ID
+   */
   readonly family_booking_id: string;
+
+  /**
+   * 예약 상태
+   */
   readonly status: string;
+
+  /**
+   * 참석 보호자
+   */
   readonly attendance_party: string;
+
+  /**
+   * 예약 경로
+   */
   readonly booking_source: string;
+
+  /**
+   * 마지막 예약 이벤트 시각
+   */
   readonly latest_event_at: Date | null;
 }
 
+/**
+ * 활성 수강 등록에서 계산한 반 표시 정보
+ */
 interface StudentAssignmentProjection {
+  /**
+   * 활성 수강 등록 반 이름 원문(중복 제거·정렬)
+   */
   readonly rawClassNames: string[];
+
+  /**
+   * 대표 반 후보(정규화)
+   */
   readonly representativeClassNames: string[];
+
+  /**
+   * 대표 수학 반 목록
+   */
   readonly mathClassNames: string[];
+
+  /**
+   * 표시용 수학 반. 원장 대표 반이 목록에 있으면 그 반, 없으면 첫 번째
+   */
   readonly mathClassName: string | null;
+
+  /**
+   * 대표 과학 반 목록
+   */
   readonly scienceClassNames: string[];
+
+  /**
+   * 표시용 단위. 수학 반이 없고 과학 반만 있으면 과학
+   */
   readonly unitName: ReturnType<typeof canonicalUnitName>;
 }
 
-/** 관리자 조회의 포함 조건으로 가져온 학생과 관련 데이터다. */
+/**
+ * 관리자 조회 include 조건으로 읽은 학생 행
+ */
 type StudentRow = Prisma.StudentGetPayload<{ include: ReturnType<StudentsService["include"]> }>;
-/** 공개 검색의 선택 조건으로 가져온 연락처 없는 학생 데이터다. */
+
+/**
+ * 공개 검색 select 조건으로 읽은 연락처 없는 학생 행
+ */
 type PublicStudentRow = Prisma.StudentGetPayload<{ select: ReturnType<StudentsService["publicSelect"]> }>;
-/** 관리자 배정 필드를 기반으로 공개 조회의 활성 상태 미선택도 허용하는 입력이다. */
+
+/**
+ * 반 표시 계산용 수강 등록 입력. 공개 조회는 sourceActive를 선택하지 않아 선택 필드로 둠
+ */
 type ProjectionAssignment = Pick<StudentRow["assignments"][number],
   "className" | "sourceUniqueNo" | "classRegistrationNo"> &
   Partial<Pick<StudentRow["assignments"][number], "sourceActive">>;
-/** 대표 반 분류에 필요한 학생·배정 필드만 담는 공통 입력이다. */
+
+/**
+ * 반 표시 계산에 필요한 학생·수강 등록 필드
+ */
 type ProjectionStudent = Pick<StudentRow,
   "className" | "classResolutionStatus" | "classResolutionReason"> & {
+    /**
+     * 수강 등록. 공개 조회는 sourceActive 없이 선택
+     */
     readonly assignments: readonly ProjectionAssignment[];
   };
 
+/**
+ * 반 분류 검토 사유
+ *
+ * - MULTIPLE_MATH_CLASS: 수학 반 여러 개
+ * - NO_RECOGNIZABLE_CLASS: 인식 가능한 대표 반 없음
+ * - UNIT_UNRESOLVED: 단위 판정 불가
+ * - ABNORMAL_OR_EMPTY_CLASS: 원장 반 이름이 비었거나 대표 반 형식이 아님
+ */
 type StudentReviewReasonCode =
   | "MULTIPLE_MATH_CLASS"
   | "NO_RECOGNIZABLE_CLASS"
   | "UNIT_UNRESOLVED"
   | "ABNORMAL_OR_EMPTY_CLASS";
 
+/**
+ * 학생 원장 조회
+ *
+ * 반 표시는 원장 대표 반이 아니라 활성 수강 등록에서 다시 계산(SQL·TS 양쪽 같은 규칙)
+ * 보호자 연락처는 관리자 응답 조립 시에만 복호화
+ */
 @Injectable()
 export class StudentsService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 공개 검색 예약 증명 확인
+     */
     private readonly bookingProof: BookingProofService,
+
+    /**
+     * 연락처 복호화
+     */
     private readonly phoneProtector: PhoneProtector,
   ) {}
 
+  /**
+   * 관리자 학생 목록
+   *
+   * 페이지 ID·전체 건수·요약 집계·검토 필요 건수·담임 선택지·최근 동기화를 병렬 조회한 뒤
+   * 페이지 학생 상세와 선택 회차 예약을 읽어 SQL 정렬 순서대로 응답
+   * 요약은 캠퍼스·단위 그룹만 적용한 활성 학생 기준, 담임 선택지는 담임 필터를 뺀 조건 기준
+   */
   public async list(filters: StudentFilters) {
     const sqlWhere = this.sqlWhere(filters);
     const summaryWhere = this.summarySqlWhere(filters);
@@ -181,6 +409,7 @@ export class StudentsService {
           ) teacher_options`),
       this.prisma.syncRun.findFirst({ where: { status: { in: ["PUBLISHED", "SUCCEEDED", "NO_CHANGES"] } }, orderBy: { publishedAt: "desc" } }),
     ]);
+    // 상세 조회 결과를 SQL 페이지 순서로 재정렬
     const positions = new Map(pageIds.map((row, index) => [row.id.toString(), index]));
     const [rows, bookingRows]: [StudentRow[], StudentBookingProjectionRow[]] = pageIds.length === 0
       ? [[], []]
@@ -233,6 +462,9 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 반 분류 검토 필요 활성 학생 목록. 연락처 제외
+   */
   public async reviewRequired(filters: StudentReviewFilters) {
     const branchWhere = filters.branch === undefined ? Prisma.sql`true` : Prisma.sql`b.code=${filters.branch}`;
     const where = Prisma.sql`s.source_active=true and ${branchWhere} and (${this.reviewRequiredSql()})`;
@@ -271,12 +503,23 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 학생 상세
+   *
+   * @throws {DomainError} 404 STUDENT_NOT_FOUND
+   */
   public async get(studentId: string) {
     const row = await this.prisma.student.findUnique({ where: { publicId: studentId }, include: this.include() });
     if (row === null) this.fail(404, "STUDENT_NOT_FOUND");
     return this.map(row);
   }
 
+  /**
+   * 학생 변경 이력 커서 조회
+   *
+   * @param requestedLimit 1~200, 기본 50
+   * @throws {DomainError} 404 STUDENT_NOT_FOUND
+   */
   public async history(studentId: string, afterSequence?: string, requestedLimit?: number) {
     const student = await this.prisma.student.findUnique({ where: { publicId: studentId }, select: { id: true } });
     if (student === null) this.fail(404, "STUDENT_NOT_FOUND");
@@ -296,8 +539,12 @@ export class StudentsService {
   }
 
   /**
-   * 예약 증명에 묶인 지점·보호자 연락처로 공개 학생을 검색한다.
-   * 연락처 원문은 반환하지 않으며 증명에 지점이 없거나 요청 지점이 다르면 DomainError를 던진다.
+   * 공개 학생 검색
+   *
+   * 예약 증명에 묶인 캠퍼스와 보호자 연락처 다이제스트가 일치하는 재원생만 이름·학번 앞부분으로 검색
+   * 연락처 원문은 반환하지 않음
+   *
+   * @throws {DomainError} 400 증명에 캠퍼스 없음·요청 캠퍼스 불일치, 증명 오류
    */
   public async publicSearch(proofValue: string, filters: { query?: string; branch?: string; page: number; pageSize: number }) {
     const proof = await this.bookingProof.authorize(proofValue, "FAMILY_BOOKING");
@@ -339,6 +586,11 @@ export class StudentsService {
     };
   }
 
+  /**
+   * Prisma 조건 형태의 학생 목록 필터
+   *
+   * 현재 목록 조회는 sqlWhere를 사용하며 이 메서드를 호출하는 곳은 없음
+   */
   private where(filters: StudentFilters): Prisma.StudentWhereInput {
     const query = filters.query?.normalize("NFKC").trim();
     const teacherName = primaryTeacher(filters.teacherName);
@@ -365,6 +617,13 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 학생 목록 SQL 조건
+   *
+   * assignment_projection 조인이 있는 쿼리에서만 사용
+   *
+   * @param includeTeacher 담임 조건 포함 여부. 담임 선택지 계산에서는 제외
+   */
   private sqlWhere(filters: StudentFilters, includeTeacher = true): Prisma.Sql {
     const conditions: Prisma.Sql[] = [];
     const query = filters.query?.normalize("NFKC").trim();
@@ -400,18 +659,31 @@ export class StudentsService {
     return Prisma.sql`${Prisma.join(conditions, " and ")}`;
   }
 
+  /**
+   * 요약 집계 SQL 조건. 활성 학생, 캠퍼스·단위 그룹만 적용
+   */
   private summarySqlWhere(filters: Pick<StudentFilters, "branch" | "unitGroup">): Prisma.Sql {
     const conditions: Prisma.Sql[] = [Prisma.sql`s.source_active=true`, this.unitGroupSql(filters.unitGroup)];
     if (filters.branch !== undefined) conditions.push(Prisma.sql`b.code=${filters.branch}`);
     return Prisma.sql`${Prisma.join(conditions, " and ")}`;
   }
 
+  /**
+   * 단위 그룹 Prisma 조건
+   *
+   * @returns 전체면 null, 비재원생 그룹은 결과 없음 조건
+   */
   private unitGroupWhere(unitGroup?: StudentUnitGroup): Prisma.StudentWhereInput | null {
     if (unitGroup === undefined || unitGroup === "ALL") return null;
     if (unitGroup === "GUEST") return { id: { lt: 0n } };
     return { unitName: { in: [...UNIT_NAMES_BY_GROUP[unitGroup]] } };
   }
 
+  /**
+   * 단위 그룹 SQL 조건
+   *
+   * 비재원생 그룹은 학생 원장에 없으므로 false, 과학 그룹은 수학 반 없이 과학 반만 있는 학생
+   */
   private unitGroupSql(unitGroup?: StudentUnitGroup): Prisma.Sql {
     if (unitGroup === undefined || unitGroup === "ALL") return Prisma.sql`true`;
     if (unitGroup === "GUEST") return Prisma.sql`false`;
@@ -423,6 +695,11 @@ export class StudentsService {
     return Prisma.sql`${this.projectedUnitSql()} in (${Prisma.join(UNIT_NAMES_BY_GROUP[unitGroup])})`;
   }
 
+  /**
+   * 활성 대표 수강 등록에서 수학·과학 반 배열을 계산하는 lateral 조인
+   *
+   * 수학 반은 원장 대표 반을 맨 앞에 두고 나머지는 이름순
+   */
   private assignmentProjectionJoinSql(): Prisma.Sql {
     return Prisma.sql`
       left join lateral (
@@ -454,6 +731,9 @@ export class StudentsService {
       ) assignment_projection on true`;
   }
 
+  /**
+   * 표시용 대표 반 SQL. 첫 수학 반 → 첫 과학 반 → 원장 반 이름 순
+   */
   private projectedClassSql(): Prisma.Sql {
     return Prisma.sql`coalesce(
       assignment_projection.math_class_names[1],
@@ -462,6 +742,9 @@ export class StudentsService {
     )`;
   }
 
+  /**
+   * 표시용 단위 SQL. 첫 수학 반의 단위, 과학 반만 있으면 과학
+   */
   private projectedUnitSql(): Prisma.Sql {
     return Prisma.sql`case
       when cardinality(assignment_projection.math_class_names)>0
@@ -471,6 +754,11 @@ export class StudentsService {
     end`;
   }
 
+  /**
+   * 반 분류 검토 필요 SQL 조건
+   *
+   * 판정 불가(정규 반 여러 개·반 없음), 원장 반 비정상, 수학 반 여러 개, 대표 반 없음, 단위 판정 불가 중 하나
+   */
   private reviewRequiredSql(): Prisma.Sql {
     return Prisma.sql`
       (s.class_resolution_status='AMBIGUOUS_FALLBACK'
@@ -483,6 +771,9 @@ export class StudentsService {
       or ${this.projectedUnitSql()} is null`;
   }
 
+  /**
+   * 학생 정렬 SQL. 캠퍼스 → 단위 → 대표 반 → 이름 → 학번
+   */
   private studentOrderSql(): Prisma.Sql {
     return Prisma.sql`
       case b.code
@@ -508,6 +799,11 @@ export class StudentsService {
       s.source_student_no collate "C"`;
   }
 
+  /**
+   * 대표 반 판정 결과 SQL 조건
+   *
+   * @throws {DomainError} 400 STUDENT_RESOLUTION_INVALID
+   */
   private resolutionSql(resolution?: string): Prisma.Sql {
     switch (resolution) {
       case undefined: return Prisma.sql`true`;
@@ -523,6 +819,13 @@ export class StudentsService {
     }
   }
 
+  /**
+   * 학생별 선택 회차 예약 1건
+   *
+   * 활성 예약 학생·예약·입장 상태를 우선하고, 이후 마지막 이벤트(없으면 예약 변경) 시각이 최신인 예약
+   *
+   * @param seminarSessionId 생략하면 빈 목록
+   */
   private async bookingProjectionRows(
     studentIds: readonly bigint[],
     seminarSessionId?: string,
@@ -557,7 +860,9 @@ export class StudentsService {
                 booking.id desc,booking_student.id desc`);
   }
 
-  /** 관리자 조회에서 지점·활성 배정·동기화 시각을 함께 읽는 Prisma 포함 조건을 반환한다. */
+  /**
+   * 관리자 조회 include 조건. 지점, 활성 수강 등록(반 이름순), 최초·마지막 확인 실행
+   */
   private include() {
     return {
       branch: { select: { code: true } },
@@ -571,7 +876,9 @@ export class StudentsService {
     } as const satisfies Prisma.StudentInclude;
   }
 
-  /** 공개 검색에 필요한 학생 식별·대표 반 필드만 선택하고 연락처를 제외한다. 배정은 활성 항목만 조회한다. */
+  /**
+   * 공개 검색 select 조건. 연락처 제외, 활성 수강 등록만
+   */
   private publicSelect() {
     return {
       publicId: true,
@@ -592,8 +899,11 @@ export class StudentsService {
   }
 
   /**
-   * 관리자 학생 응답을 구성하고 보호자 연락처는 이 경계에서만 복호화한다.
-   * 선택한 세미나 예약이 없으면 예약 필드를 null로 반환한다.
+   * 관리자 학생 응답 조립
+   *
+   * 보호자 연락처는 이 경계에서만 복호화. 담임은 수학 반이 있을 때만 표시
+   *
+   * @param booking 선택 회차 예약. 없으면 예약 필드 null
    */
   private map(row: StudentRow, booking?: StudentBookingProjectionRow) {
     const classProjection = this.assignmentProjection(row);
@@ -633,8 +943,9 @@ export class StudentsService {
   }
 
   /**
-   * 활성 배정의 반 이름을 정규화해 수학·과학 후보와 단위를 반환한다.
-   * 공개 조회는 sourceActive를 선택하지 않지만 조회 조건이 활성 배정만 허용하며 기존 런타임 검사를 유지한다.
+   * 활성 수강 등록에서 수학·과학 반 후보와 단위 계산
+   *
+   * 공개 조회는 sourceActive를 선택하지 않지만 조회 조건이 이미 활성만 허용하며, 값이 있을 때의 검사는 유지
    */
   private assignmentProjection(row: ProjectionStudent): StudentAssignmentProjection {
     const rawClassNames = [...new Set<string>(row.assignments
@@ -665,16 +976,23 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 반 이름 정규화. 문자열이 아니면 빈 문자열
+   */
   private normalizedClassName(value: unknown): string {
     return typeof value === "string" ? value.normalize("NFKC").trim() : "";
   }
 
+  /**
+   * 반 이름 코드 단위 비교. SQL `collate "C"` 정렬과 같은 순서
+   */
   private readonly classNameOrder = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
 
   /**
-   * 분류 사유와 후보 수를 대표 반 응답으로 반환한다.
-   * 정규화된 수학 반과 일치하는 활성 배정만 선택하며, 일치하지 않으면 배정 키는 null이다.
+   * 대표 반 응답
+   *
+   * 판정 결과·후보 수와 정규 반으로 선택된 활성 수강 등록 키 반환. 표시 수학 반과 일치하는 등록이 없으면 키는 null
    */
   private representative(row: ProjectionStudent, projection = this.assignmentProjection(row)) {
     const resolution = row.classResolutionStatus === "ONE_REGULAR" ? "REGULAR"
@@ -688,8 +1006,7 @@ export class StudentsService {
     return {
       resolution,
       displayName: resolution === "REGULAR" ? studentClassBaseName(row.className) : resolution === "SCIENCE_ALIAS" ? "과학" : null,
-      // FUTURE_TERM_ONLY 는 모호가 아니다 — 고를 반이 여럿이라 못 정한 것이 아니라
-      // 지금 다니는 반이 아직 없다는 확정된 사실이다.
+      // FUTURE_TERM_ONLY는 모호한 상태가 아님. 고를 반이 여럿이 아니라 현재 반이 아직 없다는 확정 사실
       ambiguous: resolution === "MULTIPLE_REGULAR" || resolution === "NO_CLASS",
       regularCandidateCount: projection.mathClassNames.length,
       scienceCandidateCount: projection.scienceClassNames.length,
@@ -698,7 +1015,9 @@ export class StudentsService {
     };
   }
 
-  /** 검토 대상 학생의 반 분류 사유를 응답 코드로 반환하며 연락처는 포함하지 않는다. */
+  /**
+   * 검토 대상 학생의 반 분류 사유 응답. 연락처 제외
+   */
   private mapReviewRequired(row: StudentRow) {
     const projection = this.assignmentProjection(row);
     const reasonCodes: StudentReviewReasonCode[] = [];
@@ -727,11 +1046,19 @@ export class StudentsService {
     };
   }
 
+  /**
+   * 수강 등록 키. 300자를 넘으면 SHA-256 다이제스트
+   */
   private assignmentKey(sourceUniqueNo: string, classRegistrationNo: string): string {
     const raw = `${sourceUniqueNo}:${classRegistrationNo}`;
     return raw.length <= 300 ? raw : `sha256:${createHash("sha256").update(raw).digest("base64url")}`;
   }
 
+  /**
+   * 대표 반 판정 결과 Prisma 조건
+   *
+   * @throws {DomainError} 400 STUDENT_RESOLUTION_INVALID
+   */
   private resolutionWhere(resolution?: string): Prisma.StudentWhereInput {
     switch (resolution) {
       case undefined: return {};
@@ -750,7 +1077,15 @@ export class StudentsService {
     }
   }
 
+  /**
+   * Prisma Bytes 입력용 ArrayBuffer 기반 복사본
+   */
   private bytes(value: Uint8Array): Uint8Array<ArrayBuffer> { const copy = new Uint8Array(new ArrayBuffer(value.byteLength)); copy.set(value); return copy; }
 
+  /**
+   * 학생 조회 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never { throw new DomainError(status, code, "The student operation could not be completed."); }
 }

@@ -1,6 +1,6 @@
 /**
- * 브라우저 전용 Nest API 어댑터 공개 API.
- * 계약(packages/contracts/openapi.yaml)만 보고 만든다 — `apps/api` 를 import 하지 않는다.
+ * 브라우저 전용 Nest API 어댑터 공개 API
+ * 계약(packages/contracts/openapi.yaml)만 보고 만듦 — `apps/api` 를 import 하지 않음
  */
 
 export { apiRequest, bootstrapCsrf, resetCsrfToken } from "./client";
@@ -9,7 +9,7 @@ export type { ApiMethod, ApiRequestOptions } from "./client";
 export { ApiError, defaultErrorMessage, isAborted, isApiError } from "./problem";
 export type { Problem, ProblemFieldError } from "./problem";
 
-// 키 생성 함수는 내보내지 않는다 — 수명을 관리하는 훅을 통해서만 키를 얻는다.
+// 키 생성 함수는 내보내지 않음 — 수명을 관리하는 훅을 통해서만 키를 얻음
 export {
   isDefinitiveFailure,
   sameOperationIntent,

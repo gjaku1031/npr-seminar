@@ -1,22 +1,22 @@
 "use client";
 
 /**
- * 모바일 예약 플로우 — 공개 루트(`/`)의 학부모 앱.
+ * 모바일 예약 플로우 — 공개 루트(`/`)의 학부모 앱
  *
  * 흐름: type → campus → list → auth(SMS OTP) → children(자동 연결 자녀) / guest(비재원 필수 정보)
- *       → 참석 학부모 → 생성 → done(QR). 첫 화면 예약 관리 링크는 manage 로 간다.
+ *       → 참석 학부모 → 생성 → done(QR). 첫 화면 예약 관리 링크는 manage 로 감
  *
- * 전부 브라우저에서 same-origin Nest `/api/v1` 계약 API 로만 동작한다.
- * `@/server`·레거시 서버 액션·목업 배열·전체 학생 데이터셋을 쓰지 않는다.
+ * 전부 브라우저에서 same-origin Nest `/api/v1` 계약 API 로만 동작함
+ * `@/server`·서버 액션·목업 배열·전체 학생 데이터셋을 쓰지 않음
  *
  * 시크릿 경계:
- * - 앱이 원문 QR·토큰을 **자동으로 남기는 경로는 없다** — URL·localStorage/sessionStorage·
- *   쿠키·서버 상태·로그·파일명·클립보드 어디에도 쓰지 않는다.
- * - 원문 QR 은 신규 발급 응답에서 한 번만 받아 **QR 이미지로만** 그린다.
- * - X-Booking-Proof 는 **메모리 전용**이고 화면 표시·내보내기 대상이 아니다.
+ * - 앱이 원문 QR·토큰을 자동으로 남기는 경로는 없음 — URL·localStorage/sessionStorage·
+ *   쿠키·서버 상태·로그·파일명·클립보드 어디에도 쓰지 않음
+ * - 원문 QR 은 신규 발급 응답에서 한 번만 받아 QR 이미지로만 그림
+ * - X-Booking-Proof 는 메모리 전용이고 화면 표시·내보내기 대상이 아님
  *
- * ★ 인증 이후 뒤로가기·캠퍼스/회차/유형 변경은 한 함수(invalidateAuth)로 proof·OTP·자녀·guest
- *   초안·생성 오류·멱등 키를 모두 무효화한다 — 이전 proof 로 생성 요청이 새어 나가지 않게 한다.
+ * 인증 이후 뒤로가기·캠퍼스/회차/유형 변경은 한 함수(invalidateAuth)로 proof·OTP·자녀·guest
+ *   초안·생성 오류·멱등 키를 모두 무효화함 — 이전 proof 로 생성 요청이 새어 나가지 않게 함
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -63,51 +63,87 @@ import { BottomBar, ErrorNote, FlowHeader, FlowToast } from "./MobileChrome";
 import { ManageBookingPanel } from "./ManageBookingPanel";
 import { ReservationTypeStep } from "./ReservationTypeStep";
 
+/**
+ * 예약 흐름 단계
+ */
 type Step = "type" | "campus" | "list" | "auth" | "children" | "guest" | "done" | "manage";
 
+/**
+ * 참석 보호자 선택지
+ */
 const ATTENDANCE_OPTIONS: AttendanceParty[] = ["MOTHER", "FATHER", "BOTH"];
 
+/**
+ * 새로 만든 예약의 완료 화면 정보
+ */
 interface FreshTicket {
+  /**
+   * 만든 예약
+   */
   booking: FamilyBooking;
-  /** 원문 QR — 신규 커밋 응답에서만 온다. 리플레이엔 없다(활성 QR 은 예약 조회에서 확인). */
+  /**
+   * 원문 QR — 신규 커밋 응답에서만 옴. 리플레이엔 없음(활성 QR 은 예약 조회에서 확인)
+   */
   qrToken: string | null;
-  /** 리플레이라 이 화면엔 QR 이미지가 없을 때 안내(오류가 아니라 정상 완료 안내). */
+  /**
+   * 리플레이라 이 화면엔 QR 이미지가 없을 때 안내(오류가 아니라 정상 완료 안내)
+   */
   qrNotice: string | null;
 }
 
-/** 생성 오류 뒤 화면에 함께 내줄 복구 동선(있을 때만). */
+/**
+ * 생성 오류 뒤 화면에 함께 내줄 복구 동선(있을 때만)
+ */
 interface CreateCta {
+  /**
+   * 버튼 문구
+   */
   label: string;
+
+  /**
+   * 버튼 동작
+   */
   run: () => void;
 }
 
+/**
+ * 회차 시각·장소 문구
+ */
 function sessionMeta(session: PublicSeminarSession): string {
   return `${fmtDateTime(new Date(session.startsAt))} · ${SEMINAR_LOCATION}`;
 }
 
-/** 초기 진입 모드 — 루트 포스터의 두 액션이 `/reserve` 검색어(`mode`)로 이걸 정한다. */
+/**
+ * 초기 진입 모드 — 루트 포스터의 두 액션이 `/reserve` 검색어(`mode`)로 이걸 정함
+ */
 export type ReserveInitialMode = "reserve" | "manage";
 
+/**
+ * 예약 흐름 속성
+ */
 export interface ReserveFlowProps {
   /**
-   * `manage` 면 첫 화면을 예약 조회·변경·취소 패널로 연다("이미 예약하셨나요?" 진입).
-   * 그 밖(기본 `reserve`)은 지금처럼 예약 유형 선택부터 시작한다. 플로우 내부 동작은 그대로다.
+   * `manage` 면 첫 화면을 예약 조회·변경·취소 패널로 엶("이미 예약하셨나요?" 진입)
+   * 그 밖(기본 `reserve`)은 지금처럼 예약 유형 선택부터 시작함. 플로우 내부 동작은 그대로임
    */
   initialMode?: ReserveInitialMode;
 }
 
+/**
+ * 학부모 예약 흐름. 유형 → 캠퍼스 → 회차 → 인증 → 참가자 → 완료
+ */
 export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) {
   const [step, setStep] = useState<Step>(initialMode === "manage" ? "manage" : "type");
   const [participantType, setParticipantType] = useState<ParticipantType | null>(null);
   const [branch, setBranch] = useState<Branch | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [attendance, setAttendance] = useState<AttendanceParty>("MOTHER");
-  // 개인정보 수집·이용 동의 — 예약 커밋 전 필수. API 본문에는 싣지 않고 UI 게이트로만 쓴다.
+  // 개인정보 수집·이용 동의 — 예약 커밋 전 필수. API 본문에는 싣지 않고 UI 게이트로만 씀
   const [consent, setConsent] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const { sessions, loading: sessionsLoading, error: sessionsError, reload } = usePublicSessions();
-  // 유형별 회차 가시성(GUEST 는 guestBookingEnabled 회차만). 성공적으로 불러온 목록에서만 센다.
+  // 유형별 회차 가시성(GUEST 는 guestBookingEnabled 회차만). 성공적으로 불러온 목록에서만 셈
   const visible = useMemo(
     () => sessionsForType(sessions, branch, participantType),
     [sessions, branch, participantType],
@@ -116,7 +152,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     () => sessions.find((s) => s.seminarSessionId === sessionId) ?? null,
     [sessions, sessionId],
   );
-  // 비재원 진입 가능 여부 — 로딩/오류/플래그를 정직하게 반영한다.
+  // 비재원 진입 가능 여부 — 로딩/오류/플래그를 정직하게 반영함
   const guestState = guestEntryState(sessionsLoading, sessionsError, sessions);
 
   const proof = useBookingProof();
@@ -139,7 +175,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     timers.current.push(setTimeout(() => setToast(null), 2600));
   }, []);
 
-  /* 학생 조회 — proof 가 연락처 digest 를 정한다. 선택 캠퍼스의 활성 자녀를 전부 자동 연결한다. */
+  // 학생 조회 — proof 가 연락처 digest 를 정함. 선택 캠퍼스의 활성 자녀를 전부 자동 연결함
   const loadStudents = useCallback(async (current: BookingProof, campus: Branch) => {
     setStudentsError(null);
     try {
@@ -154,11 +190,9 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     }
   }, []);
 
-  /**
-   * ★ 인증·하위 상태 무효화 — 한 함수로 모은다.
-   * children/guest 의 back, 캠퍼스/회차/유형 변경이 모두 이걸 부른다.
-   * 연락처 입력값(otp.contact)은 편의를 위해 남지만 **인증 효력은 전혀 없다**(proof 를 버리므로).
-   */
+  // 인증·하위 상태 무효화 — 한 함수로 모음
+  // children/guest 의 back, 캠퍼스/회차/유형 변경이 모두 이걸 부름
+  // 연락처 입력값(otp.contact)은 편의를 위해 남지만 인증 효력은 전혀 없음(proof 를 버리므로)
   const otp = useOtpFlow({
     purpose: "FAMILY_BOOKING",
     branch: branch ?? undefined,
@@ -168,7 +202,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
         setStep("children");
         if (branch) void loadStudents(issued, branch);
       } else {
-        // GUEST: 선택 회차 flag 를 다시 확인한 뒤에만 폼으로 넘어간다.
+        // GUEST: 선택 회차 flag 를 다시 확인한 뒤에만 폼으로 넘어감
         if (session?.guestBookingEnabled) {
           setStep("guest");
         } else {
@@ -213,7 +247,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     [invalidateAuth],
   );
 
-  /** 생성 실패 코드별 UX — status 하나를 모두 "이미 예약"으로 번역하지 않는다. */
+  // 생성 실패 코드별 UX — status 하나를 모두 "이미 예약"으로 번역하지 않음
   const handleCreateError = useCallback(
     (caught: unknown) => {
       if (!isApiError(caught)) {
@@ -262,7 +296,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
         default:
           break;
       }
-      // proof 만료 계열 — 인증부터 다시.
+      // proof 만료 계열 — 인증부터 다시
       if (caught.status === 401 || caught.status === 403) {
         invalidateAuth();
         flash("본인 확인이 만료됐습니다. 다시 인증해 주세요.");
@@ -274,12 +308,12 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     [flash, reload, invalidateAuth, reset],
   );
 
-  /* 예약 생성 — 신규 커밋만 원문 QR 을 준다. ENROLLED 는 studentIds 를 보내지 않는다. */
+  // 예약 생성 — 신규 커밋만 원문 QR 을 줌. ENROLLED 는 studentIds 를 보내지 않음
   const create = useCallback(async () => {
     const current = proof.proof;
     if (!session || !current || participantType === null || branch === null) return;
 
-    // GUEST 는 생성 직전 flag 를 다시 확인한다. 최종 권위는 POST 응답이다.
+    // GUEST 는 생성 직전 flag 를 다시 확인함. 최종 권위는 POST 응답임
     if (participantType === "GUEST" && !session.guestBookingEnabled) {
       setCreateError("이 회차의 비재원생 예약이 마감됐습니다. 회차를 다시 선택해 주세요.");
       setCreateCta({ label: "회차 다시 선택", run: () => { reload(); setStep("list"); } });
@@ -304,7 +338,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
               attendanceParty: attendance,
               guest: {
                 name: guest.name.trim(),
-                // 비재원 참가자의 지점은 선택한 캠퍼스다 (계약상 필수·불변).
+                // 비재원 참가자의 지점은 선택한 캠퍼스임 (계약상 필수·불변)
                 branch: branch,
                 schoolName: guest.schoolName.trim(),
                 grade: guest.grade as GuestGrade,
@@ -317,7 +351,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       });
 
       createKey.settle();
-      // 생성이 성공하면 계약상 FAMILY_BOOKING proof 가 소비된다.
+      // 생성이 성공하면 계약상 FAMILY_BOOKING proof 가 소비됨
       proof.consume();
 
       setTicket(
@@ -340,7 +374,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proof, session, participantType, attendance, guest, branch, createKey]);
 
-  /* ── 예약 유형 선택 (STEP 1 · TYPE) ── */
+  // ── 예약 유형 선택 (STEP 1 · TYPE) ──
   if (step === "type")
     return (
       <ReservationTypeStep
@@ -353,7 +387,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       />
     );
 
-  /* ── 캠퍼스 선택 ── */
+  // ── 캠퍼스 선택 ──
   if (step === "campus")
     return (
       <div data-screen-label="모바일 — 캠퍼스 선택" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -392,7 +426,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
                     <MapPin size={20} aria-hidden="true" />
                   </span>
                   <span style={{ flex: 1 }}>
-                    {/* 공개 예약 사용자 문구는 풀 라벨(…캠퍼스). 전역 BRANCH_LABELS/BRANCH_OPTIONS 는 관리자 화면용이라 그대로 둔다. */}
+                    {/* 공개 예약 사용자 문구는 풀 라벨(…캠퍼스). 전역 BRANCH_LABELS/BRANCH_OPTIONS 는 관리자 화면용이라 그대로 둠 */}
                     <span style={{ display: "block", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16.5, color: "var(--text-strong)" }}>{publicBranchLabel(option.value)}</span>
                     <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
                       {sessionsLoading ? "불러오는 중…" : `진행 설명회 ${count}개`}
@@ -410,7 +444,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       </div>
     );
 
-  /* ── 설명회 선택 ── */
+  // ── 설명회 선택 ──
   if (step === "list")
     return (
       <div data-screen-label="모바일 — 설명회 선택" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -498,7 +532,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       </div>
     );
 
-  /* ── 본인 확인 (SMS OTP) ── */
+  // ── 본인 확인 (SMS OTP) ──
   if (step === "auth" && session)
     return (
       <div data-screen-label="모바일 — 본인 확인" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -532,7 +566,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       </div>
     );
 
-  /* ── 재원생 자동 연결 자녀 확인 ── */
+  // ── 재원생 자동 연결 자녀 확인 ──
   if (step === "children" && session)
     return (
       <div data-screen-label="모바일 — 재원생 예약" style={{ minHeight: "100%", background: "var(--surface-page)" }}>
@@ -604,7 +638,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
             </Button>
           ) : (
             <Button size="lg" fullWidth disabled={!students || students.length === 0 || !consent || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
-              {/* 좌석은 참석 학부모 인원 기준 — 자녀 수(students.length)가 아니라 seatCountFor 로 센다. */}
+              {/* 좌석은 참석 학부모 인원 기준 — 자녀 수(students.length)가 아니라 seatCountFor 로 셈 */}
               {creating ? "예약 중…" : students ? `${seatCountFor(attendance)}명 예약하기` : "불러오는 중…"}
             </Button>
           )}
@@ -613,7 +647,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
       </div>
     );
 
-  /* ── 비재원생 필수 정보 폼 ── */
+  // ── 비재원생 필수 정보 폼 ──
   if (step === "guest" && session && branch) {
     const nameOk = guest.name.trim() !== "";
     const schoolOk = guest.schoolName.trim() !== "";
@@ -656,7 +690,7 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
         </div>
         <BottomBar>
           <Button size="lg" fullWidth disabled={!formValid || !consent || creating} onClick={() => void create()} iconRight={<ArrowRight size={17} aria-hidden="true" />}>
-            {/* 재원생과 동일한 좌석(참석 학부모 인원) 기준 CTA — 자녀 수와 무관하다. */}
+            {/* 재원생과 동일한 좌석(참석 학부모 인원) 기준 CTA — 자녀 수와 무관함 */}
             {creating ? "예약 중…" : `${seatCountFor(attendance)}명 예약하기`}
           </Button>
         </BottomBar>
@@ -665,17 +699,19 @@ export function ReserveFlow({ initialMode = "reserve" }: ReserveFlowProps = {}) 
     );
   }
 
-  /* ── 예약 조회 · 변경 · 취소 ── */
+  // ── 예약 조회 · 변경 · 취소 ──
   if (step === "manage")
     return <ManageBookingPanel sessions={sessions} onExit={reset} onToast={flash} />;
 
-  /* ── 예약 완료 티켓 ── */
+  // ── 예약 완료 티켓 ──
   if (step === "done" && ticket) return <Ticket ticket={ticket} session={session} onReset={reset} />;
 
   return null;
 }
 
-/** 하단 예약 관리 링크 — 캠퍼스·목록 화면 공용. */
+/**
+ * 하단 예약 관리 링크 — 캠퍼스·목록 화면 공용
+ */
 function ManageLink({ onManage }: { onManage: () => void }) {
   return (
     <div style={{ textAlign: "center", marginTop: 22 }}>
@@ -691,6 +727,10 @@ function ManageLink({ onManage }: { onManage: () => void }) {
 }
 
 /* ── 참석 학부모 — 정확히 하나 (계약 AttendanceParty) ── */
+
+/**
+ * 참석 보호자 선택
+ */
 function AttendancePicker({
   value,
   onChange,
@@ -706,14 +746,14 @@ function AttendancePicker({
       <div style={{ display: "flex", gap: 8 }}>
         {ATTENDANCE_OPTIONS.map((option) => {
           const on = value === option;
-          // 좌석 수는 서버 계약(seatCountFor)이 참석 학부모로만 파생한다 — 자녀 수와 무관하다.
+          // 좌석 수는 서버 계약(seatCountFor)이 참석 학부모로만 파생함 — 자녀 수와 무관함
           const seats = seatCountFor(option);
           return (
             <button
               key={option}
               type="button"
               aria-pressed={on}
-              // `·` 은 시각용 구분자라 접근성 이름에는 인원을 또렷이 담는다.
+              // `·` 은 시각용 구분자라 접근성 이름에는 인원을 또렷이 담음
               aria-label={`${ATTENDANCE_PARTY_LABELS[option]} ${seats}명`}
               onClick={() => onChange(option)}
               style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "12px 0", borderRadius: "var(--radius-md)", border: on ? "1.5px solid var(--violet-800)" : "1px solid var(--border-soft)", background: on ? "var(--surface-brand-soft)" : "var(--surface-card)", color: on ? "var(--violet-800)" : "var(--text-body)", fontSize: 14.5, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-body)" }}
@@ -734,6 +774,10 @@ function AttendancePicker({
 }
 
 /* ── 개인정보 수집·이용 동의 (필수) — 예약 커밋 게이트. API 본문엔 싣지 않는다 ── */
+
+/**
+ * 개인정보 수집·이용 동의. 예약 생성 전 필수
+ */
 function PrivacyConsent({
   checked,
   onChange,
@@ -774,6 +818,10 @@ function PrivacyConsent({
 }
 
 /* ── OTP 입력 (연락처 → 6자리) — 예약·관리 공용 ── */
+
+/**
+ * 인증번호 입력 칸
+ */
 export function OtpFields({ otp, hint }: { otp: ReturnType<typeof useOtpFlow>; hint: string }) {
   const sent = otp.stage === "code" || otp.stage === "verifying";
 
@@ -797,7 +845,7 @@ export function OtpFields({ otp, hint }: { otp: ReturnType<typeof useOtpFlow>; h
 
       {sent && (
         <div style={{ marginTop: 16 }}>
-          {/* 서버가 201 을 준 뒤에만 이 문구가 뜬다 */}
+          {/* 서버가 201 을 준 뒤에만 이 문구가 뜸 */}
           <p role="status" aria-live="polite" style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--mint-700)", lineHeight: 1.55 }}>
             인증번호 6자리를 문자로 보냈습니다. 5분 안에 입력해 주세요.
           </p>
@@ -829,6 +877,10 @@ export function OtpFields({ otp, hint }: { otp: ReturnType<typeof useOtpFlow>; h
 }
 
 /* ── 완료 티켓 ── */
+
+/**
+ * 예약 완료 티켓. 입장 QR 포함
+ */
 function Ticket({
   ticket,
   session,
@@ -851,7 +903,7 @@ function Ticket({
           예약이 확정됐습니다!
         </h2>
 
-        {/* QR 224px 가 390px 폭에 들어가도록 세로로 쌓는다 */}
+        {/* QR 224px 가 390px 폭에 들어가도록 세로로 쌓음 */}
         <div style={{ width: "100%", maxWidth: 340, marginTop: 20, borderRadius: "var(--radius-lg)", background: "var(--surface-card)", boxShadow: "var(--shadow-raised)", overflow: "hidden", animation: "ds-fade-up var(--dur-hero) var(--ease-spring) 200ms both" }}>
           <div style={{ background: "var(--surface-brand)", color: "var(--text-on-brand)", padding: "16px 20px" }}>
             <div style={{ fontSize: 10.5, letterSpacing: "var(--tracking-caps)", color: "var(--mint-400)", fontWeight: 700 }}>{BRAND_NAME_ROMAN} ADMISSION QR</div>
@@ -870,7 +922,7 @@ function Ticket({
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 9, width: "100%" }}>
-              {/* 공개 화면 표시 마스킹 — API 원본(booking)은 그대로 두고 표시할 때만 가린다. */}
+              {/* 공개 화면 표시 마스킹 — API 원본(booking)은 그대로 두고 표시할 때만 가림 */}
               <KV k="참석자명" v={booking.students.map((s) => maskName(s.name)).join(", ")} />
               <KV k="참석 학부모" v={attendancePartySummary(booking.attendanceParty)} />
               {session && <KV k="일시" v={`${fmtSessionCardDateTime(new Date(session.startsAt))} · ${SEMINAR_LOCATION}`} />}

@@ -6,26 +6,70 @@ import type { Prisma } from "../../generated/prisma/client.js";
 import type { BranchCode, StagedSnapshotRow } from "./offline-snapshot.types.js";
 import type { LiveSyncCounts, NormalizedLiveSnapshot } from "./student-normalizer.service.js";
 
+/**
+ * 원장 변경 건수
+ */
 interface MutationCounts {
+  /**
+   * 추가 학생 수
+   */
   readonly insertedStudentCount: number;
+
+  /**
+   * 변경 학생 수
+   */
   readonly updatedStudentCount: number;
+
+  /**
+   * 비활성화 학생 수
+   */
   readonly inactivatedStudentCount: number;
+
+  /**
+   * 추가 수강 등록 수
+   */
   readonly insertedAssignmentCount: number;
+
+  /**
+   * 변경 수강 등록 수
+   */
   readonly updatedAssignmentCount: number;
+
+  /**
+   * 비활성화 수강 등록 수
+   */
   readonly inactivatedAssignmentCount: number;
 }
 
+/**
+ * 지점 처리 순서
+ */
 const BRANCH_ORDER: readonly BranchCode[] = ["CAMPUS_A", "CAMPUS_B", "CAMPUS_C"];
 
-/** 검증된 staging 스냅샷을 학생 원장과 수업 배정에 원자적으로 반영한다. 외부 시스템은 호출하지 않는다. */
+/**
+ * 검증된 스테이징 스냅샷을 학생 원장과 수강 등록에 원자적으로 반영. 외부 시스템은 호출하지 않음
+ */
 @Injectable()
 export class StudentPromotionService {
+  /**
+   * DB 클라이언트 주입
+   */
   public constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 호출부가 적재한 세 지점의 staging 해시와 상태를 잠금 아래 재검증한다.
-   * 학생·배정 생성/갱신/비활성화와 실행 상태·감사를 한 트랜잭션에 커밋하며 변경이 없으면 NO_CHANGES를 반환한다.
-   * staging이 불완전하거나 해시가 다르면 409로 거절하고 원장 변경을 롤백한다.
+   * 스테이징을 원장에 반영
+   *
+   * 1. 트랜잭션 밖에서 현재 원장과 비교해 지점별 변경 건수 계산
+   * 2. 실행 행 잠금 후 RUNNING·로그인 시도함·스테이징 해시 있음 확인
+   * 3. 세 지점 실행이 모두 VALIDATED이고 저장된 스테이징의 해시가 같은지 확인
+   * 4. 학생 추가·변경, 수강 등록 추가·변경, 스냅샷에 없는 행 비활성화, 생성 이력 기록
+   * 5. 지점·실행 상태와 감사 이벤트 기록
+   *
+   * 모두 한 트랜잭션. 검증 실패 시 409로 거부하고 원장 변경 롤백
+   *
+   * @param branchIds 지점 코드별 DB ID
+   * @returns 변경이 없으면 NO_CHANGES, 있으면 SUCCEEDED와 지표
+   * @throws {DomainError} 409 반영 불가 상태·스테이징 불완전·무결성 불일치
    */
   public async promote(
     runId: bigint,
@@ -63,6 +107,7 @@ export class StudentPromotionService {
       await transaction.syncRun.update({ where: { id: runId }, data: { status: "PUBLISHING" } });
       await transaction.syncBranchRun.updateMany({ where: { syncRunId: runId }, data: { status: "PROMOTING" } });
 
+      // 새 학생 추가. 반 표시: 과학 반만 `과학`, 반 없음 `미분류`, 다음 학기 반만 `비재원생`
       await transaction.$executeRaw`
         insert into students(
           public_id,source_student_no,branch_id,name,class_name,school_name,grade,teacher_name,unit_name,
@@ -84,6 +129,7 @@ export class StudentPromotionService {
          where st.sync_run_id=${runId} and st.included and st.primary_selected
         on conflict(source_student_no) do nothing`;
 
+      // 기존 학생 갱신. 아버지 연락처는 원천에 열이 있었을 때만 덮어씀
       await transaction.$executeRaw`
         update students s set
           branch_id=st.branch_id,name=st.name,
@@ -104,6 +150,7 @@ export class StudentPromotionService {
         where st.sync_run_id=${runId} and st.included and st.primary_selected
           and s.source_student_no=st.source_student_no`;
 
+      // 수강 등록 추가·갱신
       await transaction.$executeRaw`
         insert into student_class_assignments(
           public_id,student_id,source_unique_no,class_registration_no,class_name,teacher_name,unit_name,
@@ -119,6 +166,7 @@ export class StudentPromotionService {
           school_name=excluded.school_name,grade=excluded.grade,source_hash=excluded.source_hash,
           source_active=true,last_seen_run_id=excluded.last_seen_run_id,source_inactivated_at=null,updated_at=now()`;
 
+      // 이번 스냅샷에 없는 수강 등록·학생 비활성화
       await transaction.$executeRaw`
         update student_class_assignments a set source_active=false,source_inactivated_at=now(),updated_at=now()
          where a.source_active and not exists(
@@ -130,12 +178,14 @@ export class StudentPromotionService {
          where s.source_active and not exists(
            select 1 from staging_students st where st.sync_run_id=${runId} and st.included
              and st.source_student_no=s.source_student_no)`;
+      // 이번 실행에서 처음 생긴 학생의 생성 이력
       await transaction.$executeRaw`
         insert into student_history(student_id,sync_run_id,change_type,current_snapshot)
         select s.id,${runId},'CREATED',jsonb_build_object(
           'branchId',s.branch_id,'classResolutionStatus',s.class_resolution_status)
           from students s where s.first_seen_run_id=${runId}
         on conflict do nothing`;
+      // 지점 실행별 변경 건수와 상태
       for (const branch of BRANCH_ORDER) {
         const branchRun = branchRuns.find((candidate) => candidate.sequenceNo === BRANCH_ORDER.indexOf(branch) + 1)!;
         const branchMutation = mutations[branch];
@@ -160,7 +210,11 @@ export class StudentPromotionService {
     return { status, metrics };
   }
 
-  /** 현재 원장과 스냅샷을 비교해 지점별 학생·배정 변경 건수를 계산한다. DB 변경은 하지 않는다. */
+  /**
+   * 현재 원장과 스냅샷을 비교한 지점별 학생·수강 등록 변경 건수. DB 변경 없음
+   *
+   * 비활성 상태·지점 변경·행 해시 변경을 변경으로 셈
+   */
   private async mutations(rows: readonly StagedSnapshotRow[], branchIds: ReadonlyMap<BranchCode, bigint>): Promise<Record<BranchCode, MutationCounts>> {
     const ids = [...branchIds.values()];
     const existing = await this.prisma.student.findMany({ where: { branchId: { in: ids } }, include: { assignments: true } });
@@ -201,6 +255,9 @@ export class StudentPromotionService {
     return result;
   }
 
+  /**
+   * 변경 건수 합계
+   */
   private sumMutations(values: readonly MutationCounts[]): MutationCounts {
     return values.reduce((total, value) => ({
       insertedStudentCount: total.insertedStudentCount + value.insertedStudentCount,
@@ -211,13 +268,26 @@ export class StudentPromotionService {
       inactivatedAssignmentCount: total.inactivatedAssignmentCount + value.inactivatedAssignmentCount,
     }), this.zeroMutations());
   }
+
+  /**
+   * 0으로 채운 변경 건수
+   */
   private zeroMutations(): MutationCounts { return { insertedStudentCount: 0, updatedStudentCount: 0, inactivatedStudentCount: 0,
     insertedAssignmentCount: 0, updatedAssignmentCount: 0, inactivatedAssignmentCount: 0 }; }
-  /** 적재 행의 순서·포함·대표 선택까지 묶은 해시를 다시 계산해 원본 스냅샷과 대조한다. */
+
+  /**
+   * 순번·행 해시·포함·대표 선택을 묶은 스테이징 해시. 정규화 때 계산한 값과 대조
+   */
   private stagingHash(rows: ReadonlyArray<{ sourceOrdinal: number; rowHash: Buffer; included: boolean; primarySelected: boolean }>): Buffer {
     const hash = createHash("sha256");
     for (const row of rows) hash.update(`${row.sourceOrdinal}\u0000${row.rowHash.toString("base64url")}\u0000${Number(row.included)}\u0000${Number(row.primarySelected)}\n`);
     return hash.digest();
   }
+
+  /**
+   * 반영 오류 발생
+   *
+   * @throws {DomainError} 409 지정 코드
+   */
   private fail(code: string): never { throw new DomainError(409, code, "The validated student snapshot could not be promoted."); }
 }

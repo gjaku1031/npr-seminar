@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Compare NestJS controller routes with the public business API contract."""
+# 실행: packages/contracts 에서 `python3 scripts/audit_controller_routes.py`(pnpm run validate 에 포함)
+# 종료 코드: 0 일치, 1 계약에만 있거나 컨트롤러에만 있는 라우트·중복 라우트·파일 오류
+"""NestJS 컨트롤러 라우트와 공개 업무 API 계약(openapi.yaml)의 operation 목록 대조"""
 
 from __future__ import annotations
 
@@ -10,22 +12,28 @@ from pathlib import Path
 from validate_openapi import ContractValidationError, iter_operations, load_contract
 
 
+# @Controller('경로') 데코레이터
 CONTROLLER_RE = re.compile(r"@Controller\(\s*['\"]([^'\"]*)['\"]\s*\)")
+# @Get·@Post·@Patch·@Delete·@Put('경로') 데코레이터
 OPERATION_RE = re.compile(
     r"@(Get|Post|Patch|Delete|Put)\(\s*(?:['\"]([^'\"]*)['\"])?\s*\)"
 )
+# Nest 경로 파라미터 :이름
 NEST_PARAMETER_RE = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)")
+# 계약 대상이 아닌 내부 상태 검사 라우트
 INTERNAL_ROUTE_ALLOWLIST = {
     ("/health/live", "get"),
     ("/health/ready", "get"),
 }
 
 
+# 컨트롤러 기본 경로와 메서드 경로를 합치고 :이름 을 {이름} 으로 바꿈
 def normalize_route(base: str, suffix: str) -> str:
     pieces = [piece.strip("/") for piece in (base, suffix) if piece.strip("/")]
     return NEST_PARAMETER_RE.sub(r"{\1}", "/" + "/".join(pieces))
 
 
+# apps/api/src 아래 모든 컨트롤러의 (경로, 메서드) → 파일. 같은 라우트가 두 번 나오면 실패
 def controller_routes(source_root: Path) -> dict[tuple[str, str], Path]:
     routes: dict[tuple[str, str], Path] = {}
     for source in sorted(source_root.rglob("*controller.ts")):
@@ -44,6 +52,7 @@ def controller_routes(source_root: Path) -> dict[tuple[str, str], Path]:
     return routes
 
 
+# 진입점. 계약 operation 과 컨트롤러 라우트를 양방향으로 대조
 def main() -> int:
     repository = Path(__file__).resolve().parents[3]
     contract_path = repository / "packages/contracts/openapi.yaml"

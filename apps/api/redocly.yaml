@@ -1,3 +1,4 @@
+# Redocly OpenAPI 검사 설정. minimal 규칙에 참조·operationId·보안·경로 모호성 검사를 오류로 추가
 extends:
   - minimal
 rules:

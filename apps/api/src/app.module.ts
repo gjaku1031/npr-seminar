@@ -17,6 +17,11 @@ import { SmsAdminModule } from "./modules/sms/sms-admin.module.js";
 import { GoogleSheetsAdminModule } from "./modules/google-sheets/google-sheets-admin.module.js";
 import { PosterModule } from "./modules/poster/poster.module.js";
 
+/**
+ * HTTP API 루트 모듈
+ *
+ * production에서는 .env 파일을 읽지 않고 프로세스 환경 변수만 사용
+ */
 @Module({
   imports: [
     ConfigModule.forRoot({

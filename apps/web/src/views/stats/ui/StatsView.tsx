@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * 운영 통계 — 정원·예약률이 아니라 학생 → 가족 → 실제 참석 학부모의 절대 규모를 보여 준다.
+ * 운영 통계 — 정원·예약률이 아니라 학생 → 가족 → 실제 참석 학부모의 절대 규모를 보여 줌
  * 같은 세 수치를 요약·단위·예약 채널에서 반복해, 형제자매 때문에 학생 행 수와 좌석 수가
- * 달라지는 이유를 한 화면에서 비교할 수 있게 한다.
+ * 달라지는 이유를 한 화면에서 비교할 수 있게 함
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -13,6 +13,9 @@ import { BRANCH_LABELS, BRANCH_OPTIONS, type Branch, type ParticipationMonitorin
 import { fmtSessionDate } from "@/shared/lib/format";
 import { Button, Card, Icons, Select, Tag } from "@/shared/ui";
 
+/**
+ * 통계 화면 반응형 CSS
+ */
 const STATS_STYLES = `
   .npr-stats-root { width: 100%; min-width: 0; box-sizing: border-box; }
   .npr-stats-header, .npr-stats-header > * { min-width: 0; }
@@ -54,6 +57,9 @@ const STATS_STYLES = `
   }
 `;
 
+/**
+ * 통계 화면 바탕
+ */
 function StatsScreen({ children }: { children: ReactNode }) {
   return (
     <div className="npr-stats-root" data-screen-label="참가자 운영 통계">
@@ -63,12 +69,18 @@ function StatsScreen({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * 회차 선택지 표시 문구
+ */
 function sessionLabel(option: SeminarSessionOption): string {
   const { session, seminarTitle } = option;
   const scope = session.branch === null ? "전체" : BRANCH_LABELS[session.branch];
   return `${seminarTitle} · ${fmtSessionDate(new Date(session.startsAt))} · ${scope}`;
 }
 
+/**
+ * 단위 그룹 표시 문구
+ */
 const UNIT_GROUP_LABELS: Record<string, string> = {
   ALL: "전체",
   ELEMENTARY: "초등",
@@ -80,10 +92,16 @@ const UNIT_GROUP_LABELS: Record<string, string> = {
   SCIENCE: "과학",
 };
 
+/**
+ * 숫자 표시. null 이면 —
+ */
 function displayNumber(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("ko-KR");
 }
 
+/**
+ * 통계 화면. 회차 × 캠퍼스 필터로 서버 집계를 읽음
+ */
 export function StatsView() {
   const sessions = useSeminarSessions();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -192,6 +210,9 @@ export function StatsView() {
   );
 }
 
+/**
+ * 통계 본문. 요약 카드·단위 표·채널 카드
+ */
 function StatsBody({ stats, scopeLabel }: { stats: SessionStatistics; scopeLabel: string }) {
   const monitoring = stats.monitoring;
   return (
@@ -249,6 +270,9 @@ function StatsBody({ stats, scopeLabel }: { stats: SessionStatistics; scopeLabel
   );
 }
 
+/**
+ * 지표 카드 색조별 색
+ */
 const TONE_COLORS = {
   neutral: "var(--text-muted)",
   brand: "var(--violet-800)",
@@ -257,6 +281,9 @@ const TONE_COLORS = {
   danger: "var(--status-danger)",
 } as const;
 
+/**
+ * 지표 카드 하나
+ */
 function MetricCard({ label, value, suffix, icon, tone, delay, featured = false, compact = false }: {
   label: string;
   value: number | null;
@@ -290,6 +317,9 @@ function MetricCard({ label, value, suffix, icon, tone, delay, featured = false,
   );
 }
 
+/**
+ * 단위별 집계 표
+ */
 function UnitTable({ rows }: { rows: UnitStat[] }) {
   return (
     <div style={{ minWidth: 0 }}>
@@ -311,6 +341,9 @@ function UnitTable({ rows }: { rows: UnitStat[] }) {
   );
 }
 
+/**
+ * 채널별 집계 카드
+ */
 function ChannelCard({ channel }: { channel: ChannelStat }) {
   const label = channel.channel === "MOBILE" ? "모바일" : "수동";
   const monitoring: ParticipationMonitoring | null = channel.monitoring;
@@ -329,6 +362,9 @@ function ChannelCard({ channel }: { channel: ChannelStat }) {
   );
 }
 
+/**
+ * 집계 값 표시. 모르면 —
+ */
 function Value({ value, emphasized = false }: { value: number | null; emphasized?: boolean }) {
   return (
     <span className="npr-stats-num" style={{ fontSize: 13, fontWeight: emphasized ? 800 : 700, color: emphasized ? "var(--violet-800)" : "var(--text-body)" }}>
@@ -337,6 +373,9 @@ function Value({ value, emphasized = false }: { value: number | null; emphasized
   );
 }
 
+/**
+ * 집계 대기 표시
+ */
 function Pending({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
   return (
     <div style={{ padding: compact ? "28px 8px" : "60px 8px", textAlign: "center", color: "var(--text-faint)", fontSize: 12.5, lineHeight: 1.6 }}>

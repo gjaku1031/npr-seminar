@@ -1,3 +1,5 @@
+# Next.js web 프로세스. 127.0.0.1:3000 에서 수신하고 API 는 127.0.0.1:4000 으로 부름
+# 웹은 서버 비밀값을 쓰지 않으므로 DB·Redis·암호화·외부 연동 값을 모두 환경에서 지움
 [Unit]
 Description=NPR Seminar Next.js web
 After=network-online.target npr-seminar-api.service
@@ -13,9 +15,11 @@ Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=HOSTNAME=127.0.0.1
 Environment=NEST_API_ORIGIN=http://127.0.0.1:4000
+# DB·세션·암호화·Google·알리고·통통통·포스터 저장 값은 웹 프로세스에 넘기지 않음
 UnsetEnvironment=DATABASE_URL WORKER_DATABASE_URL MIGRATION_DATABASE_URL REDIS_URL SESSION_SECRET PHONE_ENCRYPTION_KEY PHONE_HMAC_KEY OTP_PEPPER SCANNER_PAIRING_HMAC_KEY QR_ENCRYPTION_KEY GOOGLE_APPLICATION_CREDENTIALS ALIGO_IDENTIFIER ALIGO_KEY
 UnsetEnvironment=TONG_SYNC_ENABLED TONG_WIRE_CONTRACT_CONFIRMED TONG_WIRE_CONTRACT_JSON TONG_BASE_URL TONG_USERNAME TONG_PASSWORD
 UnsetEnvironment=POSTER_STORAGE_DIR
+# 빌드 산출물과 next 실행 파일이 없으면 시작하지 않음
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/.next/BUILD_ID
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next
 ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
@@ -26,6 +30,7 @@ TimeoutStopSec=30s
 KillSignal=SIGTERM
 UMask=0027
 
+# 샌드박스. Next 캐시만 쓰기 허용하고 설정 디렉터리는 프로세스에서 숨김
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true

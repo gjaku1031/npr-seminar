@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
+# 운영 릴리스 VM(pve-release) 배포·롤백
+# - deploy: 소스를 불변 릴리스 디렉터리로 복사·빌드하고, DB 백업·마이그레이션 후 current 링크를 원자적으로 바꿈
+#   준비 상태 검사에 실패하면 이전 코드 릴리스로 자동 복귀
+#   --defer-web 이면 API·워커만 켜고 web 은 멈춘 채 지연 표식을 남김
+# - activate-web: Sheets v4 준비·초기화·활성화 뒤 모든 시트 매핑을 현재 워커 코드로 다시 검증하고 web·공개 HTTPS 를 켬
+# - rollback: 코드만 되돌리고 DB 마이그레이션은 되돌리지 않음
+# 실행: pve-release 에서 root 로 실행. 사용법은 --help
+#   deploy-nest-release.sh deploy [--source DIR] [--stamp YYYYMMDDTHHMMSSZ] [--skip-migrations] [--defer-web]
+#   deploy-nest-release.sh activate-web
+#   deploy-nest-release.sh rollback [STAMP]
+# 종료 코드: 0 성공(--help 포함), 1 사전 조건·검증·준비 상태 실패(die), 그 밖은 빌드·마이그레이션 등 하위 명령 실패
 set -Eeuo pipefail
 
+# 릴리스·설정 경로, 서비스 계정, 고정 주소, 고정 도구 버전·무결성 값, 시트 스키마 v4 지문, 배포 대상 유닛
 readonly release_root=/srv/npr-seminar
 readonly releases_dir=${release_root}/releases
 readonly current_link=${release_root}/current
@@ -43,6 +55,7 @@ readonly -a deployment_units=(
   npr-seminar-caddy-upstream.service
 )
 
+# 실행 중 바뀌는 값. 소스 위치·릴리스 스탬프·옵션·정리 대상 경로
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 readonly tong_wire_contract=${script_dir}/tong-wire-contract.production.json
 unit_source_dir=${script_dir}/systemd
@@ -53,15 +66,18 @@ defer_web=false
 cleanup_path=
 tong_environment_temp=
 
+# 진행 메시지 출력
 log() {
   printf '[npr-deploy] %s\n' "$*"
 }
 
+# 오류를 출력하고 종료 코드 1로 끝냄
 die() {
   printf '[npr-deploy] ERROR: %s\n' "$*" >&2
   exit 1
 }
 
+# 사용법 출력
 usage() {
   cat <<'USAGE'
 Usage:
@@ -82,6 +98,7 @@ Rollback switches code only. It never reverses a database migration.
 USAGE
 }
 
+# 종료 시 남은 임시 파일·디렉터리 정리. 예상 경로일 때만 지움
 cleanup() {
   if [[ -n ${tong_environment_temp} ]]; then
     case ${tong_environment_temp} in
@@ -99,15 +116,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# 명령이 없으면 중단
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
 }
 
+# root 와 대상 호스트 확인
 require_root_and_target() {
   [[ ${EUID} -eq 0 ]] || die "run as root"
   [[ $(hostname -s) == pve-release ]] || die "refusing to run outside pve-release"
 }
 
+# 필요한 명령·Node 22 이상·소켓 프록시 실행 파일 확인
 require_tools() {
   local command_name
   for command_name in awk basename chmod chown cmp cp curl dirname flock getent grep \
@@ -122,6 +142,7 @@ require_tools() {
     || die "Node.js 22 or newer is required"
 }
 
+# 시스템 계정이 없으면 만들고, 있으면 로그인 셸이 없는지 확인
 ensure_system_user() {
   local name=$1
   local home=$2
@@ -135,6 +156,7 @@ ensure_system_user() {
   useradd --system --user-group --home-dir "${home}" --shell /usr/sbin/nologin "${name}"
 }
 
+# 서비스 계정과 릴리스·포스터·설정·빌드 디렉터리 준비
 ensure_accounts_and_directories() {
   ensure_system_user "${api_user}" /nonexistent
   ensure_system_user "${web_user}" /nonexistent
@@ -144,14 +166,14 @@ ensure_accounts_and_directories() {
 
   install -d -o root -g root -m 0755 "${release_root}" "${releases_dir}"
   install -d -o "${api_user}" -g "${api_user}" -m 0750 "${poster_storage_dir}"
-  # The worker needs traversal only to open its own mode-0600 Google credential.
-  # It cannot list this directory or read the root-owned environment files.
+  # 워커는 자기 Google 자격(0600)을 열 수 있도록 통과 권한만 가짐. 디렉터리 목록·root 소유 env 파일은 읽지 못함
   install -d -o root -g "${worker_user}" -m 0710 "${config_dir}"
   install -d -o root -g root -m 0755 "${release_root}/.tooling"
   install -d -o "${build_user}" -g "${build_user}" -m 0750 \
     /var/lib/npr-build "${corepack_home}" "${release_root}/.pnpm-store"
 }
 
+# 고정 버전 Corepack 을 SHA-512 확인 후 설치. 이미 있으면 버전만 확인
 bootstrap_corepack() {
   if [[ -f ${corepack_entry} ]]; then
     [[ $(/usr/bin/node "${corepack_entry}" --version) == "${corepack_version}" ]] \
@@ -179,6 +201,7 @@ bootstrap_corepack() {
   cleanup_path=
 }
 
+# env 파일에서 키가 나오는 횟수. 주석·빈 줄 제외
 env_key_count() {
   local file=$1
   local wanted=$2
@@ -196,6 +219,7 @@ env_key_count() {
   ' "${file}"
 }
 
+# env 파일에서 키 값 읽기. 마지막 값을 쓰고 따옴표는 벗김
 env_value() {
   local file=$1
   local wanted=$2
@@ -219,6 +243,7 @@ env_value() {
   ' "${file}"
 }
 
+# 키가 정확히 하나 있고 값이 비어 있지 않아야 함
 require_env_key() {
   local file=$1
   local key=$2
@@ -228,6 +253,7 @@ require_env_key() {
   [[ -n $(env_value "${file}" "${key}") ]] || die "${file} contains an empty ${key} entry"
 }
 
+# 키가 없어야 함
 forbid_env_key() {
   local file=$1
   local key=$2
@@ -235,6 +261,7 @@ forbid_env_key() {
     || die "${file} must not contain ${key}"
 }
 
+# env 파일이 root:root 0600 일반 파일이어야 함
 validate_root_environment_file() {
   local file=$1
   [[ -f ${file} && ! -L ${file} ]] || die "missing regular environment file: ${file}"
@@ -242,9 +269,11 @@ validate_root_environment_file() {
     || die "${file} must be root:root mode 0600"
 }
 
+# 쓰기 대기 중인 env 값과 추가 순서
 declare -A env_updates=()
 declare -a env_update_order=()
 
+# env 값을 대기열에 넣음
 queue_env_value() {
   local key=$1
   local value=$2
@@ -255,6 +284,7 @@ queue_env_value() {
   env_updates[${key}]=${value}
 }
 
+# env 파일을 스탬프 붙은 사본으로 백업
 backup_environment_file() {
   local file=$1
   local backup=${file}.bak.${stamp}
@@ -267,6 +297,7 @@ backup_environment_file() {
   chmod 0600 "${backup}"
 }
 
+# 대기열 값으로 기존 env 파일의 키만 바꾸고 없는 키는 끝에 추가. 내용이 같으면 권한만 맞춤
 atomic_upsert_environment() {
   local file=$1
   local owner=$2
@@ -309,6 +340,7 @@ atomic_upsert_environment() {
   env_update_order=()
 }
 
+# 지정한 키만 runtime.env 에서 골라 대상 env 파일을 통째로 다시 씀. 내용이 같으면 그대로 둠
 write_environment_exact() {
   local file=$1
   shift
@@ -336,6 +368,7 @@ write_environment_exact() {
   fi
 }
 
+# 대기열 값만으로 대상 env 파일을 통째로 다시 씀
 write_queued_environment_exact() {
   local file=$1
   [[ ! -e ${file} || ( -f ${file} && ! -L ${file} ) ]] \
@@ -361,10 +394,12 @@ write_queued_environment_exact() {
   env_update_order=()
 }
 
+# 32바이트 무작위 base64 키
 random_base64_key() {
   openssl rand -base64 32 | tr -d '\n'
 }
 
+# runtime.env 값, 없으면 기존 worker.env 값
 runtime_or_existing_worker_value() {
   local key=$1
   local value
@@ -375,6 +410,8 @@ runtime_or_existing_worker_value() {
   printf '%s' "${value}"
 }
 
+# 통통통 자격·운영 wire 계약을 API env 에 작은따옴표 값으로 기록
+# 활성화 두 값은 기존 API env 값을 유지하고, 함께 켜지거나 함께 꺼져 있어야 함
 install_tong_api_environment() {
   local secret_file mode username password wire temp enabled confirmed
   for secret_file in "${tong_username_file}" "${tong_password_file}"; do
@@ -422,6 +459,7 @@ install_tong_api_environment() {
   unset username password wire
 }
 
+# 사용자·비밀번호를 안전하게 인코딩한 접속 URL 생성
 build_url() {
   local scheme=$1
   local username=$2
@@ -444,6 +482,7 @@ build_url() {
     '
 }
 
+# runtime.env 의 필수 값. 저장소 자격은 배포가 다시 만들 수 없으므로 없으면 중단
 require_runtime_value() {
   local key=$1
   local value
@@ -452,6 +491,11 @@ require_runtime_value() {
   printf '%s' "${value}"
 }
 
+# runtime.env 를 현재 스키마로 맞추고 API·워커·web·마이그레이션 env 파일을 다시 만듦
+# - 접속 URL 은 runtime.env 의 저장소 자격으로 조합
+# - 앱 비밀키는 없을 때만 생성
+# - 연동 값은 runtime.env, 없으면 기존 워커 env 에서 가져옴
+# - 각 프로세스 env 에는 그 프로세스가 쓰는 키만 넣음
 migrate_runtime_environment() {
   [[ -f ${runtime_env} && ! -L ${runtime_env} ]] \
     || die "${runtime_env} must be provisioned by install-datastores.sh first"
@@ -515,8 +559,7 @@ migrate_runtime_environment() {
     'GOOGLE_SHEETS_ENABLED=false'
     'GOOGLE_SHEETS_ALLOW_PUBLIC_WRITER_IN_DEVELOPMENT=false'
     'GOOGLE_SHEETS_SPREADSHEET_ID=EXAMPLE_SHEET_ID_xxxxxxxxxxxxxxxxxxxxxxxxxxx'
-    # Explicit opt-in: first install is disabled. Once the host-gated control
-    # command enables both flags, their runtime values survive later deploys.
+    # 명시적 활성화 방식. 첫 설치는 꺼진 상태이고, 호스트 제한 제어 명령이 두 값을 켜면 이후 배포에서도 유지됨
     'TONG_SYNC_ENABLED=false'
     'TONG_WIRE_CONTRACT_CONFIRMED=false'
   )
@@ -548,6 +591,10 @@ migrate_runtime_environment() {
   log "runtime environment schema reconciled without exposing values"
 }
 
+# 프로세스별 env 경계 검증
+# - API: 필수 키, 앱 비밀키는 서로 다른 32바이트 base64, 통통통 상태 일치, 프록시 신뢰, 포스터 저장 디렉터리
+# - 워커·web·마이그레이션: 다른 프로세스 전용 비밀이 없어야 함
+# - 문자·시트를 켰으면 필요한 자격과 Google 자격 파일 권한 확인
 validate_environment_boundaries() {
   local file key tong_enabled tong_confirmed
   for file in "${api_env}" "${worker_env}" "${web_env}" "${migration_env}"; do
@@ -650,6 +697,7 @@ validate_environment_boundaries() {
   fi
 }
 
+# 소스 트리 필수 파일·고정 pnpm 버전·스탬프 형식 확인
 validate_source_tree() {
   [[ -d ${source_dir} ]] || die "source directory does not exist: ${source_dir}"
   source_dir=$(readlink -f -- "${source_dir}")
@@ -665,6 +713,7 @@ validate_source_tree() {
   [[ ${stamp} =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die "invalid release stamp: ${stamp}"
 }
 
+# 배포 대상 systemd 유닛 문법 검사
 validate_units() {
   local unit
   local -a unit_paths=()
@@ -675,6 +724,7 @@ validate_units() {
   systemd-analyze verify "${unit_paths[@]}" >/dev/null
 }
 
+# systemd 유닛 설치·활성화
 install_units() {
   local unit
   for unit in "${deployment_units[@]}"; do
@@ -684,6 +734,7 @@ install_units() {
   systemctl enable "${deployment_units[@]}" >/dev/null
 }
 
+# 소스를 빌드 계정 소유 임시 디렉터리로 복사. git·의존성·빌드 산출물·env 파일 제외
 copy_source_tree() {
   local incoming=$1
   install -d -o "${build_user}" -g "${build_user}" -m 0755 "${incoming}"
@@ -698,6 +749,7 @@ copy_source_tree() {
   chown -R "${build_user}:${build_user}" "${incoming}"
 }
 
+# 빌드 계정으로 고정 pnpm 확인 후 의존성 설치와 API·web 빌드
 build_release() {
   local incoming=$1
   (
@@ -725,6 +777,7 @@ build_release() {
   )
 }
 
+# 릴리스 산출물·운영 스크립트 실행 권한과 Next 빌드의 same-origin Nest API rewrite 확인
 preflight_release() {
   local release=$1
   local required
@@ -770,6 +823,7 @@ preflight_release() {
     ' || die "Next build does not contain the same-origin Nest API rewrite"
 }
 
+# 서비스 계정마다 자기 산출물을 읽거나 실행할 수 있는지 확인
 verify_runtime_release_access() {
   local release=$1
   runuser -u "${api_user}" -- test -r "${release}/apps/api/dist/main.js" \
@@ -782,16 +836,14 @@ verify_runtime_release_access() {
     || die "${migrate_user} cannot execute the finalized Prisma CLI"
 }
 
+# 임시 디렉터리를 root 소유 불변 릴리스로 확정하고 검사
 finalize_release() {
   local incoming=$1
   local release=$2
   [[ ! -e ${release} ]] || die "release already exists: ${release}"
   chown -R root:root "${incoming}"
-  # tar preserves the developer checkout's directory modes. Some workspaces use
-  # 0700 for source directories, which would make the finalized release
-  # unreadable to the isolated API/web/worker/migration users. The staged tree
-  # contains no runtime environment files or credentials, so normalize read and
-  # traversal access while keeping every path immutable to non-root users.
+  # tar 는 개발 체크아웃의 디렉터리 권한을 그대로 옮김. 0700 소스 디렉터리가 있으면 서비스 계정이 릴리스를 읽지 못함
+  # 스테이징 트리에는 env·자격 파일이 없으므로 읽기·통과 권한을 열되 root 외에는 쓰지 못하게 함
   chmod -R a+rX,go-w "${incoming}"
   [[ ! -L ${incoming}/apps/web/.next/cache ]] || die "Next cache path must not be a symlink"
   install -d -o "${web_user}" -g "${web_user}" -m 0750 "${incoming}/apps/web/.next/cache"
@@ -802,6 +854,7 @@ finalize_release() {
   verify_runtime_release_access "${release}"
 }
 
+# API 계정·자격으로 Redis 접속과 ACL 허용 명령(EVAL 포함) 점검
 verify_authenticated_redis() {
   local release=$1
   local redis_url
@@ -834,6 +887,7 @@ verify_authenticated_redis() {
   ) >/dev/null 2>&1 || die "authenticated Redis preflight failed"
 }
 
+# API 계정·자격으로 PostgreSQL 세션 시간대가 UTC 인지 점검
 verify_authenticated_postgres_utc() {
   local release=$1
   local database_url
@@ -860,6 +914,7 @@ verify_authenticated_postgres_utc() {
   ) >/dev/null 2>&1 || die "authenticated PostgreSQL UTC preflight failed"
 }
 
+# DB 변경 전 백업 유닛 실행
 backup_postgresql() {
   systemctl cat npr-postgres-backup.service >/dev/null \
     || die "npr-postgres-backup.service must be installed before database changes"
@@ -869,15 +924,15 @@ backup_postgresql() {
     || die "pre-change PostgreSQL backup failed"
 }
 
+# 격리된 워커 DB 역할 생성·속성 고정. 상속 역할 제거, DB 접속 권한만 부여
 ensure_worker_database_role() {
   local password escaped_password
   password=$(env_value "${runtime_env}" DB_WORKER_PASSWORD)
   [[ -n ${password} && ${password} != *$'\n'* && ${password} != *$'\r'* ]] \
     || die "DB_WORKER_PASSWORD is invalid"
   escaped_password=${password//\'/\'\'}
-  # CONNECTION LIMIT 은 앱의 풀 상한(POOL_MAX_CONNECTIONS, apps/api/src/common/prisma/
-  # prisma.service.ts)보다 넉넉해야 한다. 낮으면 부하가 오른 순간 PostgreSQL 이 연결을
-  # 끊고 워커가 재시작 루프에 빠진다 — 문자 대량 발송 중에 실제로 그렇게 됐다.
+  # CONNECTION LIMIT 은 앱 풀 상한(POOL_MAX_CONNECTIONS, apps/api/src/common/prisma/prisma.service.ts)보다 넉넉해야 함
+  # 낮으면 부하가 오른 순간 PostgreSQL 이 연결을 끊고 워커가 재시작 루프에 빠짐. 문자 대량 발송 중 실제로 발생했음
   log "ensuring the isolated npr_worker login role exists"
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 postgres >/dev/null <<SQL
 DO \$role\$
@@ -909,6 +964,7 @@ GRANT CONNECT ON DATABASE npr_seminar TO npr_worker;
 SQL
 }
 
+# 워커 DB 계정 권한을 모두 회수한 뒤 필요한 테이블·시퀀스 권한만 정확히 부여
 apply_worker_database_grants() {
   log "applying the exact npr_worker table and sequence grants"
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 npr_seminar >/dev/null <<'SQL'
@@ -924,6 +980,7 @@ GRANT USAGE, SELECT ON SEQUENCE sms_attempts_id_seq, sheet_attempts_id_seq TO np
 SQL
 }
 
+# 활성 QR 이 모두 복구 가능(암호문 보유)한지 확인. 아니면 DB 오류로 중단
 verify_recoverable_active_qr() {
   runuser -u postgres -- psql -X --set=ON_ERROR_STOP=1 npr_seminar >/dev/null <<'SQL'
 do $$
@@ -956,6 +1013,7 @@ $$;
 SQL
 }
 
+# QR 확인 → 백업 → 워커 역할 → 마이그레이션(생략 가능) → QR 재확인 → 워커 권한
 prepare_database_for_release() {
   local release=$1
   verify_recoverable_active_qr
@@ -981,6 +1039,7 @@ prepare_database_for_release() {
   apply_worker_database_grants
 }
 
+# current·previous 링크만 원자적으로 교체
 atomic_symlink() {
   local target=$1
   local link=$2
@@ -991,6 +1050,7 @@ atomic_symlink() {
   mv -fT -- "${temp}" "${link}"
 }
 
+# 링크가 가리키는 릴리스 경로. 링크가 없으면 빈 값, 릴리스 디렉터리 밖이면 중단
 resolved_release_link() {
   local link=$1
   [[ -L ${link} ]] || return 0
@@ -1002,6 +1062,7 @@ resolved_release_link() {
   esac
 }
 
+# current 를 새 릴리스로 바꾸고 이전 대상을 previous 로 남김. 이전 대상 경로를 출력
 activate_release() {
   local target=$1
   local old_target
@@ -1013,6 +1074,7 @@ activate_release() {
   printf '%s' "${old_target}"
 }
 
+# web 지연 활성화 대상 릴리스를 root 전용 표식 파일에 원자적으로 기록
 write_web_deferred_marker() {
   local target=$1
   local temp=${web_deferred_marker}.new.$$
@@ -1026,6 +1088,7 @@ write_web_deferred_marker() {
   mv -fT -- "${temp}" "${web_deferred_marker}"
 }
 
+# 지연 표식 파일이 가리키는 릴리스. 형식·권한이 어긋나면 실패
 deferred_release() {
   [[ -f ${web_deferred_marker} && ! -L ${web_deferred_marker} ]] || return 1
   [[ $(stat -c '%U:%G:%a' "${web_deferred_marker}") == root:root:600 ]] || return 1
@@ -1037,6 +1100,7 @@ deferred_release() {
   esac
 }
 
+# URL 이 응답할 때까지 1초 간격으로 재시도
 wait_http() {
   local url=$1
   local attempts=${2:-30}
@@ -1050,6 +1114,7 @@ wait_http() {
   return 1
 }
 
+# 지정 포트가 루프백 주소에서만 수신 중인지 확인
 verify_loopback_ports() {
   local listeners
   listeners=$(ss -H -ltn)
@@ -1063,6 +1128,7 @@ verify_loopback_ports() {
   done
 }
 
+# 해당 포트가 정확히 지정 주소에서만 수신 중인지 확인
 verify_exact_listener() {
   local expected=$1
   local port=${expected##*:}
@@ -1076,11 +1142,13 @@ verify_exact_listener() {
   done <<< "${addresses}"
 }
 
+# 정상 배포 뒤 수신 경계. 앱·DB 포트는 루프백, upstream 은 WireGuard 주소만
 verify_listener_boundaries() {
   verify_loopback_ports 3000 4000 5432 6379 \
     && verify_exact_listener "${caddy_upstream_listener}"
 }
 
+# 지연 배포 중 수신 경계. web·upstream 포트는 닫혀 있어야 함
 verify_deferred_listener_boundaries() {
   local listeners
   listeners=$(ss -H -ltn)
@@ -1090,6 +1158,7 @@ verify_deferred_listener_boundaries() {
   verify_loopback_ports 4000 5432 6379
 }
 
+# 공개 주소 설정이 고정 공개 URL 과 같아야 함
 validate_public_base_url() {
   local file configured_url
   for file in "${runtime_env}" "${api_env}" "${worker_env}"; do
@@ -1099,9 +1168,9 @@ validate_public_base_url() {
   done
 }
 
+# 소켓 프록시 재기동
 start_and_verify_caddy_upstream() {
-  # Stop the proxy before rebinding its socket so an old inherited listening
-  # descriptor cannot keep the address occupied across a unit update.
+  # 소켓을 다시 바인딩하기 전에 프록시를 멈춤. 이전에 물려받은 수신 디스크립터가 주소를 붙잡지 않게 함
   systemctl stop "${caddy_upstream_service}" || return 1
   systemctl restart "${caddy_upstream_socket}" || return 1
   systemctl start "${caddy_upstream_service}" || return 1
@@ -1109,12 +1178,14 @@ start_and_verify_caddy_upstream() {
     && systemctl is-active --quiet "${caddy_upstream_service}"
 }
 
+# 공개 HTTPS 경로로 화면과 API 응답 확인
 verify_public_https() {
   wait_http "${default_public_base_url}/" 15 || return 1
   wait_http "${default_public_base_url}/api/v1/public/seminar-sessions" 15 || return 1
   log "public GCP Caddy URL is ${default_public_base_url}"
 }
 
+# web 활성화 전 시트 v4 재검증. 모든 매핑을 현재 코드로 다시 enable 하고 DB 상태가 v4·활성·회로 닫힘인지 확인
 revalidate_sheets_v4_for_web() {
   local spreadsheet_id
   [[ $(env_value "${worker_env}" GOOGLE_SHEETS_ENABLED) == true ]] \
@@ -1159,6 +1230,7 @@ SQL
   systemctl is-active --quiet npr-seminar-worker.service
 }
 
+# API 재시작·준비 확인 후 워커 재시작
 start_and_verify_api_worker() {
   systemctl restart npr-seminar-api.service
   wait_http http://127.0.0.1:4000/health/ready 30 || return 1
@@ -1167,15 +1239,16 @@ start_and_verify_api_worker() {
   systemctl is-active --quiet npr-seminar-worker.service || return 1
 }
 
+# web 재시작 후 화면과 API rewrite 응답 확인
 start_and_verify_web() {
   systemctl restart npr-seminar-web.service
   wait_http http://127.0.0.1:3000/ 45 || return 1
   wait_http http://127.0.0.1:3000/api/v1/public/seminar-sessions 30 || return 1
 }
 
+# 정상 배포의 서비스 시작·검증
 start_and_verify_services() {
-  # Normal deployments retain the existing one-shot behavior. Deferred
-  # deployments call the two halves separately around the Sheets v4 gate.
+  # 정상 배포는 한 번에 모두 켬. 지연 배포는 시트 v4 관문 앞뒤로 두 부분을 나눠 부름
   start_and_verify_api_worker \
     && start_and_verify_web \
     && systemctl is-active --quiet npr-seminar-api.service \
@@ -1186,6 +1259,7 @@ start_and_verify_services() {
     && verify_public_https
 }
 
+# 지연 배포의 서비스 시작. web·upstream 은 멈추고 API·워커만 켬
 start_and_verify_deferred_services() {
   systemctl stop "${caddy_upstream_service}" "${caddy_upstream_socket}" \
     npr-seminar-web.service || return 1
@@ -1198,6 +1272,7 @@ start_and_verify_deferred_services() {
     && verify_deferred_listener_boundaries
 }
 
+# 준비 실패 시 복구. 이전 릴리스가 있으면 되돌려 켜고, 첫 배포면 모두 멈추고 current 링크 제거
 recover_failed_activation() {
   local old_target=$1
   if [[ -n ${old_target} ]]; then
@@ -1215,6 +1290,7 @@ recover_failed_activation() {
   fi
 }
 
+# 지연 배포 실패 시 복구. 서비스를 모두 멈춘 채 표식을 지우고 링크만 되돌림
 recover_failed_deferred_activation() {
   local old_target=$1
   log "deferred activation failed; leaving every application service stopped"
@@ -1228,6 +1304,7 @@ recover_failed_deferred_activation() {
   fi
 }
 
+# deploy 동작. 검증 → 빌드 → 릴리스 확정 → 저장소 점검 → 유닛 설치 → DB 준비 → 전환 → 시작·검증
 deploy_release() {
   [[ ! -e ${web_deferred_marker} ]] \
     || die "a deferred web activation is already pending; run activate-web or rollback first"
@@ -1255,9 +1332,8 @@ deploy_release() {
   local old_target
   old_target=$(activate_release "${release}")
   if ${defer_web}; then
-    # Persist the exact handoff before starting either runtime. If the shell is
-    # interrupted while services start, web activation remains fail-closed and
-    # can only resume against this exact current release.
+    # 어느 런타임도 켜기 전에 넘김 대상을 정확히 기록함
+    # 서비스 시작 중 셸이 끊겨도 web 활성화는 실패 쪽으로 닫혀 있고 이 current 릴리스에 대해서만 재개 가능
     if ! write_web_deferred_marker "${release}"; then
       recover_failed_deferred_activation "${old_target}"
       die "release ${stamp} could not record deferred web activation"
@@ -1276,6 +1352,8 @@ deploy_release() {
   fi
 }
 
+# activate-web 동작. 표식이 current 와 같고 API·워커가 정상일 때 시트 v4 재검증 후 web·공개 HTTPS 를 켬
+# 실패하면 web·upstream 을 멈추고 표식은 남김
 activate_deferred_web() {
   validate_units
   validate_environment_boundaries
@@ -1311,6 +1389,7 @@ activate_deferred_web() {
   log "web for $(basename "${current}") is active after fresh Sheets v4 validation"
 }
 
+# rollback 동작. 지정 스탬프 또는 previous 릴리스로 코드만 되돌림
 rollback_release() {
   local requested=${1:-}
   validate_units
@@ -1339,6 +1418,7 @@ rollback_release() {
   log "code rolled back to $(basename "${target}"); database migrations were not reversed"
 }
 
+# 진입점. 도움말 외에는 root·호스트·도구 확인과 배포 잠금 후 동작 분기
 main() {
   local action=${1:-deploy}
   if [[ ${action} == -h || ${action} == --help ]]; then

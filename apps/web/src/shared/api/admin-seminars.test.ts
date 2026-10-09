@@ -1,7 +1,7 @@
 /**
- * 회차 어댑터의 **정규화 심장**만 값으로 확인한다 (node:test + tsx).
+ * 회차 어댑터의 정규화 심장만 값으로 확인함 (node:test + tsx)
  * fetch 를 타는 목록 함수는 훅·통합에서 다루고, 여기서는 목록 항목의 operationsSummary 를
- * 서버 원시 필드명(…BookingCount)에서 화면 이름(…Count)으로 옮기는 규칙만 본다.
+ * 서버 원시 필드명(…BookingCount)에서 화면 이름(…Count)으로 옮기는 규칙만 봄
  *
  * 실행: pnpm --dir apps/web test
  */
@@ -80,7 +80,7 @@ describe("normalizeAdminSeminarSession — operationsSummary 만 정규화하고
     });
     assert.equal(session.operationsSummary.activeCount, 130);
     assert.equal(session.operationsSummary.uncheckedCount, 90);
-    // 나머지 필드는 그대로 보존된다.
+    // 나머지 필드는 그대로 보존됨
     assert.equal(session.seminarSessionId, "sess-1");
     assert.equal(session.status, "OPEN");
   });
@@ -143,7 +143,7 @@ describe("updateAdminSeminarSession — 비재원생 토글 PATCH", () => {
     assert.equal(captured.url?.endsWith("/admin/seminar-sessions/sess-9"), true);
     assert.deepEqual(JSON.parse(captured.body!), { guestBookingEnabled: true, expectedVersion: 4 });
     assert.equal(captured.idempotencyKey, "op-toggle-1");
-    // 응답 guestBookingEnabled 를 그대로 보존한다.
+    // 응답 guestBookingEnabled 를 그대로 보존함
     assert.equal(result.guestBookingEnabled, true);
   });
 });

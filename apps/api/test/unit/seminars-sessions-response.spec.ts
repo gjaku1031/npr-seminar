@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { SeminarsService } from "../../src/modules/seminars/seminars.service.js";
 
+// 관리자 회차 목록 응답
 describe("admin seminar session list", () => {
+  // 회차별 예약 운영 요약을 한 번의 상태별 집계 쿼리로 붙임
   it("adds family-booking operations summaries with one batched status aggregation", async () => {
     const now = new Date("2026-07-18T00:00:00Z");
     const session = (id: bigint, publicId: string) => ({
@@ -28,8 +30,8 @@ describe("admin seminar session list", () => {
     const groupBy = vi.fn(async () => [
       { sessionId: 11n, status: "RESERVED", attendanceParty: "BOTH", _count: { _all: 2 }, _sum: { attendedCount: null } },
       { sessionId: 11n, status: "CHECKED_IN", attendanceParty: "MOTHER", _count: { _all: 1 }, _sum: { attendedCount: 1 } },
-      // ★ 2명 예약 2건이 입장했는데 실제로는 3명만 왔다 — 한 가족은 한 분만 온 경우다.
-      //   예상 참석(attendeeCount)은 4를 더하지만 실제 입장은 3이어야 한다.
+      // 2명 예약 2건이 입장했는데 실제로는 3명만 왔음 — 한 가족은 한 분만 온 경우임
+      //   예상 참석(attendeeCount)은 4를 더하지만 실제 입장은 3이어야 함
       { sessionId: 11n, status: "CHECKED_IN", attendanceParty: "BOTH", _count: { _all: 2 }, _sum: { attendedCount: 3 } },
       { sessionId: 11n, status: "CANCELLED", attendanceParty: "BOTH", _count: { _all: 3 }, _sum: { attendedCount: null } },
       { sessionId: 11n, status: "NO_SHOW", attendanceParty: "MOTHER", _count: { _all: 4 }, _sum: { attendedCount: null } },
@@ -58,7 +60,7 @@ describe("admin seminar session list", () => {
         noShowBookingCount: 4,
         // 예상 참석: RESERVED BOTH 2건(4) + CHECKED_IN MOTHER 1건(1) + CHECKED_IN BOTH 2건(4)
         attendeeCount: 9,
-        // 실제 입장: 게이트가 확정한 값의 합(1 + 3). 예상(위)에서 파생하지 않는다.
+        // 실제 입장: 게이트가 확정한 값의 합(1 + 3). 예상(위)에서 파생하지 않음
         attendedPeopleCount: 4,
       },
     });
@@ -74,6 +76,7 @@ describe("admin seminar session list", () => {
     expect(response.page).toEqual({ page: 1, pageSize: 2, totalItems: 2, totalPages: 1 });
   });
 
+  // 공개 회차의 예약 가능 상태는 회차 상태와 예약 기간으로만 결정
   it("keeps public booking availability governed by status and booking window only", async () => {
     const now = new Date();
     const service = new SeminarsService({

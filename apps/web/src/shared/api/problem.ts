@@ -1,44 +1,124 @@
-/**
- * RFC 9457 problem+json 정규화 (계약 components/schemas/Problem).
- *
- * 네트워크 실패·비정상 응답·problem 응답을 하나의 ApiError로 좁혀서
- * 화면이 status/code만 보고 분기할 수 있게 한다. 서버 detail은 영어라
- * 화면에 그대로 쓰지 않고, 각 기능이 code에 맞는 한국어 문구를 고른다.
- */
+// RFC 9457 problem+json 정규화(계약 components/schemas/Problem)
+// 네트워크 실패·비정상 응답·problem 응답을 하나의 ApiError로 좁혀 화면이 status·code로만 분기하게 함
+// 서버 detail은 영어라 화면에 그대로 쓰지 않고 각 기능이 code에 맞는 한국어 문구를 고름
 
+/**
+ * 필드별 검증 오류
+ */
 export interface ProblemFieldError {
+  /**
+   * 필드 이름
+   */
   field: string;
+
+  /**
+   * 오류 코드
+   */
   code: string;
 }
 
+/**
+ * problem+json 본문
+ */
 export interface Problem {
+  /**
+   * 문제 유형 URI
+   */
   type: string;
+
+  /**
+   * 제목
+   */
   title: string;
+
+  /**
+   * HTTP 상태
+   */
   status: number;
+
+  /**
+   * 상세(영어)
+   */
   detail: string;
+
+  /**
+   * 요청 경로
+   */
   instance: string;
+
+  /**
+   * 안정 오류 코드
+   */
   code: string;
+
+  /**
+   * 서버 로그 추적 ID
+   */
   traceId: string;
+
+  /**
+   * 필드별 오류
+   */
   errors?: ProblemFieldError[];
 }
 
+/**
+ * API 오류 종류
+ */
 export type ApiErrorKind =
-  /** 요청 자체가 나가지 못했거나 응답을 받지 못함 */
+
+  /**
+   * 요청이 나가지 못했거나 응답을 받지 못함
+   */
   | "network"
-  /** 호출자가 AbortSignal로 취소 */
+
+  /**
+   * 호출자가 AbortSignal로 취소
+   */
   | "aborted"
-  /** problem+json 을 받은 정상적인 도메인 실패 */
+
+  /**
+   * problem+json을 받은 정상적인 도메인 실패
+   */
   | "problem"
-  /** HTTP 오류지만 problem+json 이 아님 (프록시·게이트웨이 등) */
+
+  /**
+   * problem+json이 아닌 HTTP 오류(프록시·게이트웨이 등)
+   */
   | "unexpected";
 
+/**
+ * 화면이 분기에 쓰는 API 오류
+ */
 export class ApiError extends Error {
+  /**
+   * 오류 종류
+   */
   readonly kind: ApiErrorKind;
+
+  /**
+   * HTTP 상태. 네트워크·취소는 0
+   */
   readonly status: number;
+
+  /**
+   * 오류 코드
+   */
   readonly code: string;
+
+  /**
+   * 원본 problem 본문. 없으면 null
+   */
   readonly problem: Problem | null;
+
+  /**
+   * 추적 ID. problem이 없으면 null
+   */
   readonly traceId: string | null;
 
+  /**
+   * 종류·상태·코드·문구와 선택 problem 본문으로 생성
+   */
   constructor(init: {
     kind: ApiErrorKind;
     status: number;
@@ -55,27 +135,40 @@ export class ApiError extends Error {
     this.traceId = init.problem?.traceId ?? null;
   }
 
+  /**
+   * 필드별 검증 오류. 없으면 빈 배열
+   */
   get fieldErrors(): ProblemFieldError[] {
     return this.problem?.errors ?? [];
   }
 }
 
+/**
+ * ApiError 여부
+ */
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
-/** 호출자가 취소한 요청 — 화면에 오류로 띄우면 안 된다. */
+/**
+ * 호출자가 취소한 요청 여부. 화면에 오류로 표시하면 안 됨
+ */
 export function isAborted(error: unknown): boolean {
   return isApiError(error) ? error.kind === "aborted" : error instanceof DOMException && error.name === "AbortError";
 }
 
+/**
+ * status·code·title을 가진 problem 형태인지 여부
+ */
 function isProblemShape(value: unknown): value is Problem {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.status === "number" && typeof candidate.code === "string" && typeof candidate.title === "string";
 }
 
-/** problem+json 이면 그대로, 아니면 status만 살린 unexpected 로 좁힌다. */
+/**
+ * 응답을 ApiError로 변환. problem+json이면 그대로, 아니면 상태만 살린 unexpected
+ */
 export async function toApiError(response: Response): Promise<ApiError> {
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -92,7 +185,7 @@ export async function toApiError(response: Response): Promise<ApiError> {
         });
       }
     } catch {
-      // problem 본문이 깨졌으면 아래 unexpected 로 떨어뜨린다.
+            // problem 본문이 깨졌으면 아래 unexpected로 처리
     }
   }
 
@@ -104,7 +197,9 @@ export async function toApiError(response: Response): Promise<ApiError> {
   });
 }
 
-/** 어떤 실패든 화면에 바로 쓸 수 있는 한국어 기본 문구. 기능별 code 분기가 우선한다. */
+/**
+ * 화면에 바로 쓸 수 있는 한국어 기본 오류 문구. 기능별 code 분기가 우선
+ */
 export function defaultErrorMessage(error: unknown): string {
   if (!isApiError(error)) return "알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
 

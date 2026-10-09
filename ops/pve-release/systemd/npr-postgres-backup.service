@@ -1,3 +1,5 @@
+# PostgreSQL 야간 백업 실행 유닛. npr-postgres-backup.timer 가 시작함
+# postgres 계정으로 backup-npr-postgres 를 실행하고 백업 디렉터리만 쓰기 허용
 [Unit]
 Description=Back up the NPR PostgreSQL database
 After=postgresql.service
@@ -8,6 +10,7 @@ Type=oneshot
 User=postgres
 Group=postgres
 ExecStart=/usr/local/sbin/backup-npr-postgres
+# 샌드박스. 백업 디렉터리 외 파일 시스템은 읽기 전용
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectSystem=strict

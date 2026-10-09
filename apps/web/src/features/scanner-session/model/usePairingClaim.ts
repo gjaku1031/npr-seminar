@@ -1,20 +1,20 @@
 "use client";
 
 /**
- * iPad 페어링 claim — 계약 POST /api/v1/public/scanner-pairing/claims.
+ * iPad 페어링 claim — 계약 POST /api/v1/public/scanner-pairing/claims
  *
- * 핸드오프 요구: 잘못된 코드 / 이미 사용된 코드 / 만료된 코드 / 네트워크 오류를
- * 서로 다른 문구로 안내한다.
+ * 잘못된 코드 / 이미 사용된 코드 / 만료된 코드 / 네트워크 오류를
+ * 서로 다른 문구로 안내함
  *
  * 결과 미상(네트워크·5xx) 처리:
- * - claim 은 성공 시 세션을 SCANNER 로 재생성한다. 응답을 잃었어도 이미 성립했을 수 있으므로
- *   실패를 알리기 전에 GET /scanner/current 로 실제 상태를 되묻는다.
- * - paired 면 원문 코드를 버리고 세션을 채택한다.
- * - unpaired 면 **같은 키**로 같은 코드만 재시도한다. 코드를 고치는 건 이전 시도가
- *   확정적으로 미페어링임이 밝혀진 뒤에만 새 조작이 된다.
+ * - claim 은 성공 시 세션을 SCANNER 로 재생성함. 응답을 잃었어도 이미 성립했을 수 있으므로
+ *   실패를 알리기 전에 GET /scanner/current 로 실제 상태를 되물음
+ * - paired 면 원문 코드를 버리고 세션을 채택함
+ * - unpaired 면 같은 키로 같은 코드만 재시도함. 코드를 고치는 건 이전 시도가
+ *   확정적으로 미페어링임이 밝혀진 뒤에만 새 조작이 됨
  *
- * 보안: 원문 코드는 이 훅의 state 에만 있고 성공 후 즉시 비운다.
- * 세션은 HttpOnly 쿠키라 클라이언트가 토큰을 들고 있지 않는다.
+ * 보안: 원문 코드는 이 훅의 state 에만 있고 성공 후 즉시 비움
+ * 세션은 HttpOnly 쿠키라 클라이언트가 토큰을 들고 있지 않음
  */
 
 import { useCallback, useState } from "react";
@@ -32,25 +32,62 @@ import {
   type ScannerDevice,
 } from "@/shared/api";
 
+/**
+ * 스캐너 연결 코드 입력 상태
+ */
 export interface PairingClaimState {
+  /**
+   * 입력한 코드
+   */
   code: string;
+
+  /**
+   * 코드 입력값 변경
+   */
   setCode: (value: string) => void;
+
+  /**
+   * 연결 요청 중 여부
+   */
   claiming: boolean;
+
+  /**
+   * 오류 문구. 없으면 null
+   */
   error: string | null;
-  /** 결과 미상 구간 — 코드 편집을 막고 같은 코드 재시도만 허용한다. */
+  /**
+   * 결과 미상 구간 — 코드 편집을 막고 같은 코드 재시도만 허용함
+   */
   codeLocked: boolean;
+
+  /**
+   * 코드로 연결 요청
+   */
   submit: () => Promise<void>;
 }
 
+/**
+ * 스캐너 연결 훅 옵션
+ */
 export interface UsePairingClaimOptions {
-  /** 이 iPad 를 부르는 이름 — 계약 deviceName(1~100자). */
+  /**
+   * 이 iPad 를 부르는 이름 — 계약 deviceName(1~100자)
+   */
   deviceName: string;
+
+  /**
+   * 연결 성공 시 등록된 기기 전달
+   */
   onPaired: (device: ScannerDevice) => void;
-  /** 미상 복구 중 이미 페어링돼 있었음을 확인한 경우. */
+  /**
+   * 미상 복구 중 이미 페어링돼 있었음을 확인한 경우
+   */
   onReconciled: (current: ScannerCurrent) => void;
 }
 
-/** 계약 status 별 한국어 문구. 서버 detail 은 영어라 그대로 쓰지 않는다. */
+/**
+ * 계약 status 별 한국어 문구. 서버 detail 은 영어라 그대로 쓰지 않음
+ */
 function claimErrorMessage(error: unknown): string {
   if (!isApiError(error)) return defaultErrorMessage(error);
 
@@ -70,6 +107,9 @@ function claimErrorMessage(error: unknown): string {
   }
 }
 
+/**
+ * 연결 코드로 이 iPad 를 스캐너로 등록하는 훅. 결과 미상이면 서버에 되물음
+ */
 export function usePairingClaim({
   deviceName,
   onPaired,
@@ -83,12 +123,12 @@ export function usePairingClaim({
 
   const setCode = useCallback(
     (value: string) => {
-      // 미상 구간에서는 코드를 못 바꾼다 — 페이로드가 바뀌면 같은 키를 쓸 수 없다.
+      // 미상 구간에서는 코드를 못 바꿈 — 페이로드가 바뀌면 같은 키를 쓸 수 없음
       if (codeLocked) return;
 
       setCodeState(normalizePairingCode(value));
       setError(null);
-      // 코드를 고쳐 넣는 건 새 조작 — 이전 시도의 키를 물려주지 않는다.
+      // 코드를 고쳐 넣는 건 새 조작 — 이전 시도의 키를 물려주지 않음
       claimKey.reset();
     },
     [codeLocked, claimKey],
@@ -116,24 +156,24 @@ export function usePairingClaim({
       );
 
       claimKey.settle();
-      // 성공하면 원문 코드를 즉시 버린다 — 1회용이라 다시 쓸 수 없다.
+      // 성공하면 원문 코드를 즉시 버림 — 1회용이라 다시 쓸 수 없음
       setCodeState("");
       setCodeLocked(false);
       onPaired(response.device);
     } catch (caught) {
       if (isDefinitiveFailure(caught)) {
-        // 서버가 확정적으로 거절했다 — 코드를 고쳐 다시 시도할 수 있다.
+        // 서버가 확정적으로 거절했음 — 코드를 고쳐 다시 시도할 수 있음
         claimKey.settle(caught);
         setCodeLocked(false);
         setError(claimErrorMessage(caught));
         return;
       }
 
-      // 결과 미상 — 세션이 이미 SCANNER 로 재생성됐을 수 있다.
+      // 결과 미상 — 세션이 이미 SCANNER 로 재생성됐을 수 있음
       const reconciliation = await reconcileScannerClaim();
 
       if (reconciliation.kind === "paired") {
-        // 실제로는 성공했다. 원문 코드를 버리고 세션을 채택한다.
+        // 실제로는 성공했음. 원문 코드를 버리고 세션을 채택함
         claimKey.settle();
         setCodeState("");
         setCodeLocked(false);
@@ -142,15 +182,15 @@ export function usePairingClaim({
       }
 
       if (reconciliation.kind === "unpaired") {
-        // 확정적으로 페어링되지 않았다 — 같은 키로 같은 코드를 다시 보내면 되고,
-        // 코드를 고쳐 새 조작으로 가는 것도 허용한다.
+        // 확정적으로 페어링되지 않았음 — 같은 키로 같은 코드를 다시 보내면 되고,
+        // 코드를 고쳐 새 조작으로 가는 것도 허용함
         claimKey.settle(caught);
         setCodeLocked(false);
         setError(`${defaultErrorMessage(caught)} 연결되지 않았어요. 다시 시도해 주세요.`);
         return;
       }
 
-      // 확인조차 실패 — 같은 키·같은 코드만 재시도한다.
+      // 확인조차 실패 — 같은 키·같은 코드만 재시도함
       claimKey.settle(caught);
       setCodeLocked(true);
       setError(

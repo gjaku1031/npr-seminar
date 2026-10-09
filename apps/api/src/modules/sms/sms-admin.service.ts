@@ -11,106 +11,373 @@ import { SmsTemplateRenderer } from "./sms-template-renderer.service.js";
 import type { SmsTemplatePurpose } from "./sms-template-renderer.service.js";
 import { SMS_TEMPLATE_EDITING_POLICY, type SmsTemplatePolicyView } from "./sms-template-policy.js";
 
+/**
+ * 관리자 발송 대상 구분
+ *
+ * - BOOKED_FAMILIES: 예약·체크인 가족
+ * - RESERVED_FAMILIES: 체크인 전 예약 가족
+ * - CHECKED_IN_FAMILIES: 체크인한 가족
+ * - CANCELLED_FAMILIES: 취소한 가족. 마지막으로 해제된 학생 기준
+ * - TEST_ACCOUNTS: 테스트 예약만. 실제 가족에게 닿지 않고 발송 경로를 확인하기 위한 대상
+ */
 export type SmsAudience =
   | "BOOKED_FAMILIES"
   | "RESERVED_FAMILIES"
   | "CHECKED_IN_FAMILIES"
   | "CANCELLED_FAMILIES"
-  /** 테스트 예약만. 발송 경로를 실제 가족에게 닿지 않고 확인하기 위한 대상이다. */
   | "TEST_ACCOUNTS";
 
+/**
+ * 발송 대상·내용 요청
+ */
 interface TargetRequest {
+  /**
+   * 지점
+   */
   readonly branch: SmsBranch;
+
+  /**
+   * 회차 공개 ID
+   */
   readonly seminarSessionId: string;
+
+  /**
+   * 대상 구분
+   */
   readonly audience: SmsAudience;
+
+  /**
+   * 템플릿 ID. 직접 입력과 함께 쓸 수 없음
+   */
   readonly templateId?: string;
+
+  /**
+   * 직접 입력 본문
+   */
   readonly message?: string;
+
+  /**
+   * 직접 입력 LMS 제목
+   */
   readonly title?: string;
 }
 
+/**
+ * 템플릿 또는 직접 입력으로 확정한 발송 내용
+ */
 interface ResolvedPayload {
+  /**
+   * 치환 전 본문
+   */
   readonly messageTemplate: string;
+
+  /**
+   * 치환 전 제목. 없으면 null
+   */
   readonly titleTemplate: string | null;
+
+  /**
+   * 템플릿 ID. 직접 입력이면 null
+   */
   readonly templateId: string | null;
+
+  /**
+   * 템플릿 이름. 직접 입력이면 "직접 입력"
+   */
   readonly templateName: string;
+
+  /**
+   * 템플릿 버전. 직접 입력이면 null
+   */
   readonly templateVersion: string | null;
+
+  /**
+   * 템플릿 용도. 직접 입력이면 null이고 전체 변수 허용
+   */
   readonly purpose: SmsTemplatePurpose | null;
 }
 
+/**
+ * 치환·분류까지 마친 수신 대상 1건
+ */
 interface PreparedTarget {
+  /**
+   * 예약 공개 ID
+   */
   readonly publicId: string;
+
+  /**
+   * 예약 버전. previewToken 계산에 포함
+   */
   readonly version: bigint;
+
+  /**
+   * 연락처 암호문
+   */
   readonly contactCiphertext: Uint8Array;
+
+  /**
+   * 연락처 다이제스트
+   */
   readonly contactDigest: Uint8Array;
+
+  /**
+   * 연락처 끝 4자리
+   */
   readonly contactLast4: string;
+
+  /**
+   * 대상 학생 이름. 여러 명이면 쉼표로 연결
+   */
   readonly studentName: string;
+
+  /**
+   * 치환된 본문
+   */
   readonly message: string;
+
+  /**
+   * 치환된 제목
+   */
   readonly title: string | null;
+
+  /**
+   * 문자 유형·바이트 수
+   */
   readonly classification: SmsPayloadClassification;
 }
 
+/**
+ * 배치별 발송 집계 행
+ */
 interface BatchAggregateRow {
+  /**
+   * 배치 ID
+   */
   readonly batch_id: string;
+
+  /**
+   * 발송 원인
+   */
   readonly source: string;
+
+  /**
+   * 템플릿 ID
+   */
   readonly template_id: string | null;
+
+  /**
+   * 템플릿 이름
+   */
   readonly template_name: string | null;
+
+  /**
+   * 대상 구분
+   */
   readonly audience: string | null;
+
+  /**
+   * 회차 공개 ID
+   */
   readonly seminar_session_id: string | null;
+
+  /**
+   * 지점
+   */
   readonly branch: string;
+
+  /**
+   * 발송 요청 주체
+   */
   readonly actor_subject: string | null;
+
+  /**
+   * 수신 건수
+   */
   readonly recipient_count: number;
+
+  /**
+   * 발송 성공 건수
+   */
   readonly success_count: number;
+
+  /**
+   * 최종 실패 건수. 차단·불명·소진 포함
+   */
   readonly failure_count: number;
+
+  /**
+   * 대기·처리 중 건수
+   */
   readonly pending_count: number;
+
+  /**
+   * 워커 처리 중 건수
+   */
   readonly processing_count: number;
+
+  /**
+   * 최초 적재 시각
+   */
   readonly created_at: Date;
+
+  /**
+   * 마지막 변경 시각
+   */
   readonly updated_at: Date;
 }
 
+/**
+ * 템플릿 응답
+ */
 export interface SmsTemplateView {
+  /**
+   * 템플릿 공개 ID
+   */
   readonly templateId: string;
+
+  /**
+   * 템플릿 키
+   */
   readonly key: string;
+
+  /**
+   * 표시 이름
+   */
   readonly name: string;
+
+  /**
+   * 용도
+   */
   readonly purpose: string;
+
+  /**
+   * LMS 제목
+   */
   readonly title: string | null;
+
+  /**
+   * 본문
+   */
   readonly body: string;
+
+  /**
+   * 활성 여부
+   */
   readonly active: boolean;
+
+  /**
+   * 용도별 기본 템플릿 여부
+   */
   readonly isDefault: boolean;
+
+  /**
+   * 낙관적 잠금 버전(숫자 문자열)
+   */
   readonly version: string;
+
+  /**
+   * 생성 시각
+   */
   readonly createdAt: Date;
+
+  /**
+   * 변경 시각
+   */
   readonly updatedAt: Date;
 }
 
+/**
+ * 템플릿 삭제 결과
+ */
 export interface SmsTemplateRemovalResult {
+  /**
+   * 템플릿 공개 ID
+   */
   readonly templateId: string;
+
+  /**
+   * 처리 방식. 사용 이력 없으면 DELETED, 있으면 ARCHIVED
+   */
   readonly disposition: "DELETED" | "ARCHIVED";
+
+  /**
+   * 발송 이력에서 사용된 횟수
+   */
   readonly usageCount: number;
+
+  /**
+   * 보관된 템플릿. 삭제했으면 null
+   */
   readonly archivedTemplate: SmsTemplateView | null;
 }
 
+/**
+ * 템플릿 생성·변경·삭제 공용 advisory lock 이름
+ */
 const TEMPLATE_LOCK_NAME = "npr:sms-templates";
+
+/**
+ * 지점별 문의 전화번호. {문의전화} 치환 값
+ */
 const INQUIRY_PHONE: Readonly<Record<SmsBranch, string>> = {
   CAMPUS_A: "02-000-0001",
   CAMPUS_B: "02-000-0002",
   CAMPUS_C: "02-000-0003",
 };
+
+/**
+ * 최종 실패로 집계하는 발송 상태
+ */
 const TERMINAL_FAILURE_STATUSES = [
   "BLOCKED_DISABLED", "BLOCKED_ALLOWLIST", "FAILED_PERMANENT", "DELIVERY_UNKNOWN", "DEAD",
 ] as const;
 
-/** 문자 템플릿 편집 정책 조회와 관리자 템플릿·발송 업무를 처리한다. */
+/**
+ * 관리자 문자 템플릿 관리와 그룹 발송
+ */
 @Injectable()
 export class SmsAdminService {
+  /**
+   * 의존성 주입
+   */
   public constructor(
+    /**
+     * DB 클라이언트
+     */
     private readonly prisma: PrismaService,
+
+    /**
+     * 멱등 처리
+     */
     private readonly idempotency: IdempotencyService,
+
+    /**
+     * 문자 대기열 적재
+     */
     private readonly outbox: SmsOutboxService,
+
+    /**
+     * 문자 길이 정책
+     */
     private readonly policy: SmsMessagePolicy,
+
+    /**
+     * 템플릿 렌더러
+     */
     private readonly renderer: SmsTemplateRenderer,
+
+    /**
+     * 실행 환경. 발송 설정·공개 기준 URL
+     */
     @Inject("APP_ENVIRONMENT") private readonly environment: AppEnvironment,
   ) {}
 
-  /** API 프로세스의 문자 설정 상태를 반환한다. provider 발송은 워커가 맡으므로 adapterAvailable은 false다. */
+  /**
+   * API 프로세스의 문자 설정 상태
+   *
+   * 실제 공급자 호출은 워커 전용이라 adapterAvailable은 항상 false
+   */
   public readiness() {
     const sendersConfigured = Object.values(this.environment.smsSenders).every((value) => value !== undefined);
     return {
@@ -124,20 +391,27 @@ export class SmsAdminService {
   }
 
   /**
-   * {@link SMS_TEMPLATE_EDITING_POLICY}에서 편집 가능한 다섯 용도의 공개 정책을 반환한다.
-   * FIRST_CHECK_IN은 저장·렌더링 허용을 유지하면서 화면 목록에는 포함하지 않는다.
+   * 편집 가능한 다섯 용도의 공개 정책
+   *
+   * FIRST_CHECK_IN은 저장·렌더링은 허용하지만 화면 목록에는 포함하지 않음
    */
   public templatePolicy(): SmsTemplatePolicyView {
     return SMS_TEMPLATE_EDITING_POLICY;
   }
 
-  /** 활성 템플릿을 먼저 정렬한 전체 목록을 반환한다. 보관된 행도 관리자 조회에는 포함한다. */
+  /**
+   * 템플릿 전체 목록. 활성 우선, 키 오름차순. 보관된 행 포함
+   */
   public async listTemplates() {
     const rows = await this.prisma.smsTemplate.findMany({ orderBy: [{ active: "desc" }, { key: "asc" }] });
     return { items: rows.map((row) => this.mapTemplate(row)) };
   }
 
-  /** 공개 ID로 템플릿을 조회하고 없으면 SMS_TEMPLATE_NOT_FOUND(404)를 던진다. */
+  /**
+   * 공개 ID로 템플릿 조회
+   *
+   * @throws {DomainError} 404 SMS_TEMPLATE_NOT_FOUND
+   */
   public async getTemplate(templateId: string) {
     const row = await this.prisma.smsTemplate.findUnique({ where: { publicId: templateId } });
     if (row === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
@@ -145,8 +419,13 @@ export class SmsAdminService {
   }
 
   /**
-   * 본문·제목·용도 변수를 검증한 뒤 멱등 키와 전체 입력으로 템플릿을 생성한다.
-   * {@link lockTemplates}로 기본 지정과 키 중복 확인을 직렬화하며, 생성과 멱등 응답은 함께 커밋된다.
+   * 템플릿 생성
+   *
+   * 본문·제목·용도 변수를 먼저 검증한 뒤 멱등 실행
+   * 템플릿 잠금 아래 키 중복 확인과 기본 지정을 직렬화하고, 생성과 멱등 응답을 함께 커밋
+   * 기본으로 지정하면 같은 용도의 기존 기본을 해제. 용도의 첫 활성 기본이 없으면 자동으로 기본
+   *
+   * @throws {DomainError} 400 변수·길이 오류, 409 키 중복·멱등 키 재사용
    */
   public createTemplate(
     input: { key: string; name: string; purpose: SmsSource; title?: string; body: string; isDefault?: boolean },
@@ -183,8 +462,13 @@ export class SmsAdminService {
   }
 
   /**
-   * 버전이 일치할 때만 변경을 커밋한다. 용도별 기본 템플릿 교체도 {@link lockTemplates} 아래 처리한다.
-   * 현재 기본을 다른 기본 지정 없이 내리면 409, 비활성 행을 기본으로 지정하면 409를 반환한다.
+   * 템플릿 변경
+   *
+   * 버전이 일치할 때만 반영. 용도별 기본 템플릿 교체도 템플릿 잠금 아래 처리
+   * 현재 기본을 다른 기본 지정 없이 내리거나 용도를 바꾸거나 비활성화하면 409
+   * 비활성 행을 기본으로 지정하면 409. 활성 기본이 없는 용도로 옮기면 자동으로 기본
+   *
+   * @throws {DomainError} 404 없음, 409 버전·기본 지정 충돌, 400 변수·길이 오류
    */
   public updateTemplate(
     templateId: string,
@@ -197,16 +481,19 @@ export class SmsAdminService {
       const current = await transaction.smsTemplate.findUnique({ where: { publicId: templateId } });
       if (current === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
       if (current.version.toString() !== input.version) this.fail(409, "SMS_TEMPLATE_VERSION_CONFLICT");
+      // 변경 후 값으로 변수·길이 재검증
       const nextBody = input.body ?? current.body;
       const nextTitle = input.title === undefined ? current.title : input.title;
       const nextPurpose = input.purpose ?? current.purpose;
       this.validateTemplatePayload(nextBody, nextTitle, nextPurpose as SmsTemplatePurpose);
       const nextActive = input.active ?? current.active;
+      // 기본 템플릿은 다른 템플릿을 기본으로 지정하기 전까지 내릴 수 없음
       if (current.isDefault && (
         nextPurpose !== current.purpose || !nextActive || input.isDefault === false
       )) {
         this.fail(409, "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED");
       }
+      // 새 기본 지정 시 같은 용도의 기존 기본 해제, 활성 기본이 없는 용도면 자동 기본
       let nextDefault = input.isDefault ?? current.isDefault;
       if (input.isDefault === true) {
         if (!nextActive) this.fail(409, "SMS_DEFAULT_TEMPLATE_MUST_BE_ACTIVE");
@@ -239,9 +526,14 @@ export class SmsAdminService {
   }
 
   /**
-   * 버전·기본 지정 여부·사용 이력을 템플릿 CRUD가 공유하는 잠금 아래 확인한다.
-   * 발송 아웃박스 생성은 이 잠금을 쓰지 않으므로 사용 이력 조회와 발송의 직렬화까지 보장하지 않는다.
-   * 사용 이력이 없으면 삭제하고 있으면 비활성 보관하며, 결과와 멱등 기록을 함께 커밋한다.
+   * 템플릿 삭제 또는 보관
+   *
+   * 버전·기본 지정 여부·사용 이력을 템플릿 CRUD 공용 잠금 아래 확인
+   * 사용 이력이 없으면 삭제, 있으면 비활성 보관. 결과와 멱등 기록을 함께 커밋
+   * 발송 대기열 적재는 이 잠금을 쓰지 않아 사용 이력 조회와 발송 사이의 직렬화까지는 보장하지 않음
+   *
+   * @param version If-Match로 받은 현재 버전
+   * @throws {DomainError} 400 버전 형식 오류, 404 없음, 409 버전 충돌·기본 템플릿
    */
   public removeTemplate(
     templateId: string,
@@ -255,15 +547,15 @@ export class SmsAdminService {
       key,
       { templateId, version },
       async (transaction) => {
-        // Every create, update, default reassignment, and removal takes the same
-        // transaction-scoped lock. This makes the default check, history check,
-        // and delete/archive decision one serializable template lifecycle step.
+        // 생성·변경·기본 재지정·삭제가 같은 트랜잭션 잠금을 사용
+        // 기본 여부 확인, 이력 확인, 삭제·보관 결정을 하나의 직렬화된 수명 주기 단계로 만듦
         await this.lockTemplates(transaction);
         const current = await transaction.smsTemplate.findUnique({ where: { publicId: templateId } });
         if (current === null) this.fail(404, "SMS_TEMPLATE_NOT_FOUND");
         if (current.version.toString() !== version) this.fail(409, "SMS_TEMPLATE_VERSION_CONFLICT");
         if (current.isDefault) this.fail(409, "SMS_DEFAULT_TEMPLATE_REASSIGN_REQUIRED");
 
+        // 발송 기록 메타데이터의 templateId로 사용 이력 계산
         const usageCount = await transaction.smsOutbox.count({
           where: { safeMetadata: { path: ["templateId"], equals: current.publicId } },
         });
@@ -277,6 +569,7 @@ export class SmsAdminService {
           };
         }
 
+        // 이력이 있으면 비활성 보관. 이미 비활성이면 그대로 응답
         const archived = current.active
           ? await transaction.smsTemplate.update({
             where: { id: current.id },
@@ -299,15 +592,11 @@ export class SmsAdminService {
   }
 
   /**
-   * 대상별 수신 인원 — 발송 전에 "누구에게 몇 명 나가는지"를 화면이 미리 보여 주기 위한 읽기 전용 집계.
+   * 대상별 수신 인원 집계. 발송 전 화면에 누구에게 몇 명 나가는지 보여 주는 읽기 전용 값
    *
-   * ★ 근사하지 않는다. 실제 발송이 쓰는 targets() 를 대상마다 그대로 돌려 그 결과 수를 센다.
-   *   예약 상태만으로 세면 실제와 어긋난다 — 취소 대상은 마지막 해제 시각으로 학생을 다시
-   *   추리고, 그 결과 대상이 0명이 되는 예약이 있기 때문이다. 발송 직전에 보여 준 숫자와
-   *   실제로 나간 수가 다르면 그 숫자는 없느니만 못하다.
-   *
-   * preview() 와 달리 previewToken 을 만들지 않고 본문도 렌더하지 않는다 — 화면이 캠퍼스·회차를
-   * 바꿀 때마다 부르는 값이라, 발송 자격을 남기면 안 된다.
+   * 근사하지 않고 실제 발송이 쓰는 targets()를 대상마다 실행해 결과 수를 셈
+   * 예약 상태만으로 세면 실제와 어긋남. 취소 대상은 마지막 해제 시각으로 학생을 다시 추려 0명이 되는 예약이 있음
+   * preview()와 달리 previewToken·본문을 만들지 않음. 캠퍼스·회차 변경마다 호출되므로 발송 자격을 남기면 안 됨
    */
   public async audienceCounts(input: { branch: SmsBranch; seminarSessionId: string }) {
     const audiences: SmsAudience[] = [
@@ -328,7 +617,12 @@ export class SmsAdminService {
     };
   }
 
-  /** 실제 대상 선택·변수 치환·문자 분류를 계산하고 발송 검증용 previewToken과 최대 10개 표본을 돌려준다. */
+  /**
+   * 발송 미리보기
+   *
+   * 실제 대상 선택·변수 치환·문자 분류를 계산하고 발송 검증용 previewToken과 최대 10개 표본 반환
+   * 저장·발송은 하지 않음
+   */
   public async preview(input: TargetRequest) {
     const prepared = await this.prepare(input);
     const maximumMessageBytes = this.maximum(prepared.rows.map((row) => row.classification.messageBytes));
@@ -365,9 +659,14 @@ export class SmsAdminService {
   }
 
   /**
-   * 예약은 아웃박스 행의 next_attempt_at으로 표현된다. 같은 트랜잭션에서 대상과 previewToken을
-   * 다시 계산해 일치할 때만 암호화 아웃박스를 기록한다. 외부 문자 전송은 워커가 맡는다.
-   * @param input.scheduledAt 예약 발송 시각(ISO). 생략하면 즉시 발송이다.
+   * 그룹 발송 등록
+   *
+   * 같은 트랜잭션에서 대상과 previewToken을 다시 계산해 미리보기와 같을 때만 암호화된 대기열 행 적재
+   * 예약 발송은 대기열 행의 next_attempt_at으로 표현. 실제 전송은 워커가 수행
+   *
+   * @param input scheduledAt은 예약 발송 시각(ISO 8601). 생략하면 즉시 발송
+   * @returns 배치 ID와 적재 건수
+   * @throws {DomainError} 409 미리보기 이후 대상·내용 변경, 예약 시각 범위 밖
    */
   public enqueue(
     input: TargetRequest & { previewToken: string; scheduledAt?: string },
@@ -380,6 +679,7 @@ export class SmsAdminService {
       if (prepared.previewToken !== input.previewToken) this.fail(409, "SMS_PREVIEW_TOKEN_CHANGED");
       const notBefore = this.scheduledSendTime(input.scheduledAt);
       const batchId = randomUUID();
+      // 배치 ID+예약 ID를 이벤트 키로 써서 같은 배치 안 중복 적재 방지
       for (const row of prepared.rows) {
         await this.outbox.enqueue(transaction, {
           eventKey: `${source}:${batchId}:${row.publicId}`,
@@ -419,7 +719,13 @@ export class SmsAdminService {
     }, 202);
   }
 
-  /** 조건에 맞는 개별 아웃박스와 배치 집계를 조회한다. 배치 건수를 개별 행과 다시 합산하지 않는다. */
+  /**
+   * 발송 이력 조회
+   *
+   * 조건에 맞는 개별 행과 배치 집계를 함께 반환. 배치 건수를 개별 행에서 다시 합산하지 않음
+   *
+   * @param filters limit은 1~200, 기본 50
+   */
   public async history(filters: {
     status?: string;
     source?: string;
@@ -448,7 +754,11 @@ export class SmsAdminService {
     return { batches, items: rows.map((row) => this.mapOutbox(row)) };
   }
 
-  /** 발송 행과 시도 기록을 조회한다. 없으면 SMS_MESSAGE_NOT_FOUND(404)를 던지고 수신 번호는 마스킹한다. */
+  /**
+   * 발송 1건과 시도 기록 조회. 수신 번호는 마스킹
+   *
+   * @throws {DomainError} 404 SMS_MESSAGE_NOT_FOUND
+   */
   public async detail(messageId: string) {
     const row = await this.prisma.smsOutbox.findUnique({
       where: { publicId: messageId },
@@ -469,7 +779,14 @@ export class SmsAdminService {
     };
   }
 
-  /** 대상별 치환 본문·문자 종류와 예약/템플릿 버전을 묶어 프리뷰 토큰을 만든다. 저장·전송은 하지 않는다. */
+  /**
+   * 대상별 치환 본문·문자 유형을 계산하고 previewToken 생성
+   *
+   * 토큰은 지점·회차·대상·회차 버전·템플릿 버전과 대상별 예약 버전·연락처·치환 결과의 SHA-256
+   * 저장·전송은 하지 않음
+   *
+   * @param transaction 발송 등록 시 같은 트랜잭션에서 재계산하기 위한 클라이언트
+   */
   private async prepare(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
     const payload = await this.payload(input, transaction);
     this.validateTemplatePayload(payload.messageTemplate, payload.titleTemplate, payload.purpose ?? undefined);
@@ -487,6 +804,7 @@ export class SmsAdminService {
       const title = payload.titleTemplate === null ? null : this.renderer.render(payload.titleTemplate, context, "title", payload.purpose ?? undefined);
       return { ...row, message, title, classification: this.policy.classify(message, title) };
     });
+    // 공통 정보와 대상별 결과를 순서대로 해시해 미리보기 이후 변경을 감지
     const digest = createHash("sha256");
     digest.update(JSON.stringify({
       branch: input.branch,
@@ -519,7 +837,13 @@ export class SmsAdminService {
     return { payload, rows, previewToken: digest.digest("base64url") };
   }
 
-  /** 템플릿 ID 또는 직접 입력 중 하나를 확정한다. 템플릿은 활성 행만 허용하며 혼합 입력은 400이다. */
+  /**
+   * 템플릿 ID 또는 직접 입력 중 하나로 발송 내용 확정
+   *
+   * 템플릿은 활성 행만 허용
+   *
+   * @throws {DomainError} 400 두 방식 혼합·둘 다 없음, 404 템플릿 없음
+   */
   private async payload(
     input: TargetRequest,
     transaction: Prisma.TransactionClient | PrismaService = this.prisma,
@@ -551,18 +875,17 @@ export class SmsAdminService {
   }
 
   /**
-   * 예약 발송을 취소한다 — 아직 나가지 않은 것만.
+   * 예약 발송 배치 취소. 아직 나가지 않은 건만 대상
    *
-   * 예약 발송에 취소가 없으면, 잘못 잡은 600명짜리 발송을 멈출 방법이 없다. 그게 이 기능이
-   * 존재하는 이유다.
+   * 잘못 잡은 대량 예약 발송을 멈추기 위한 기능
+   * PENDING만 취소함. CLAIMED·SENDING은 워커가 이미 점유해 상태를 바꾸면 lease 불변식이 깨지고, SENT는 이미 도착함
+   * 운영자가 모두 막았다고 오해하지 않도록 취소 건수와 이미 처리된 건수를 함께 반환
    *
-   * **PENDING 만 취소한다.** CLAIMED·SENDING 은 워커가 이미 손에 쥔 것이라 여기서 상태를
-   * 바꾸면 lease 불변식이 깨지고, SENT 는 이미 사람에게 도착했다 — 보낸 문자를 취소할 수는
-   * 없으므로 그런 척하지 않는다. 그래서 몇 건이 취소됐고 몇 건이 이미 손을 떠났는지 함께
-   * 돌려준다: 운영자가 "다 막았다"고 오해하면 안 된다.
+   * @throws {DomainError} 404 SMS_BATCH_NOT_FOUND
    */
   public async cancelScheduledBatch(batchId: string, actor: string, key: string) {
     return this.idempotency.execute("SMS_BATCH_CANCEL", key, { batchId }, async (transaction) => {
+      // 취소 전 상태별 건수 집계
       const rows = await transaction.$queryRaw<Array<{ status: string; count: bigint }>>`
         select status,count(*)::bigint count
           from sms_outbox
@@ -570,6 +893,7 @@ export class SmsAdminService {
          group by status`;
       if (rows.length === 0) this.fail(404, "SMS_BATCH_NOT_FOUND");
 
+      // PENDING만 CANCELLED로 전환
       const cancelled = await transaction.$executeRaw`
         update sms_outbox
            set status='CANCELLED',
@@ -593,12 +917,13 @@ export class SmsAdminService {
   }
 
   /**
-   * 예약 발송 시각 검증. 없으면 null(즉시 발송).
+   * 예약 발송 시각 검증
    *
-   * 과거 시각은 거절한다 — "예약"이라고 눌렀는데 즉시 나가면 운영자가 의도한 것과 정반대다.
-   * 지금 보내려면 예약을 비우면 된다. 시계 오차를 감안해 1분 여유만 준다.
+   * 과거 시각은 거부. 예약으로 눌렀는데 즉시 나가면 의도와 반대이며, 즉시 발송은 예약을 비우면 됨. 시계 오차 1분 허용
+   * 오타로 먼 미래에 나가는 대기열을 남기지 않도록 180일 상한
    *
-   * 상한도 둔다. 오타 하나(2026 → 2036)로 문자가 10년 뒤에 나가는 큐를 남기지 않는다.
+   * @returns 예약 시각. 생략하면 null(즉시 발송)
+   * @throws {DomainError} 400 형식 오류, 409 과거·180일 초과
    */
   private scheduledSendTime(value: string | undefined): Date | null {
     if (value === undefined) return null;
@@ -610,7 +935,14 @@ export class SmsAdminService {
     return at;
   }
 
-  /** 지점·회차·대상 상태와 테스트 구분으로 실제 수신 가족을 고른다. 회차가 없거나 학생명이 비면 오류다. */
+  /**
+   * 실제 수신 가족 선택
+   *
+   * 지점·회차·대상 상태·테스트 구분으로 예약을 고르고, 대상별 관련 학생 이름을 묶음
+   * 관련 학생이 없는 예약은 제외. 예약 공개 ID 오름차순
+   *
+   * @throws {DomainError} 404 회차 없음, 409 학생 이름 누락
+   */
   private async targets(input: TargetRequest, transaction: Prisma.TransactionClient | PrismaService = this.prisma) {
     const session = await transaction.seminarSession.findUnique({
       where: { publicId: input.seminarSessionId },
@@ -628,7 +960,7 @@ export class SmsAdminService {
       where: {
         sessionId: session.id,
         status: { in: statuses },
-        // 실제 발송이 테스트 행에 닿아서도, 테스트 발송이 실제 가족에게 닿아서도 안 된다.
+        // 실제 발송이 테스트 예약에, 테스트 발송이 실제 가족에게 닿지 않도록 분리
         isTest: input.audience === "TEST_ACCOUNTS",
         students: { some: input.audience === "CANCELLED_FAMILIES"
           ? { branchCodeAtBooking: input.branch, releasedAt: { not: null } }
@@ -678,7 +1010,11 @@ export class SmsAdminService {
     };
   }
 
-  /** 취소 대상은 마지막 해제 시각의 학생만, 나머지는 현재 활성 학생만 지점별로 선택한다. */
+  /**
+   * 대상 구분별 관련 학생 선택
+   *
+   * 취소 대상은 마지막 해제 시각에 해제된 학생만, 나머지는 현재 활성 학생만 지점 기준으로 선택
+   */
   private relevantStudents(
     audience: SmsAudience,
     students: readonly {
@@ -702,20 +1038,25 @@ export class SmsAdminService {
       && student.releasedAt?.getTime() === latestReleasedAt);
   }
 
-  /** 대상 구분을 예약 상태 집합으로 바꾼다. 테스트 예약은 실제 가족과 별도 조건으로 제한된다. */
+  /**
+   * 대상 구분을 예약 상태 집합으로 변환. 테스트 여부는 targets()가 별도 조건으로 제한
+   */
   private audienceStatuses(audience: SmsAudience): string[] {
     switch (audience) {
       case "BOOKED_FAMILIES": return ["RESERVED", "CHECKED_IN"];
       case "RESERVED_FAMILIES": return ["RESERVED"];
       case "CHECKED_IN_FAMILIES": return ["CHECKED_IN"];
       case "CANCELLED_FAMILIES": return ["CANCELLED"];
-      // 테스트 예약은 취소 말고 어떤 상태든 대상이다 — 재테스트 도중 어느 상태에 있든
-      // 발송을 확인할 수 있어야 한다.
+      // 테스트 예약은 취소 외 모든 상태가 대상. 재테스트 중 어느 상태에서든 발송을 확인하기 위함
       case "TEST_ACCOUNTS": return ["RESERVED", "CHECKED_IN", "NO_SHOW"];
     }
   }
 
-  /** 아웃박스를 배치 ID로 한 번만 집계해 수신·성공·실패·대기 수를 반환한다. */
+  /**
+   * 배치 ID별 발송 집계
+   *
+   * 대기열을 한 번만 집계해 수신·성공·실패·대기 수 반환. 상태 필터는 해당 상태 행이 하나라도 있는 배치
+   */
   private async batchHistory(
     filters: { status?: string; source?: string; branch?: string; seminarSessionId?: string; batchId?: string },
     limit: number,
@@ -771,7 +1112,12 @@ export class SmsAdminService {
     }));
   }
 
-  /** 처리 중 행을 우선해 배치 상태를 고른다. 미확정·차단 결과는 성공으로 세지 않는다. */
+  /**
+   * 배치 상태 결정
+   *
+   * 대기 행이 있으면 처리 중 행 유무로 PROCESSING·QUEUED, 없으면 실패 수로 COMPLETED·FAILED·PARTIAL
+   * 불명·차단 결과는 성공으로 세지 않음
+   */
   private batchStatus(row: BatchAggregateRow): "QUEUED" | "PROCESSING" | "COMPLETED" | "PARTIAL" | "FAILED" {
     if (row.pending_count > 0) return row.processing_count > 0 ? "PROCESSING" : "QUEUED";
     if (row.failure_count === 0) return "COMPLETED";
@@ -779,7 +1125,13 @@ export class SmsAdminService {
     return "PARTIAL";
   }
 
-  /** 용도별 변수와 메시지 길이·문자 표현 가능성을 검증한다. 위반 시 렌더러/정책 오류를 전달한다. */
+  /**
+   * 템플릿 변수와 길이·문자 표현 가능성 검증
+   *
+   * 제목 길이는 LMS로 분류되는 46자 더미 본문과 함께 계산
+   *
+   * @throws {DomainError} 400 렌더러·길이 정책 위반
+   */
   private validateTemplatePayload(body: string, title: string | null, purpose?: SmsTemplatePurpose): SmsPayloadClassification {
     this.renderer.validate(body, "message", purpose);
     if (title !== null) this.renderer.validate(title, "title", purpose);
@@ -790,12 +1142,20 @@ export class SmsAdminService {
     return { ...bodyClassification, titleBytes };
   }
 
+  /**
+   * 예약 확인 링크
+   *
+   * @returns 공개 기준 URL의 /booking/{예약 ID}. 기준 URL 미설정이면 빈 문자열
+   */
   private bookingUrl(familyBookingId: string): string {
     if (this.environment.publicBaseUrl === undefined) return "";
     const base = new URL(this.environment.publicBaseUrl);
     return new URL(`/booking/${encodeURIComponent(familyBookingId)}`, base.origin).toString();
   }
 
+  /**
+   * 회차 일시 문자 표기. `YYYY.MM.DD(요일) HH:mm`, 서울 시간
+   */
   private formatSessionDateTime(value: Date): string {
     const parts = new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
@@ -811,15 +1171,25 @@ export class SmsAdminService {
     return `${part("year")}.${part("month")}.${part("day")}(${part("weekday")}) ${part("hour")}:${part("minute")}`;
   }
 
-  /** 생성·수정·삭제가 공유하는 트랜잭션 단위 advisory lock으로 기본 템플릿 불변식을 직렬화한다. */
+  /**
+   * 템플릿 공용 트랜잭션 advisory lock
+   *
+   * 생성·변경·삭제를 직렬화해 용도별 기본 템플릿 불변식 유지
+   */
   private async lockTemplates(transaction: Prisma.TransactionClient): Promise<void> {
     await transaction.$executeRaw`select pg_advisory_xact_lock(hashtextextended(${TEMPLATE_LOCK_NAME}::text, 0::bigint))`;
   }
 
+  /**
+   * 최댓값. 빈 목록이면 null
+   */
   private maximum(values: readonly number[]): number | null {
     return values.length === 0 ? null : Math.max(...values);
   }
 
+  /**
+   * 템플릿 행을 응답 형태로 변환
+   */
   private mapTemplate(row: {
     publicId: string;
     key: string;
@@ -848,6 +1218,9 @@ export class SmsAdminService {
     };
   }
 
+  /**
+   * 대기열 행을 이력 응답으로 변환. 수신 번호 마스킹, 메타데이터에서 배치·템플릿 정보 추출
+   */
   private mapOutbox(row: {
     publicId: string;
     source: string;
@@ -892,19 +1265,33 @@ export class SmsAdminService {
     };
   }
 
+  /**
+   * JSON 객체 메타데이터. 객체가 아니면 빈 객체
+   */
   private safeMetadata(value: Prisma.JsonValue): Readonly<Record<string, Prisma.JsonValue | undefined>> {
     return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
   }
 
+  /**
+   * 메타데이터 문자열 값. 문자열이 아니면 null
+   */
   private metadataString(metadata: Readonly<Record<string, Prisma.JsonValue | undefined>>, key: string): string | null {
     const value = metadata[key];
     return typeof value === "string" ? value : null;
   }
 
+  /**
+   * 끝 4자리만 남긴 수신 번호 마스킹
+   */
   private mask(last4: string): string {
     return `***-****-${last4}`;
   }
 
+  /**
+   * 문자 관리 작업 오류 발생
+   *
+   * @throws {DomainError} 지정 상태·코드
+   */
   private fail(status: number, code: string): never {
     throw new DomainError(status, code, "The SMS operation could not be completed.");
   }

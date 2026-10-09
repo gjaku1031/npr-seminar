@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import { SessionNotice, useSessionCheck } from "@/features/auth";
 import { ConsoleShell } from "./ConsoleShell";
 
-/** 관리자 콘솔을 ADMIN 확인 전에는 마운트하지 않고, 세션이 사라지면 즉시 가린다. */
+/**
+ * 관리자 콘솔을 ADMIN 확인 전에는 마운트하지 않고, 세션이 사라지면 즉시 가림
+ */
 export function AdminSessionGate({ children }: { children: ReactNode }) {
   const { state, retry } = useSessionCheck();
   const pathname = usePathname();

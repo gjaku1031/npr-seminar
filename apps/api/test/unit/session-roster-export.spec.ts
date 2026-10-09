@@ -12,7 +12,9 @@ import {
 } from "../../src/modules/family-bookings/session-roster.service.js";
 import { SessionStatisticsService } from "../../src/modules/family-bookings/session-statistics.service.js";
 
+// 회차 명단 엑셀의 안전성과 응답 형식
 describe("session roster spreadsheet safety", () => {
+  // 앞 공백 뒤의 수식 시작 문자도 무력화하고 일반 텍스트는 그대로 유지
   it("neutralizes formula-triggering values even after leading whitespace and preserves ordinary text", () => {
     for (const value of ["=1+1", "+SUM(A1:A2)", "-2+3", "@HYPERLINK(\"https://example.test\")", "\t=cmd"] as const) {
       expect(neutralizeSpreadsheetText(value)).toBe(`'${value}`);
@@ -22,6 +24,7 @@ describe("session roster spreadsheet safety", () => {
     expect(neutralizeSpreadsheetText(null)).toBe("");
   });
 
+  // 회차 경로의 관리자 가드와 XLSX 내려받기 헤더
   it("protects the session endpoints and emits the XLSX download headers", async () => {
     expect(Reflect.getMetadata(ROLES_KEY, SessionRosterController)).toEqual(["ADMIN"]);
     expect(Reflect.getMetadata(GUARDS_METADATA, SessionRosterController)).toEqual([SessionGuard, RolesGuard]);
@@ -59,6 +62,7 @@ describe("session roster spreadsheet safety", () => {
     });
   });
 
+  // Nest HTTP 어댑터를 거쳐도 XLSX 바이트가 그대로 전송됨
   it("sends XLSX bytes unchanged through the Nest HTTP adapter", async () => {
     const workbookBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x7f]);
     const exportXlsx = vi.fn().mockResolvedValue(workbookBytes);

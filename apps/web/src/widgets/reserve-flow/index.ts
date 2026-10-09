@@ -1,11 +1,11 @@
-// widgets/reserve-flow 공개 API (barrel). (설계 §4.1)
+// widgets/reserve-flow 공개 API (barrel)
 export { ReserveFlow } from "./ui/ReserveFlow";
 export type { ReserveFlowProps, ReserveInitialMode } from "./ui/ReserveFlow";
-// 예약 조회·변경 패널 — 루트 플로우와 문자 링크(`/booking/{id}`)가 같은 구현을 공유한다.
+// 예약 조회·변경 패널 — 루트 플로우와 문자 링크(`/booking/{id}`)가 같은 구현을 공유함
 export { ManageBookingPanel } from "./ui/ManageBookingPanel";
 export type { ManageBookingPanelProps } from "./ui/ManageBookingPanel";
-// 앱 크롬 중 외부 뷰(booking-access)에서 재사용하는 공개 요소만 노출한다.
+// 앱 크롬 중 외부 뷰(booking-access)에서 재사용하는 공개 요소만 노출함
 export { FlowHeader } from "./ui/MobileChrome";
-// 루트 연락처 조회와 개인 링크 교환이 공유하는 연락처 입력 표현.
+// 루트 연락처 조회와 개인 링크 교환이 공유하는 연락처 입력 표현
 export { ContactEntryForm } from "./ui/ContactEntry";
 export type { ContactEntryFormProps } from "./ui/ContactEntry";

@@ -1,6 +1,7 @@
+# GCP 게이트웨이 초기 기동용 Caddy 설정. HTTPS 없이 HTTP 로만 전달
+# DNS 를 옮기기 전 WireGuard·upstream 점검용
 {
-	# DNS still points at the previous endpoint during bootstrap, so serve HTTP
-	# only until the WireGuard and upstream checks have passed.
+	# 부트스트랩 중에는 DNS 가 아직 이전 endpoint 를 가리키므로 WireGuard·upstream 확인이 끝날 때까지 HTTP 만 제공
 	auto_https off
 }
 

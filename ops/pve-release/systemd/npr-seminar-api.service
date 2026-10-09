@@ -1,3 +1,5 @@
+# NestJS API 프로세스. 127.0.0.1:4000 에서 수신
+# 비밀값은 /etc/npr-seminar/api.env 에서 읽고, 워커·마이그레이션 전용 값은 환경에서 지움
 [Unit]
 Description=NPR Seminar NestJS API
 After=network-online.target postgresql.service redis-server.service
@@ -13,9 +15,11 @@ Environment=NODE_ENV=production
 Environment=APP_ENV=production
 Environment=PROCESS_ROLE=api
 Environment=PORT=4000
+# 워커·마이그레이션 전용 자격(DB 계정·Google·알리고·발신 번호)은 API 프로세스에 넘기지 않음
 UnsetEnvironment=GOOGLE_APPLICATION_CREDENTIALS WORKER_DATABASE_URL MIGRATION_DATABASE_URL
 UnsetEnvironment=ALIGO_IDENTIFIER ALIGO_KEY
 UnsetEnvironment=SMS_SENDER_CAMPUS_A SMS_SENDER_CAMPUS_B SMS_SENDER_CAMPUS_C
+# 릴리스 빌드 산출물이 없으면 시작하지 않음
 ExecStartPre=/usr/bin/test -f /srv/npr-seminar/current/apps/api/dist/main.js
 ExecStart=/usr/bin/node /srv/npr-seminar/current/apps/api/dist/main.js
 Restart=on-failure
@@ -25,6 +29,7 @@ TimeoutStopSec=30s
 KillSignal=SIGTERM
 UMask=0027
 
+# 샌드박스. 포스터 저장 디렉터리만 쓰기 허용하고 설정 디렉터리는 프로세스에서 숨김
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true

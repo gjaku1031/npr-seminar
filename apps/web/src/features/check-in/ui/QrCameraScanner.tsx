@@ -1,49 +1,78 @@
 "use client";
 
 /**
- * 실카메라 QR 스캐너 — qr-poc `QRScanner.tsx` 이식 (pinned c4194a0, fix/scanner-final).
- * 스타일만 npr 디자인 토큰으로 옮기고 카메라 동작은 원본 기준을 그대로 따른다.
+ * 실카메라 QR 스캐너
  *
- * 이식하지 않는 것: 원본의 서버 액션·DB·토큰 저장. 이 컴포넌트는 디코드한 문자열을
- * onScan 으로 넘길 뿐이고, 검증은 호출부가 계약 API 로 한다.
+ * 디코드한 문자열을 onScan 으로 넘길 뿐이고 토큰을 저장하지 않음. 검증은 호출부가 계약 API 로 함
  *
- * ── 카메라 불변식 (깨뜨리면 iOS 인식률이 무너진다) ────────────────────────────
- * 1. 방향과 해상도(1440×1080 4:3)를 **시작 시점에 한 번** 요청한다.
+ * ── 카메라 불변식 (깨뜨리면 iOS 인식률이 무너짐) ────────────────────────────
+ * 1. 방향과 해상도(1440×1080 4:3)를 시작 시점에 한 번 요청함
  *    시작 후 applyConstraints 로 해상도를 바꾸면 iOS Safari 가 스트림을 16:9 로
- *    재협상해 디코드 품질이 나빠진다. → 해상도 재협상 코드는 여기 없다.
+ *    재협상해 디코드 품질이 나빠짐. → 해상도 재협상 코드는 여기 없음
  * 2. `disableFlip: true` 고정. 스트림은 미러되어 들어오지 않으므로(전면 프리뷰 미러는
- *    CSS 표시 전용) 반전 프레임 재디코드는 낭비다. 끄면 프레임당 디코드가 1회로 줄어
- *    iOS zxing 폴백의 실효 스캔 횟수가 2배가 된다.
- * 3. 주입된 video 에 width/height/object-fit 을 강제하지 않는다. 표시 크기를 CSS 로
+ *    CSS 표시 전용) 반전 프레임 재디코드는 낭비임. 끄면 프레임당 디코드가 1회로 줄어
+ *    iOS zxing 폴백의 실효 스캔 횟수가 2배가 됨
+ * 3. 주입된 video 에 width/height/object-fit 을 강제하지 않음. 표시 크기를 CSS 로
  *    강제하면 라이브러리가 표시/원본 비율을 축별로 곱해 만드는 디코드 캔버스가
- *    비등방 압축되어 iOS(zxing 폴백)에서 인식이 깨진다. 원본 종횡비를 보존한다.
+ *    비등방 압축되어 iOS(zxing 폴백)에서 인식이 깨짐. 원본 종횡비를 보존함
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { Html5Qrcode, Html5QrcodeCameraScanConfig } from "html5-qrcode";
 
+/**
+ * QR 카메라 스캐너 속성
+ */
 export interface QrCameraScannerProps {
+  /**
+   * 디코드한 문자열 전달
+   */
   onScan: (decodedText: string) => void;
+
+  /**
+   * 후면 카메라 우선 여부
+   */
   preferRearCamera?: boolean;
 }
 
+/**
+ * 카메라 상태
+ */
 type ScannerStatus = "loading" | "active" | "error";
 
+/**
+ * 플래시(torch) 제어 기능
+ */
 type TorchCapability = {
+  /**
+   * 플래시 지원 여부
+   */
   isSupported: () => boolean;
+
+  /**
+   * 플래시 켜기·끄기
+   */
   apply: (value: boolean) => Promise<void>;
+
+  /**
+   * 현재 플래시 상태. 모르면 null
+   */
   value: () => boolean | null;
 };
 
-// iPad/태블릿 전면 카메라는 고정 초점 광각이라 QR 이 작고 흐리게 잡힌다.
-// 터치 기기에서만 살짝 확대해 디코더가 읽을 픽셀을 확보한다. (Mac 은 정상이라 제외)
+// iPad/태블릿 전면 카메라는 고정 초점 광각이라 QR 이 작고 흐리게 잡힘
+// 터치 기기에서만 살짝 확대해 디코더가 읽을 픽셀을 확보함. (Mac 은 정상이라 제외)
 const FRONT_CAMERA_TARGET_ZOOM = 2;
+
+/**
+ * 터치 기기 여부
+ */
 const isTouchDevice = typeof navigator !== "undefined" && navigator.maxTouchPoints > 1;
 
 /**
- * 카메라 방향과 해상도를 스캔 시작 시점에 한 번에 요청한다.
+ * 카메라 방향과 해상도를 스캔 시작 시점에 한 번에 요청함
  * 1440×1080(4:3)은 대부분 카메라 센서의 네이티브 비율이라 수용률이 높고,
- * 같은 폭에서 16:9 보다 스캔 영역이 넓어 iOS 의 zxing 폴백 디코더에 유리하다.
+ * 같은 폭에서 16:9 보다 스캔 영역이 넓어 iOS 의 zxing 폴백 디코더에 유리함
  */
 function buildVideoConstraints(preferRearCamera: boolean): MediaTrackConstraints {
   return {
@@ -54,6 +83,9 @@ function buildVideoConstraints(preferRearCamera: boolean): MediaTrackConstraints
   };
 }
 
+/**
+ * 카메라 스캔 설정 생성
+ */
 function buildScanConfig(preferRearCamera: boolean): Html5QrcodeCameraScanConfig {
   return {
     fps: 20,
@@ -71,11 +103,11 @@ function buildScanConfig(preferRearCamera: boolean): Html5QrcodeCameraScanConfig
 }
 
 /**
- * 초점·줌만 조정한다 — 해상도는 절대 건드리지 않는다.
- * (focusMode/zoom 은 스트림 비율 재협상을 일으키지 않는다.)
+ * 초점·줌만 조정함 — 해상도는 절대 건드리지 않음
+ * (focusMode/zoom 은 스트림 비율 재협상을 일으키지 않음.)
  */
 async function tuneCameraForScanning(scanner: Html5Qrcode, shouldApplyTouchZoom: boolean) {
-  // 연속 초점을 지원하는 기기에서는 오토포커스를 켠다.
+  // 연속 초점을 지원하는 기기에서는 오토포커스를 켬
   try {
     const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & {
       focusMode?: string[];
@@ -86,12 +118,12 @@ async function tuneCameraForScanning(scanner: Html5Qrcode, shouldApplyTouchZoom:
       });
     }
   } catch {
-    // 초점 제어를 지원하지 않는 브라우저는 무시한다.
+    // 초점 제어를 지원하지 않는 브라우저는 무시함
   }
 
   if (!isTouchDevice || !shouldApplyTouchZoom) return;
 
-  // 고정 초점 전면 카메라에서 QR 확대를 위해 줌을 적용한다.
+  // 고정 초점 전면 카메라에서 QR 확대를 위해 줌을 적용함
   try {
     const zoom = scanner.getRunningTrackCameraCapabilities().zoomFeature();
     if (zoom.isSupported()) {
@@ -101,10 +133,13 @@ async function tuneCameraForScanning(scanner: Html5Qrcode, shouldApplyTouchZoom:
       }
     }
   } catch {
-    // 줌 미지원 기기는 기본 배율로 계속 진행한다.
+    // 줌 미지원 기기는 기본 배율로 계속 진행함
   }
 }
 
+/**
+ * 스캐너가 돌고 있으면 멈추고 정리
+ */
 async function stopScanner(scanner: Html5Qrcode) {
   try {
     if (scanner.isScanning) {
@@ -112,10 +147,13 @@ async function stopScanner(scanner: Html5Qrcode) {
     }
     scanner.clear();
   } catch {
-    // 카메라 해제는 라우트 전환·권한 프롬프트와 경합할 수 있다.
+    // 카메라 해제는 라우트 전환·권한 프롬프트와 경합할 수 있음
   }
 }
 
+/**
+ * 카메라 오류를 사용자 안내 문구로 변환
+ */
 function getCameraErrorMessage(error: unknown, preferRearCamera: boolean) {
   const cameraLabel = preferRearCamera ? "후면" : "전면";
 
@@ -132,7 +170,9 @@ function getCameraErrorMessage(error: unknown, preferRearCamera: boolean) {
   return `카메라 권한 또는 ${cameraLabel} 카메라 상태를 확인해 주세요.`;
 }
 
-/** 카메라 위 오버레이 칩 버튼 — 다크 배경 공용 */
+/**
+ * 카메라 위 오버레이 칩 버튼 — 다크 배경 공용
+ */
 const chipStyle: React.CSSProperties = {
   borderRadius: "var(--radius-pill)",
   background: "rgba(10,15,26,0.65)",
@@ -146,6 +186,9 @@ const chipStyle: React.CSSProperties = {
   backdropFilter: "blur(4px)",
 };
 
+/**
+ * 실카메라 QR 스캐너 컴포넌트
+ */
 export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraScannerProps) {
   const generatedId = useId();
   const previewId = `qr-preview-${generatedId.replaceAll(":", "")}`;
@@ -158,7 +201,7 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
   const [torchOn, setTorchOn] = useState(false);
   const [torchChanging, setTorchChanging] = useState(false);
   const [startAttempt, setStartAttempt] = useState(0);
-  // ?scanDebug 로 접속하면 기기 현장 검증용 진단 정보를 표시한다.
+  // ?scanDebug 로 접속하면 기기 현장 검증용 진단 정보를 표시함
   const [debugEnabled] = useState(
     () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("scanDebug"),
   );
@@ -190,7 +233,7 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
 
         await scanner.start(
           // config.videoConstraints 가 유효하면 라이브러리는 getUserMedia 에 그 값을 쓰고
-          // 이 인자는 무시한다. (폴백 겸 형식상 필수 인자)
+          // 이 인자는 무시함. (폴백 겸 형식상 필수 인자)
           { facingMode: preferRearCamera ? { exact: "environment" } : "user" },
           buildScanConfig(preferRearCamera),
           (text) => onScanRef.current(text),
@@ -247,7 +290,7 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
     };
   }, [preferRearCamera, previewId, startAttempt]);
 
-  // 현장 진단 — 원본·표시·track 해상도와 디코더 경로를 노출한다.
+  // 현장 진단 — 원본·표시·track 해상도와 디코더 경로를 노출함
   useEffect(() => {
     if (!debugEnabled || status !== "active") return;
 
@@ -263,7 +306,7 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
           trackInfo = ` | track ${settings.width ?? "?"}x${settings.height ?? "?"}@${fps}fps`;
         }
       } catch {
-        // 스캐너 전환 중에는 트랙 정보를 읽을 수 없다.
+        // 스캐너 전환 중에는 트랙 정보를 읽을 수 없음
       }
 
       const decoder = "BarcodeDetector" in window ? "native+zxing" : "zxing";
@@ -308,8 +351,8 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
       }}
     >
       {/*
-        주입된 video 에는 전면 미러(표시 전용) transform 만 건다.
-        width/height/object-fit 을 주면 디코드 캔버스가 찌그러진다 — 위 불변식 3.
+        주입된 video 에는 전면 미러(표시 전용) transform 만 검
+        width/height/object-fit 을 주면 디코드 캔버스가 찌그러짐 — 위 불변식 3
       */}
       <style>{`
         #${previewId} video { display: block; ${preferRearCamera ? "" : "transform: scaleX(-1);"} }
@@ -340,7 +383,7 @@ export function QrCameraScanner({ onScan, preferRearCamera = false }: QrCameraSc
         </div>
       )}
 
-      {/* 스캔 영역 마커 — 오버레이만 정사각이고 video 에는 영향을 주지 않는다 */}
+      {/* 스캔 영역 마커 — 오버레이만 정사각이고 video 에는 영향을 주지 않음 */}
       {status === "active" && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <div style={{ position: "relative", aspectRatio: "1 / 1", height: "min(74%, 320px)" }}>

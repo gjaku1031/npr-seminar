@@ -1,6 +1,6 @@
 /**
- * 카드 연결 표시 규칙 — 순수 함수라 값으로 바로 확인한다 (node:test + tsx).
- * 핵심 불변식: durable ACTIVE ≠ 연결됨. 연결 여부는 presence(online)만 근거로 한다.
+ * 카드 연결 표시 규칙 — 순수 함수라 값으로 바로 확인함 (node:test + tsx)
+ * 핵심 불변식: durable ACTIVE ≠ 연결됨. 연결 여부는 presence(online)만 근거로 함
  *
  * 실행: npm --prefix apps/web test
  */

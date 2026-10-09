@@ -5,6 +5,9 @@ import { GoogleSheetsOutboxModule } from "./google-sheets-outbox.module.js";
 import { SheetWorkerService } from "./sheet-worker.service.js";
 import { SheetMappingActivationService } from "./sheet-mapping-activation.service.js";
 
+/**
+ * 시트 반영 워커 모듈. Google 자격 증명을 쓰므로 워커 프로세스 전용
+ */
 @Module({
   imports: [GoogleSheetsOutboxModule],
   providers: [
