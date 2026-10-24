@@ -66,7 +66,7 @@
 7. [배포와 운영](https://gjaku1031.github.io/ken-blog/post/doc-5fe55659-a943-4c64-aed1-481462f32c56/)
 8. [보안 설계](https://gjaku1031.github.io/ken-blog/post/doc-9ba607d2-b6e2-4a63-8e79-c974564acf11/)
 
-저장소 안의 [API 계약](packages/contracts/openapi.yaml)과 [설계 결정 기록](docs/specs/)은 개발 당시의 작업 문서임.
+저장소 안의 [API 계약](packages/contracts/openapi.yaml)과 [설계 결정 기록](docs/specs/)은 개발 당시의 작업 문서임. 학원 관리 서비스 연동 계약(`ops/pve-release/tong-wire-contract.production.json`)과 일회용 로그인·수집 도구에 적힌 경로·필드 이름·학원 코드·호스트는 공개용 자리표시 값임.
 
 ## 개발 형태
 

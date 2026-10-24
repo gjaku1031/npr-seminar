@@ -448,6 +448,10 @@ https://survey.example.kr/
 
 ## TongTongTong safety contract
 
+In this public copy, the paths, form field names, academy and branch codes, and
+host in `tong-wire-contract.production.json` and in the one-shot login and
+capture tools are placeholders, not the values used in operation.
+
 Application deployment copies the existing root-owned
 `/etc/npr-seminar/secrets/tongtong-username` and `tongtong-password` values
 only into the root-owned API environment. The worker, web, and migration
